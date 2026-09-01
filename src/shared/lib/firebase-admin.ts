@@ -18,6 +18,27 @@ import { getFirestore, type Firestore } from 'firebase-admin/firestore'
 let app: App | null = null
 let db: Firestore | null = null
 
+/**
+ * Env-var private keys arrive mangled in ways that vary by *where* they were set, not
+ * just how they were copied:
+ * - literal `\n` two-char escapes instead of real newlines (how `.env` files store a
+ *   multi-line value on one line) — always need converting back.
+ * - a wrapping `"..."` pair, if the `.env`-style quoted value was pasted verbatim into
+ *   a platform's raw env var box instead of just the inner value.
+ * - stray `\r` (CRLF): `.env.local` is parsed by a line-based reader that strips `\r`
+ *   as a side effect of splitting lines, but a platform's env var UI stores pasted text
+ *   completely verbatim — a value copied from a Windows-saved file can carry `\r\n`
+ *   through to production even though it looks identical locally. OpenSSL's PEM
+ *   decoder can reject a CRLF-embedded key outright (`ERR_OSSL_UNSUPPORTED`).
+ * Normalizing here means the app works regardless of which platform/paste-path set the
+ * var, instead of relying on every future re-paste being byte-perfect.
+ */
+function normalizePrivateKey(raw: string): string {
+  let key = raw.trim()
+  if (key.startsWith('"') && key.endsWith('"')) key = key.slice(1, -1)
+  return key.replace(/\\n/g, '\n').replace(/\r\n/g, '\n')
+}
+
 function getAdminApp(): App {
   if (app) return app
   if (getApps().length > 0) {
@@ -40,8 +61,7 @@ function getAdminApp(): App {
     credential: cert({
       projectId,
       clientEmail,
-      // Env vars store the key with literal "\n" sequences, not real newlines.
-      privateKey: privateKey.replace(/\\n/g, '\n'),
+      privateKey: normalizePrivateKey(privateKey),
     }),
   })
   return app
