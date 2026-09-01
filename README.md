@@ -351,17 +351,36 @@ Testing Library, dengan repository di-mock — tidak menyentuh Firestore sungguh
 
 ## Deploy ke Produksi
 
-Cara termudah: [Vercel](https://vercel.com) (pembuat Next.js).
+Cara termudah: [Vercel](https://vercel.com) (pembuat Next.js) — repo ini sudah diuji
+untuk itu: build produksi bersih (typecheck + lint + 206 test + `next build`) baik
+dengan env var lengkap maupun **kosong sama sekali** (build tidak pernah gagal hanya
+karena env belum diisi — halaman yang butuh Firebase/Drive/Gemini cukup menampilkan
+pesan "belum dikonfigurasi", bukan crash), satu `pnpm-lock.yaml` tanpa lockfile lain
+yang bentrok (Vercel otomatis mendeteksi & memakai pnpm), dan tidak ada pemakaian
+`next/image` ke domain luar yang butuh whitelist tambahan.
 
-1. Push repo ini ke GitHub/GitLab/Bitbucket, import di Vercel.
-2. Di pengaturan proyek Vercel, isi **Environment Variables** dengan seluruh variabel
-   dari tabel di atas (nilai produksi, bukan yang lokal).
-3. Tambahkan domain produksi ke **Authorized JavaScript origins** di kredensial OAuth
-   Google Cloud (langkah 4 di atas), dan ke **Authorized domains** di Firebase Auth
-   (Authentication → Settings).
-4. Deploy. Firestore rules & indexes tidak ikut ter-deploy otomatis oleh Vercel — pakai
-   `firebase deploy --only firestore:rules,firestore:indexes` terpisah tiap kali
-   berubah.
+1. Push repo ini ke GitHub/GitLab/Bitbucket, import di Vercel — tidak perlu konfigurasi
+   build khusus, Next.js 14 terdeteksi otomatis.
+2. Di **Project Settings → Environment Variables**, isi seluruh variabel dari tabel di
+   atas (nilai produksi, bukan yang lokal) — minimal enam variabel `NEXT_PUBLIC_FIREBASE_*`
+   agar aplikasi bisa dipakai sama sekali; sisanya optional per fitur.
+3. Tambahkan domain produksi (`https://nama-proyekmu.vercel.app` dan domain kustom
+   kalau ada) ke **Authorized JavaScript origins** di kredensial OAuth Google Cloud
+   (langkah 4 di atas), dan ke **Authorized domains** di Firebase Auth
+   (Authentication → Settings) — tanpa ini, login Google dan tautan Drive akan ditolak
+   di production walau berjalan normal di localhost.
+4. Deploy. Firestore rules & indexes **tidak** ikut ter-deploy otomatis oleh Vercel —
+   jalankan `firebase deploy --only firestore:rules,firestore:indexes` terpisah, sekali
+   di awal dan tiap kali berubah.
+5. **Periksa batas durasi function** di Project Settings → Functions untuk
+   `/api/ai/scan-receipt` (di kode diset `maxDuration = 60` detik, karena scan struk
+   memanggil Gemini dua kali dengan satu retry) — paket/pengaturan Vercel-mu perlu
+   benar-benar mengizinkan durasi itu, kalau tidak permintaan scan yang lambat bisa
+   terpotong sebelum selesai di production walau lancar di lokal.
+
+`package.json` sudah menyertakan `"packageManager"` (pin versi pnpm persis) dan
+`"engines"` (rentang Node minimum) supaya instalasi di Vercel deterministik dan tidak
+diam-diam memakai versi Node yang berbeda dari yang diuji.
 
 ## Keamanan & Privasi Data
 
