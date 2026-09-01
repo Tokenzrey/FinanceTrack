@@ -177,19 +177,19 @@ export function CategoryItemManager() {
         const items = categoryItems[category.id] ?? []
         return (
           <Card key={category.id}>
-            <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
-              <CardTitle className="flex items-center gap-2 text-sm">
+            <CardHeader className="flex-row items-center justify-between gap-2 space-y-0 pb-3">
+              <CardTitle className="flex min-w-0 items-center gap-2 text-sm">
                 <span
                   aria-hidden
-                  className="size-2.5 rounded-full"
+                  className="size-2.5 shrink-0 rounded-full"
                   style={{ backgroundColor: category.color }}
                 />
-                {category.name}
+                <span className="truncate">{category.name}</span>
               </CardTitle>
               <Button
                 variant="outline"
                 size="sm"
-                className="gap-1.5"
+                className="shrink-0 gap-1.5"
                 onClick={() => {
                   setActiveCategoryId(category.id)
                   setEditing(null)
@@ -219,7 +219,7 @@ export function CategoryItemManager() {
                       </div>
 
                       {item.isRecurring && (
-                        <Badge variant="secondary" className="gap-1">
+                        <Badge variant="secondary" className="shrink-0 gap-1">
                           <CalendarClock className="size-3" aria-hidden />
                           Rutin
                         </Badge>

@@ -50,20 +50,24 @@ function MarketPulsePanel({ market }: { market: ReturnType<typeof useAnalyticsDa
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
-        <ul className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {/* Two-up on mobile squeezed a bold "Rp 2.496.737"-sized value past its card —
+            one column below `sm` gives every quote its full width to render in. */}
+        <ul className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {quotes.map((quote) => {
             const isPercent = quote!.unit.includes('%')
             return (
-              <li key={quote!.label} className="rounded-xl border p-3">
+              <li key={quote!.label} className="min-w-0 rounded-xl border p-3">
                 <div className="flex items-center gap-1.5">
-                  <p className="text-xs font-medium text-muted-foreground">{quote!.label}</p>
+                  <p className="truncate text-xs font-medium text-muted-foreground">
+                    {quote!.label}
+                  </p>
                   {!quote!.live && (
-                    <Badge variant="outline" className="px-1 py-0 text-[10px]">
+                    <Badge variant="outline" className="shrink-0 px-1 py-0 text-[10px]">
                       manual
                     </Badge>
                   )}
                 </div>
-                <p className="tabular font-display text-lg font-bold">
+                <p className="tabular break-words font-display text-lg font-bold">
                   {isPercent ? formatPercent(quote!.value, 2) : formatIDR(quote!.value)}
                 </p>
                 <p className="text-[10px] text-muted-foreground">

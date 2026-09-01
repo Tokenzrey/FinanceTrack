@@ -29,7 +29,14 @@ const TabsTrigger = React.forwardRef<
   <TabsPrimitive.Trigger
     ref={ref}
     className={cn(
-      'inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm',
+      // `min-w-0` matters whenever a consumer lays TabsList out as `grid grid-cols-N
+      // w-full` (most of them do): a grid/flex item defaults to `min-width: auto`, so
+      // without this a trigger refuses to shrink below its label's natural width and
+      // forces the whole row — and with it the page — wider than the viewport instead
+      // of fitting the column it was given. `truncate` (which already covers the
+      // `whitespace-nowrap` this needed anyway) means a label that's still too long
+      // for its column ellipsizes instead of spilling out unclipped.
+      'inline-flex min-w-0 items-center justify-center truncate rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm',
       className,
     )}
     {...props}

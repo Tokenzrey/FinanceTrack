@@ -57,13 +57,13 @@ function SortableCategoryRow({
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
       className={cn(
-        'flex items-center gap-3 rounded-xl border bg-card p-3',
+        'flex w-full min-w-0 items-center gap-2 overflow-hidden rounded-xl border bg-card p-3',
         isDragging && 'z-10 shadow-lg',
       )}
     >
       <button
         type="button"
-        className="cursor-grab touch-none text-muted-foreground hover:text-foreground active:cursor-grabbing"
+        className="shrink-0 cursor-grab touch-none text-muted-foreground hover:text-foreground active:cursor-grabbing"
         aria-label={`Ubah urutan ${category.name}`}
         {...attributes}
         {...listeners}
@@ -72,43 +72,45 @@ function SortableCategoryRow({
       </button>
 
       <span
-        className="flex size-9 shrink-0 items-center justify-center rounded-xl text-white"
+        className="flex size-8 shrink-0 items-center justify-center rounded-xl text-white"
         style={{ backgroundColor: category.color }}
       >
         <Icon className="size-4" aria-hidden />
       </span>
 
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{category.name}</p>
-        <p className="text-xs text-muted-foreground">
+      <div className="min-w-0 flex-1 overflow-hidden">
+        <p className="truncate text-sm font-medium leading-tight">{category.name}</p>
+        <p className="truncate text-xs text-muted-foreground">
           {formatPercent(category.percentOfIncome, 1)}
           {income > 0 && ` · ${formatIDR((income * category.percentOfIncome) / 100)}`}
         </p>
       </div>
 
-      <div className="hidden items-center gap-1.5 sm:flex">
+      <div className="hidden shrink-0 items-center gap-1 sm:flex">
         {category.isSinkingFund && <Badge variant="secondary">Sinking</Badge>}
         {itemCount > 0 && <Badge variant="outline">{itemCount} item</Badge>}
       </div>
 
-      <Button
-        variant="ghost"
-        size="icon"
-        className="size-8"
-        onClick={() => onEdit(category)}
-        aria-label={`Ubah ${category.name}`}
-      >
-        <Pencil className="size-3.5" />
-      </Button>
-      <Button
-        variant="ghost"
-        size="icon"
-        className="size-8 text-destructive"
-        onClick={() => onDelete(category)}
-        aria-label={`Hapus ${category.name}`}
-      >
-        <Trash2 className="size-3.5" />
-      </Button>
+      <div className="flex shrink-0 items-center">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8"
+          onClick={() => onEdit(category)}
+          aria-label={`Ubah ${category.name}`}
+        >
+          <Pencil className="size-3.5" />
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8 text-destructive"
+          onClick={() => onDelete(category)}
+          aria-label={`Hapus ${category.name}`}
+        >
+          <Trash2 className="size-3.5" />
+        </Button>
+      </div>
     </li>
   )
 }
@@ -160,13 +162,13 @@ export function CategoryDragList({
   }
 
   return (
-    <Card>
-      <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
+    <Card className="overflow-hidden">
+      <CardHeader className="flex-row flex-wrap items-center justify-between gap-x-2 gap-y-1 space-y-0 pb-3">
+        <CardTitle className="flex shrink-0 items-center gap-2 text-base">
           <PillarColorDot pillar={pillar} />
           {PILLAR_LABELS[pillar]}
         </CardTitle>
-        <span className="tabular text-xs text-muted-foreground">
+        <span className="tabular shrink-0 text-xs text-muted-foreground">
           {formatPercent(allocated, 1)}
           {ceiling > 0 && ` / ${formatPercent(ceiling, 1)}`}
         </span>
@@ -188,7 +190,7 @@ export function CategoryDragList({
               items={inPillar.map((c) => c.id)}
               strategy={verticalListSortingStrategy}
             >
-              <ul className="space-y-2">
+              <ul className="min-w-0 space-y-2">
                 {inPillar.map((category) => (
                   <SortableCategoryRow
                     key={category.id}

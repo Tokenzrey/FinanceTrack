@@ -118,7 +118,10 @@ export function TransactionFilters({ filters, onChange, availableTags }: Transac
             )}
           </Button>
         </PopoverTrigger>
-        <PopoverContent align="end" className="max-h-[70dvh] w-80 space-y-4 overflow-y-auto">
+        <PopoverContent
+          align="end"
+          className="w-[calc(100vw-2rem)] space-y-4 sm:w-80"
+        >
           <ChipGroup
             label="Jenis"
             options={TYPES}
@@ -158,7 +161,7 @@ export function TransactionFilters({ filters, onChange, availableTags }: Transac
             />
           )}
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="filter-from" className="text-xs">
                 Dari tanggal
@@ -183,7 +186,7 @@ export function TransactionFilters({ filters, onChange, availableTags }: Transac
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="filter-min" className="text-xs">
                 Nominal min

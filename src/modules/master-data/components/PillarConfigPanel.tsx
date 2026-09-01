@@ -77,11 +77,14 @@ export function PillarConfigPanel() {
 
         {PILLARS.map((pillar) => (
           <div key={pillar} className="space-y-2">
-            <div className="flex items-center justify-between text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-sm">
               <span className="flex items-center gap-2 font-medium">
                 <PillarColorDot pillar={pillar} />
                 {PILLAR_LABELS[pillar]}
               </span>
+              {/* `flex-wrap` on the row: "33,3% · Rp 3.333.333" has no natural break
+                  point of its own, so without somewhere to wrap to it would force this
+                  row wider than its card on a narrow screen. */}
               <span className="tabular text-muted-foreground">
                 {formatPercent(config[pillar] * 100)} · {formatIDR(income * config[pillar])}
               </span>

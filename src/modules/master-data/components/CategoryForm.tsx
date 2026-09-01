@@ -191,7 +191,7 @@ function FormBody({ category, onDone }: { category?: Category | null; onDone: ()
       </div>
 
       <div className="space-y-2">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
           <Label htmlFor="cat-percent" className="text-xs">
             Persentase dari pemasukan
           </Label>
@@ -214,7 +214,10 @@ function FormBody({ category, onDone }: { category?: Category | null; onDone: ()
 
       <div className="space-y-1.5">
         <span className="text-xs font-medium">Ikon</span>
-        <div className="grid grid-cols-10 gap-1.5">
+        {/* Fixed at 10 columns regardless of screen size squeezed every icon under the
+            44px touch-target minimum on a phone-width Drawer — scale with viewport
+            instead. */}
+        <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-7 lg:grid-cols-10">
           {(Object.keys(CATEGORY_ICONS) as CategoryIcon[]).map((key) => {
             const Icon = CATEGORY_ICONS[key]
             return (

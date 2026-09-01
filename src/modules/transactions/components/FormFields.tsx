@@ -93,12 +93,15 @@ export function MoodSelector({
               // Tapping the active mood clears it — the field stays optional.
               onClick={() => onChange(active ? '' : mood.value)}
               className={cn(
-                'flex flex-1 items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-medium transition-colors',
+                // See the same fix in SettingsPage's theme row: `min-w-0` lets a
+                // `flex-1` item actually shrink instead of forcing the row wider than
+                // its container to fit the icon+label at full size.
+                'flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-xl border px-2 py-2 text-xs font-medium transition-colors',
                 active ? mood.className : 'text-muted-foreground hover:bg-muted',
               )}
             >
-              <mood.icon className="size-4" aria-hidden />
-              {mood.label}
+              <mood.icon className="size-4 shrink-0" aria-hidden />
+              <span className="truncate">{mood.label}</span>
             </button>
           )
         })}

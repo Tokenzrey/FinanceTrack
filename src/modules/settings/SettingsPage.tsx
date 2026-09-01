@@ -381,14 +381,19 @@ export function SettingsPage() {
                   aria-pressed={theme === option.value}
                   onClick={() => setTheme(option.value)}
                   className={cn(
-                    'flex flex-1 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors',
+                    // `min-w-0` matters here: a `flex-1` item defaults to
+                    // `min-width: auto`, so without it the button refuses to shrink
+                    // below its icon+label's natural width and forces the row wider
+                    // than its container instead of compressing — exactly what made
+                    // "Sistem" run past its button on narrow phones.
+                    'flex min-w-0 flex-1 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm transition-colors',
                     theme === option.value
                       ? 'border-primary bg-primary/10 text-primary'
                       : 'hover:bg-muted',
                   )}
                 >
-                  <option.icon className="size-4" aria-hidden />
-                  {option.label}
+                  <option.icon className="size-4 shrink-0" aria-hidden />
+                  <span className="truncate">{option.label}</span>
                 </button>
               ))}
             </div>

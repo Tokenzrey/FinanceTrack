@@ -151,6 +151,89 @@ function PillarGroup({
   )
 }
 
+/**
+ * One category, stacked instead of columned — the `<table>` needs ~520px to show
+ * every column side by side, which is exactly what forced horizontal scroll on
+ * mobile before this existed. Same data, same `BudgetCell` inline-edit, no columns.
+ */
+function CategoryCard({ summary }: { summary: CategorySummary }) {
+  return (
+    <li className="rounded-xl border p-3">
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            aria-hidden
+            className="size-2.5 shrink-0 rounded-full"
+            style={{ backgroundColor: summary.category.color }}
+          />
+          <span className="truncate text-sm font-medium">{summary.category.name}</span>
+        </div>
+        <StatusChip status={summary.status} />
+      </div>
+
+      <AbsorptionBar rate={summary.absorptionRate} size="sm" />
+
+      <div className="mt-2.5 grid grid-cols-3 gap-2">
+        <div className="min-w-0">
+          <p className="text-[11px] text-muted-foreground">Anggaran</p>
+          <BudgetCell summary={summary} />
+        </div>
+        <div className="min-w-0 text-right">
+          <p className="text-[11px] text-muted-foreground">Terpakai</p>
+          <MoneyDisplay value={summary.used} className="text-sm" />
+        </div>
+        <div className="min-w-0 text-right">
+          <p className="text-[11px] text-muted-foreground">Sisa</p>
+          <MoneyDisplay value={summary.remaining} signed className="text-sm" />
+        </div>
+      </div>
+    </li>
+  )
+}
+
+function PillarGroupCards({
+  pillar,
+  summaries,
+  budget,
+}: {
+  pillar: Exclude<Pillar, 'income'>
+  summaries: CategorySummary[]
+  budget: number
+}) {
+  const [open, setOpen] = useState(true)
+  const used = summaries.reduce((sum, s) => sum + s.used, 0)
+
+  if (summaries.length === 0) return null
+
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 rounded-lg bg-muted/50 px-2 py-2 text-left"
+      >
+        <ChevronDown
+          className={cn('size-4 shrink-0 transition-transform', !open && '-rotate-90')}
+          aria-hidden
+        />
+        <PillarColorDot pillar={pillar} />
+        <span className="text-sm font-semibold">{PILLAR_LABELS[pillar]}</span>
+        <span className="tabular ml-auto text-xs text-muted-foreground">
+          {formatIDR(used)} / {formatIDR(budget)}
+        </span>
+      </button>
+      {open && (
+        <ul className="mt-2 space-y-2">
+          {summaries.map((summary) => (
+            <CategoryCard key={summary.category.id} summary={summary} />
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 interface CategoryTableProps {
   categories: CategorySummary[]
   pillarSummary: Record<Pillar, { budget: number; used: number }>
@@ -175,48 +258,64 @@ export function CategoryTable({ categories, pillarSummary }: CategoryTableProps)
             description="Tambahkan kategori di Master Data untuk mulai menganggarkan."
           />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[520px] border-collapse">
-              <caption className="sr-only">
-                Anggaran, pemakaian, dan serapan per kategori bulan ini
-              </caption>
-              <thead>
-                <tr className="border-b text-xs text-muted-foreground">
-                  <th scope="col" className="py-2 pr-2 text-left font-medium">
-                    Nama
-                  </th>
-                  <th scope="col" className="hidden py-2 text-right font-medium sm:table-cell">
-                    %
-                  </th>
-                  <th scope="col" className="py-2 text-right font-medium">
-                    Anggaran
-                  </th>
-                  <th scope="col" className="py-2 text-right font-medium">
-                    Terpakai
-                  </th>
-                  <th scope="col" className="hidden py-2 text-right font-medium md:table-cell">
-                    Sisa
-                  </th>
-                  <th scope="col" className="py-2 pl-3 text-left font-medium">
-                    Serapan
-                  </th>
-                  <th scope="col" className="hidden py-2 pl-3 text-left font-medium lg:table-cell">
-                    Status
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {SPEND_PILLARS.map((pillar) => (
-                  <PillarGroup
-                    key={pillar}
-                    pillar={pillar}
-                    budget={pillarSummary[pillar].budget}
-                    summaries={spendCategories.filter((c) => c.category.pillar === pillar)}
-                  />
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <>
+            <div className="hidden overflow-x-auto lg:block">
+              <table className="w-full min-w-[520px] border-collapse">
+                <caption className="sr-only">
+                  Anggaran, pemakaian, dan serapan per kategori bulan ini
+                </caption>
+                <thead>
+                  <tr className="border-b text-xs text-muted-foreground">
+                    <th scope="col" className="py-2 pr-2 text-left font-medium">
+                      Nama
+                    </th>
+                    <th scope="col" className="hidden py-2 text-right font-medium sm:table-cell">
+                      %
+                    </th>
+                    <th scope="col" className="py-2 text-right font-medium">
+                      Anggaran
+                    </th>
+                    <th scope="col" className="py-2 text-right font-medium">
+                      Terpakai
+                    </th>
+                    <th scope="col" className="hidden py-2 text-right font-medium md:table-cell">
+                      Sisa
+                    </th>
+                    <th scope="col" className="py-2 pl-3 text-left font-medium">
+                      Serapan
+                    </th>
+                    <th
+                      scope="col"
+                      className="hidden py-2 pl-3 text-left font-medium lg:table-cell"
+                    >
+                      Status
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {SPEND_PILLARS.map((pillar) => (
+                    <PillarGroup
+                      key={pillar}
+                      pillar={pillar}
+                      budget={pillarSummary[pillar].budget}
+                      summaries={spendCategories.filter((c) => c.category.pillar === pillar)}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="space-y-4 lg:hidden">
+              {SPEND_PILLARS.map((pillar) => (
+                <PillarGroupCards
+                  key={pillar}
+                  pillar={pillar}
+                  budget={pillarSummary[pillar].budget}
+                  summaries={spendCategories.filter((c) => c.category.pillar === pillar)}
+                />
+              ))}
+            </div>
+          </>
         )}
       </CardContent>
     </Card>

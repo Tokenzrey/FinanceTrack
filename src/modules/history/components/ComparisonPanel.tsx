@@ -33,6 +33,26 @@ const MODES: { value: Mode; label: string }[] = [
   { value: 'year', label: 'Tahun vs tahun' },
 ]
 
+/** Shared by the desktop table and the mobile card list — same badge, one definition. */
+function DiffBadge({ diff, percentChange }: { diff: number; percentChange: number | null }) {
+  const stable = diff === 0
+  const up = diff > 0
+  const Icon = stable ? Minus : up ? ArrowUpRight : ArrowDownRight
+
+  return (
+    <span
+      className={cn(
+        'tabular inline-flex shrink-0 items-center justify-end gap-1 text-xs font-medium',
+        // Spending up is bad, down is good.
+        stable ? 'text-muted-foreground' : up ? 'text-exceeded' : 'text-safe',
+      )}
+    >
+      <Icon className="size-3.5" aria-hidden />
+      {percentChange === null ? 'baru' : formatPercent(Math.abs(percentChange))}
+    </span>
+  )
+}
+
 /** Compares two months of the loaded year, or the loaded year against another year
  *  entirely — same underlying category-diff math either way, just fed different
  *  transaction sets (`compareMonths` is not actually month-specific). */
@@ -185,34 +205,32 @@ export function ComparisonPanel({ year, transactions, categories }: ComparisonPa
             Tidak ada transaksi di {mode === 'month' ? 'kedua bulan' : 'kedua tahun'} tersebut.
           </p>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[440px] border-collapse text-sm">
-              <caption className="sr-only">
-                Perbandingan pengeluaran per kategori antara dua periode
-              </caption>
-              <thead>
-                <tr className="border-b text-xs text-muted-foreground">
-                  <th scope="col" className="py-2 pr-2 text-left font-medium">
-                    Kategori
-                  </th>
-                  <th scope="col" className="py-2 text-right font-medium">
-                    {labelA}
-                  </th>
-                  <th scope="col" className="py-2 text-right font-medium">
-                    {labelB}
-                  </th>
-                  <th scope="col" className="py-2 pl-3 text-right font-medium">
-                    Selisih
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => {
-                  const stable = row.diff === 0
-                  const up = row.diff > 0
-                  const Icon = stable ? Minus : up ? ArrowUpRight : ArrowDownRight
-
-                  return (
+          <>
+            {/* The table needs ~440px to show four columns side by side — below `lg`
+                that forced horizontal scroll, so a stacked list takes over instead. */}
+            <div className="hidden overflow-x-auto lg:block">
+              <table className="w-full min-w-[440px] border-collapse text-sm">
+                <caption className="sr-only">
+                  Perbandingan pengeluaran per kategori antara dua periode
+                </caption>
+                <thead>
+                  <tr className="border-b text-xs text-muted-foreground">
+                    <th scope="col" className="py-2 pr-2 text-left font-medium">
+                      Kategori
+                    </th>
+                    <th scope="col" className="py-2 text-right font-medium">
+                      {labelA}
+                    </th>
+                    <th scope="col" className="py-2 text-right font-medium">
+                      {labelB}
+                    </th>
+                    <th scope="col" className="py-2 pl-3 text-right font-medium">
+                      Selisih
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => (
                     <tr key={row.categoryId} className="border-b last:border-0">
                       <td className="py-2 pr-2">{row.name}</td>
                       <td className="py-2 text-right">
@@ -222,35 +240,63 @@ export function ComparisonPanel({ year, transactions, categories }: ComparisonPa
                         <MoneyDisplay value={row.b} compact />
                       </td>
                       <td className="py-2 pl-3 text-right">
-                        <span
-                          className={cn(
-                            'tabular inline-flex items-center justify-end gap-1 text-xs font-medium',
-                            // Spending up is bad, down is good.
-                            stable ? 'text-muted-foreground' : up ? 'text-exceeded' : 'text-safe',
-                          )}
-                        >
-                          <Icon className="size-3.5" aria-hidden />
-                          {row.percentChange === null
-                            ? 'baru'
-                            : formatPercent(Math.abs(row.percentChange))}
-                        </span>
+                        <DiffBadge diff={row.diff} percentChange={row.percentChange} />
                       </td>
                     </tr>
-                  )
-                })}
-              </tbody>
-              <tfoot>
-                <tr className="border-t font-medium">
-                  <td className="py-2 pr-2">Total</td>
-                  <td className="py-2 text-right">
-                    <MoneyDisplay value={totalA} compact />
-                  </td>
-                  <td className="py-2 text-right">
-                    <MoneyDisplay value={totalB} compact />
-                  </td>
-                  <td
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="border-t font-medium">
+                    <td className="py-2 pr-2">Total</td>
+                    <td className="py-2 text-right">
+                      <MoneyDisplay value={totalA} compact />
+                    </td>
+                    <td className="py-2 text-right">
+                      <MoneyDisplay value={totalB} compact />
+                    </td>
+                    <td
+                      className={cn(
+                        'tabular py-2 pl-3 text-right text-xs',
+                        totalDiff > 0
+                          ? 'text-exceeded'
+                          : totalDiff < 0
+                            ? 'text-safe'
+                            : 'text-muted-foreground',
+                      )}
+                    >
+                      {totalDiff > 0 ? '+' : ''}
+                      <MoneyDisplay value={totalDiff} compact />
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            <ul className="space-y-2 lg:hidden">
+              {rows.map((row) => (
+                <li key={row.categoryId} className="rounded-xl border p-3">
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <span className="truncate text-sm font-medium">{row.name}</span>
+                    <DiffBadge diff={row.diff} percentChange={row.percentChange} />
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>
+                      {labelA}: <MoneyDisplay value={row.a} compact className="text-foreground" />
+                    </span>
+                    <span>
+                      {labelB}: <MoneyDisplay value={row.b} compact className="text-foreground" />
+                    </span>
+                  </div>
+                </li>
+              ))}
+              <li className="flex items-center justify-between rounded-xl border bg-muted/40 p-3 text-sm font-medium">
+                <span>Total</span>
+                <span className="flex items-center gap-3">
+                  <MoneyDisplay value={totalA} compact />
+                  <MoneyDisplay value={totalB} compact />
+                  <span
                     className={cn(
-                      'tabular py-2 pl-3 text-right text-xs',
+                      'tabular text-xs',
                       totalDiff > 0
                         ? 'text-exceeded'
                         : totalDiff < 0
@@ -260,11 +306,11 @@ export function ComparisonPanel({ year, transactions, categories }: ComparisonPa
                   >
                     {totalDiff > 0 ? '+' : ''}
                     <MoneyDisplay value={totalDiff} compact />
-                  </td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
+                  </span>
+                </span>
+              </li>
+            </ul>
+          </>
         )}
       </CardContent>
     </Card>
