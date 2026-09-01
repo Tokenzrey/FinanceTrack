@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto'
 import { NextResponse, type NextRequest } from 'next/server'
 import { handleIncoming } from '@/shared/bot/core'
 import { downloadWhatsAppMedia } from '@/shared/bot/media-whatsapp'
-import type { BotIncoming } from '@/shared/bot/types'
+import type { BotIncoming, BotReply } from '@/shared/bot/types'
 
 export const runtime = 'nodejs'
 export const maxDuration = 30
@@ -56,7 +56,45 @@ function verifySignature(rawBody: string, signatureHeader: string | null): boole
   return timingSafeEqual(expectedBuf, providedBuf)
 }
 
-async function sendMessage(to: string, text: string): Promise<void> {
+/**
+ * WhatsApp has no HTML/inline-keyboard support, so a `BotReply` is downgraded here,
+ * once, in the one place that actually sends to Graph API — `core.ts`/`replies.ts`
+ * stay platform-agnostic.
+ *
+ * A keyboard whose every value is either a bare number or `"batal"` (the
+ * category-confirm and goal-contribution flows) renders as a plain numbered list —
+ * typing the number reproduces exactly what tapping the button would have sent, so
+ * the underlying flow needs no WhatsApp-specific branch at all. A keyboard carrying
+ * self-contained action tokens instead (`unlink:confirm`, `skip_recurring:<id>:<day>`)
+ * has no typed equivalent a user could plausibly guess, so those stay Telegram-only —
+ * the message says so rather than silently going nowhere.
+ */
+function renderForWhatsApp(reply: BotReply): string {
+  let text = reply.text
+    .replace(/<b>([\s\S]*?)<\/b>/g, '*$1*')
+    .replace(/<i>([\s\S]*?)<\/i>/g, '_$1_')
+    .replace(/<code>([\s\S]*?)<\/code>/g, '`$1`')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+
+  if (reply.keyboard && reply.keyboard.length > 0) {
+    const buttons = reply.keyboard.flat()
+    const allTypeable = buttons.every((b) => /^\d+$/.test(b.value) || b.value === 'batal')
+
+    if (allTypeable) {
+      const lines = buttons.map((b) => `${b.value === 'batal' ? '"batal"' : `${b.value})`} ${b.label}`)
+      text += `\n\n${lines.join('\n')}`
+    } else {
+      text += '\n\n(Aksi ini saat ini hanya bisa dikonfirmasi lewat Telegram, atau lewat Pengaturan di web.)'
+    }
+  }
+
+  return text
+}
+
+async function sendMessage(to: string, reply: BotReply): Promise<void> {
   const token = process.env.WHATSAPP_ACCESS_TOKEN
   const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID
   if (!token || !phoneNumberId) return
@@ -64,7 +102,7 @@ async function sendMessage(to: string, text: string): Promise<void> {
     await fetch(`https://graph.facebook.com/v22.0/${phoneNumberId}/messages`, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body: text } }),
+      body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body: renderForWhatsApp(reply) } }),
     })
   } catch (error) {
     console.error('whatsapp sendMessage error:', error)
@@ -91,11 +129,11 @@ async function processMessage(message: WhatsAppMessage): Promise<void> {
 
     if (incoming) {
       const reply = await handleIncoming(incoming)
-      await sendMessage(message.from, reply.text)
+      await sendMessage(message.from, reply)
     }
   } catch (error) {
     console.error('whatsapp webhook message error:', error)
-    await sendMessage(message.from, 'Ada masalah di sisi kami — coba lagi sebentar lagi.')
+    await sendMessage(message.from, { text: 'Ada masalah di sisi kami — coba lagi sebentar lagi.' })
   }
 }
 

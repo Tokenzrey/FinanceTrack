@@ -91,22 +91,38 @@ milikmu sendiri, bukan di server pihak ketiga mana pun.
   dibuang) dan skor keyakinan AI.
 
 ### Bot WhatsApp & Telegram
-- Tautkan akun sekali dari Pengaturan (kode 6 karakter, berlaku 15 menit), lalu catat
-  transaksi langsung dari chat — gratis, tanpa biaya tambahan.
+- Tautkan akun sekali dari Pengaturan (kode 6 karakter, berlaku 15 menit), lalu jalankan
+  hampir seluruh aplikasi langsung dari chat — gratis, tanpa biaya tambahan.
 - Kirim teks bahasa natural ("makan siang 35rb", "gaji masuk 5jt") — nominal, jenis
   (pemasukan/pengeluaran), dan kategori terdeteksi otomatis; kalau ragu, bot menawarkan
-  pilihan kategori bernomor untuk dikonfirmasi.
+  pilihan kategori (tombol tap di Telegram, balas angka di WhatsApp) untuk dikonfirmasi.
 - **Kirim foto struk** — dibaca dengan mesin AI yang sama dengan Scan Struk di web, lalu
   otomatis tersimpan ke folder Drive `FinTrack/Receipts` kalau akun Google Drive-mu
   sudah tertaut (kalau belum, transaksi tetap tercatat, hanya tanpa lampiran foto).
-- Perintah baca cepat: `ringkasan` (ringkasan bulan ini), `sisa`/`saldo` (sisa anggaran
-  per pilar), `kategori` (daftar kategori aktif), `bantuan`.
+- **14 command** mencakup hampir semua domain aplikasi, bukan cuma catat transaksi:
+  `/ringkasan`, `/saldo`, `/riwayat`, `/tahunan` (Anggaran &amp; Riwayat), `/target`,
+  `/setor` (Target Tabungan — dua langkah: pilih target, lalu ketik nominal),
+  `/kekayaan` (Kekayaan Bersih, dihitung dari aset &amp; liabilitas terkini — bukan
+  snapshot basi), `/rutin` (Transaksi Rutin, dengan tombol "lewati bulan ini"),
+  `/wishlist` (kelayakan beli lewat mesin yang sama dengan web), `/kategori`, `/batal`,
+  `/putuskan`, `/help`. Setiap command murni memakai ulang logika/perhitungan yang sama
+  dengan halaman web-nya (`buildMonthlySummary`, `buildYearSummary`, `calculateAffordability`,
+  `pendingOccurrences`, dst.) — bukan disalin ulang, jadi tidak pernah menyimpang dari
+  angka yang tampil di web.
+- **Telegram**: menu command lengkap (ketik `/` untuk melihatnya), pesan terformat
+  (tebal/kode/emoji status), dan tombol interaktif (inline keyboard) untuk konfirmasi
+  kategori, target setoran, dan aksi "lewati" — tanpa perlu mengetik angka manual.
+- Keyword baca polos lama (`ringkasan`, `sisa`, tanpa `/`) tetap didukung di kedua
+  platform — tidak ada yang berhenti bekerja.
+- Sengaja **tidak** membawa manajemen kategori/anggaran, tutup/buka bulan, reset data,
+  atau apa pun yang butuh form/wizard/konfirmasi ketik-kata — itu tetap di web,
+  by design (lihat §11 di `implementation_telegram_bot_pro.md`).
 - Aturan bisnis yang sama persis dengan web ditegakkan di jalur bot: pilar selalu ikut
   kategori (tidak pernah ditebak dari kata-kata di pesan), bulan yang sudah ditutup
   menolak pencatatan baru, nominal nol/negatif ditolak.
 - Setup lengkap (gratis, ~3 menit Telegram / ~15 menit WhatsApp): lihat langkah 7 di
   [Instalasi & Konfigurasi](#7-opsional-siapkan-bot-whatsapp--telegram) atau
-  [`implementation_bot_integration.md`](implementation_bot_integration.md).
+  `implementation_bot_integration.md` / `implementation_telegram_bot_pro.md`.
 
 ### Transaksi Rutin (Recurring)
 - Buat aturan tagihan/pemasukan berulang: harian, mingguan, bulanan, atau tahunan.

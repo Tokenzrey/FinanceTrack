@@ -6,6 +6,15 @@ export type BotIntent =
   | 'get_summary'
   | 'get_balance'
   | 'list_categories'
+  | 'get_recent'
+  | 'get_year_summary'
+  | 'list_goals'
+  | 'contribute_goal'
+  | 'net_worth'
+  | 'list_recurring'
+  | 'list_wishlist'
+  | 'cancel_pending'
+  | 'unlink'
   | 'help'
   | 'unknown'
 
@@ -30,8 +39,24 @@ export interface BotIncomingImage {
  *  media ids, signatures) never cross this boundary. */
 export type BotIncoming = BotIncomingText | BotIncomingImage
 
+/** A single button in an inline keyboard row. `value` is what comes back as the
+ *  incoming message when tapped — Telegram sends it as `callback_query.data`, treated
+ *  identically to the user having typed it (see `core.ts`). */
+export interface BotKeyboardButton {
+  label: string
+  value: string
+}
+
 export interface BotReply {
   text: string
+  /** HTML-formatted (`<b>`, `<i>`, `<code>`, …) when true (the default every `replies.ts`
+   *  function sets). WhatsApp has no HTML support — its adapter strips these tags to
+   *  WhatsApp's own lite-markdown instead of sending them raw. */
+  html?: boolean
+  /** One row per array entry. Telegram renders this as a tappable inline keyboard.
+   *  WhatsApp has no equivalent — its adapter falls back to a numbered text list built
+   *  from the same buttons, exactly like the pre-keyboard text-only flow. */
+  keyboard?: BotKeyboardButton[][]
 }
 
 /** What a platform media downloader hands back — already normalized, so `core.ts`

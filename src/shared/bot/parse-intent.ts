@@ -5,10 +5,21 @@ import type { BotIntent, ParsedIntent } from './types'
 const MODEL = process.env.GEMINI_MODEL ?? 'gemini-3.5-flash'
 
 const READ_COMMANDS: { pattern: RegExp; intent: BotIntent }[] = [
-  { pattern: /^(ringkasan|summary)$/i, intent: 'get_summary' },
-  { pattern: /^(sisa|saldo)$/i, intent: 'get_balance' },
-  { pattern: /^(kategori|categories)$/i, intent: 'list_categories' },
-  { pattern: /^(bantuan|help|\/start|\/help)$/i, intent: 'help' },
+  // `/?` accepts both the bare keyword ("ringkasan") and the Telegram slash-command
+  // form ("/ringkasan") — command menu entries and old muscle-memory keywords both work.
+  { pattern: /^\/?(ringkasan|summary)$/i, intent: 'get_summary' },
+  { pattern: /^\/?(sisa|saldo)$/i, intent: 'get_balance' },
+  { pattern: /^\/?(kategori|categories)$/i, intent: 'list_categories' },
+  { pattern: /^\/?(riwayat|history)$/i, intent: 'get_recent' },
+  { pattern: /^\/?(tahunan|year)$/i, intent: 'get_year_summary' },
+  { pattern: /^\/?(target|goals?)$/i, intent: 'list_goals' },
+  { pattern: /^\/?setor$/i, intent: 'contribute_goal' },
+  { pattern: /^\/?(kekayaan|networth)$/i, intent: 'net_worth' },
+  { pattern: /^\/?rutin$/i, intent: 'list_recurring' },
+  { pattern: /^\/?wishlist$/i, intent: 'list_wishlist' },
+  { pattern: /^\/?(batal|cancel)$/i, intent: 'cancel_pending' },
+  { pattern: /^\/?(bantuan|help|start)$/i, intent: 'help' },
+  { pattern: /^\/?putuskan$/i, intent: 'unlink' },
 ]
 
 /**

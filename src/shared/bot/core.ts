@@ -1,7 +1,12 @@
+import { projectSavings } from '@/shared/lib/analytics'
 import { buildMonthlySummary } from '@/shared/lib/budget-math'
+import { formatIDR, formatMonthLong } from '@/shared/lib/format'
 import { ALLOWED_MIME, MAX_BASE64_CHARS, extractReceipt } from '@/shared/lib/receipt-extraction'
+import { dayKey, pendingOccurrences } from '@/shared/lib/recurring'
+import { buildYearSummary } from '@/shared/lib/year-summary'
 import { DEFAULT_PILLAR_CONFIG, type Category } from '@/shared/types/domain'
 import type { MappedReceiptItem } from '@/shared/types/receipt-scanner.types'
+import { analyseWishlistItem } from '@/shared/use-cases/wishlist/CalculateAffordability.usecase'
 import * as adminData from './admin-data'
 import type { BotPendingDraft } from './admin-data'
 import { uploadReceiptForUser } from './drive-upload'
@@ -29,6 +34,8 @@ interface Draft {
   dateIso: string
 }
 
+type GoalContributionDraft = Extract<BotPendingDraft, { pendingKind: 'goal_contribution' }>
+
 export async function handleIncoming(msg: BotIncoming): Promise<BotReply> {
   const link = await adminData.findLinkByExternalId(msg.platform, msg.externalId)
 
@@ -36,14 +43,30 @@ export async function handleIncoming(msg: BotIncoming): Promise<BotReply> {
     // An unlinked chat can only meaningfully do one thing: submit a link code.
     if (msg.kind === 'text' && LINK_CODE_RE.test(msg.text.trim().toUpperCase())) {
       const result = await adminData.consumeLinkCode(msg.text, msg.platform, msg.externalId, null)
-      return result.ok ? { text: replies.linkSuccess() } : { text: replies.linkCodeInvalid(result.error) }
+      return result.ok ? replies.linkSuccess() : replies.linkCodeInvalid(result.error)
     }
-    return { text: replies.notLinked() }
+    return replies.notLinked()
   }
 
   const userId = link.userId
 
-  // A pending category confirmation takes priority over everything else.
+  // Inline-keyboard button taps arrive as plain text (see the webhook adapters), but
+  // carry a fixed action token instead of natural language — checked first, and
+  // independent of any `botPending` draft, since these actions are fully
+  // self-contained (see `replies.unlinkConfirmPrompt`/`recurringList`).
+  if (msg.kind === 'text') {
+    if (msg.text === 'unlink:confirm') {
+      await adminData.deleteLink(userId, msg.platform)
+      return replies.unlinkedFromChat()
+    }
+    if (msg.text === 'unlink:cancel') return replies.unlinkCancelled()
+    if (msg.text.startsWith('skip_recurring:')) {
+      return handleSkipRecurring(userId, msg.text.slice('skip_recurring:'.length))
+    }
+  }
+
+  // A pending multi-step draft (category confirmation or goal contribution) takes
+  // priority over everything else.
   const pending = await adminData.getPending(userId)
   if (pending) return handlePendingReply(userId, pending, msg)
 
@@ -61,15 +84,19 @@ async function handlePendingReply(
   if (msg.kind !== 'text') {
     // A photo arrives while something else is pending — the stale draft is dropped
     // silently and the photo is processed fresh, rather than leaving the user stuck
-    // answering a question about a different transaction.
+    // answering a question about something unrelated.
     await adminData.clearPending(userId)
     return handleImage(userId, msg)
+  }
+
+  if (pending.pendingKind === 'goal_contribution') {
+    return handleGoalContributionReply(userId, pending, msg.text)
   }
 
   const trimmed = msg.text.trim()
   if (/^batal$/i.test(trimmed)) {
     await adminData.clearPending(userId)
-    return { text: replies.pendingCancelled() }
+    return replies.pendingCancelled()
   }
 
   if (/^\d+$/.test(trimmed)) {
@@ -81,7 +108,7 @@ async function handlePendingReply(
     }
     // A number, but out of range — almost certainly a mistyped answer, not a new
     // message. Keep the draft alive and ask again instead of discarding it.
-    return { text: replies.invalidCategoryChoice(pending.options.length) }
+    return replies.invalidCategoryChoice(pending.options.length)
   }
 
   // Anything else is a fresh message — the draft is abandoned silently, exactly as
@@ -90,11 +117,60 @@ async function handlePendingReply(
   return handleText(userId, msg.text)
 }
 
+async function handleGoalContributionReply(
+  userId: string,
+  pending: GoalContributionDraft,
+  text: string,
+): Promise<BotReply> {
+  const trimmed = text.trim()
+  if (/^batal$/i.test(trimmed)) {
+    await adminData.clearPending(userId)
+    return replies.pendingCancelled()
+  }
+
+  if (pending.step === 'pick_goal') {
+    if (/^\d+$/.test(trimmed)) {
+      const choice = Number(trimmed)
+      if (choice >= 1 && choice <= pending.options.length) {
+        const picked = pending.options[choice - 1]
+        await adminData.setPending(userId, {
+          pendingKind: 'goal_contribution',
+          step: 'enter_amount',
+          options: pending.options,
+          goalId: picked.goalId,
+          goalName: picked.name,
+        })
+        return replies.goalAmountPrompt(picked.name)
+      }
+      return replies.invalidCategoryChoice(pending.options.length)
+    }
+    // Non-numeric, non-"batal" — treat as a fresh message abandoning this draft, same
+    // symmetry as the category-confirm flow.
+    await adminData.clearPending(userId)
+    return handleText(userId, text)
+  }
+
+  // step === 'enter_amount'
+  const amount = parseAmount(trimmed)
+  if (amount === null) return replies.goalContributionInvalidAmount()
+
+  await adminData.clearPending(userId)
+  const goalId = pending.goalId as string
+  await adminData.addGoalContribution(userId, goalId, amount)
+  const goal = await adminData.findGoalById(userId, goalId)
+  return replies.goalContributionRecorded(
+    amount,
+    pending.goalName ?? '',
+    goal?.currentAmount ?? amount,
+    goal?.targetAmount ?? amount,
+  )
+}
+
 // ─── Text messages ───────────────────────────────────────────────
 
 async function handleText(userId: string, text: string): Promise<BotReply> {
   const trimmed = text.trim()
-  if (!trimmed) return { text: replies.unknownMessage() }
+  if (!trimmed) return replies.unknownMessage()
 
   const readCommand = matchReadCommand(trimmed)
   if (readCommand) return handleReadCommand(userId, readCommand)
@@ -102,7 +178,7 @@ async function handleText(userId: string, text: string): Promise<BotReply> {
   // Nominal is checked before ever calling Gemini — no point spending a model call on
   // a message that has no parsable amount at all.
   const amount = parseAmount(trimmed)
-  if (amount === null) return { text: replies.amountNotFound() }
+  if (amount === null) return replies.amountNotFound()
 
   const categories = await adminData.findCategories(userId)
   const active = categories.filter((c) => c.isActive)
@@ -124,13 +200,40 @@ async function handleText(userId: string, text: string): Promise<BotReply> {
 }
 
 async function handleReadCommand(userId: string, intent: BotIntent): Promise<BotReply> {
-  if (intent === 'help') return { text: replies.help() }
+  if (intent === 'help') return replies.help()
+  if (intent === 'cancel_pending') return replies.cancelNothingPending()
+  if (intent === 'unlink') return replies.unlinkConfirmPrompt()
 
   if (intent === 'list_categories') {
     const categories = await adminData.findCategories(userId)
-    return { text: replies.categoryList(categories.filter((c) => c.isActive && c.pillar !== 'income')) }
+    return replies.categoryList(categories.filter((c) => c.isActive && c.pillar !== 'income'))
   }
 
+  if (intent === 'get_recent') {
+    const [transactions, categories] = await Promise.all([
+      adminData.getRecentTransactions(userId, 5),
+      adminData.findCategories(userId),
+    ])
+    return replies.recentTransactions(transactions, categories)
+  }
+
+  if (intent === 'get_year_summary') {
+    const year = new Date().getFullYear()
+    const [transactions, budgets, categories] = await Promise.all([
+      adminData.getYearTransactions(userId, year),
+      adminData.getYearBudgets(userId, year),
+      adminData.findCategories(userId),
+    ])
+    return replies.yearSummary(buildYearSummary(year, transactions, budgets, categories))
+  }
+
+  if (intent === 'list_goals') return handleListGoals(userId)
+  if (intent === 'contribute_goal') return handleContributeGoalStart(userId)
+  if (intent === 'net_worth') return handleNetWorth(userId)
+  if (intent === 'list_recurring') return handleListRecurring(userId)
+  if (intent === 'list_wishlist') return handleListWishlist(userId)
+
+  // get_summary / get_balance both need the full monthly summary.
   const now = new Date()
   const year = now.getFullYear()
   const month = now.getMonth() + 1
@@ -149,7 +252,105 @@ async function handleReadCommand(userId: string, intent: BotIntent): Promise<Bot
     overrides: budget?.categoryOverrides,
   })
 
-  return intent === 'get_summary' ? { text: replies.summary(summary) } : { text: replies.balance(summary) }
+  return intent === 'get_summary' ? replies.summary(summary) : replies.balance(summary)
+}
+
+// ─── /target & /setor ────────────────────────────────────────────
+
+async function handleListGoals(userId: string): Promise<BotReply> {
+  const goals = await adminData.findGoals(userId)
+  if (goals.length === 0) return replies.noGoals()
+
+  const rows = goals.map((g) => {
+    const percent = g.targetAmount > 0 ? (g.currentAmount / g.targetAmount) * 100 : 0
+    const projection = projectSavings(g.currentAmount, g.targetAmount, g.monthlyContribution)
+    const projectedText =
+      projection.monthsToTarget === 0
+        ? 'Sudah tercapai! 🎉'
+        : projection.monthsToTarget === null || !projection.projectedDate
+          ? 'Belum ada rencana setoran bulanan.'
+          : `Estimasi tercapai: ${formatMonthLong(projection.projectedDate.getFullYear(), projection.projectedDate.getMonth() + 1)} (setor ${formatIDR(g.monthlyContribution)}/bln)`
+    return { name: g.name, currentAmount: g.currentAmount, targetAmount: g.targetAmount, percent, projectedText }
+  })
+
+  return replies.goalList(rows)
+}
+
+async function handleContributeGoalStart(userId: string): Promise<BotReply> {
+  const goals = await adminData.findGoals(userId)
+  if (goals.length === 0) return replies.noGoals()
+
+  const options = goals.map((g) => ({ goalId: g.id, name: g.name }))
+  await adminData.setPending(userId, { pendingKind: 'goal_contribution', step: 'pick_goal', options })
+  return replies.goalPickPrompt(options)
+}
+
+// ─── /kekayaan ───────────────────────────────────────────────────
+
+async function handleNetWorth(userId: string): Promise<BotReply> {
+  const [assets, liabilities] = await Promise.all([adminData.findAssets(userId), adminData.findLiabilities(userId)])
+  const totalAssets = assets.reduce((sum, a) => sum + a.value, 0)
+  const totalLiabilities = liabilities.reduce((sum, l) => sum + l.remainingAmount, 0)
+  return replies.netWorth(totalAssets, totalLiabilities)
+}
+
+// ─── /rutin ──────────────────────────────────────────────────────
+
+async function handleListRecurring(userId: string): Promise<BotReply> {
+  const rules = await adminData.findRecurringRules(userId)
+  const active = rules.filter((r) => r.isActive)
+  if (active.length === 0) return replies.noRecurring()
+
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = now.getMonth() + 1
+  const [transactions, categories] = await Promise.all([
+    adminData.getMonthTransactions(userId, year, month),
+    adminData.findCategories(userId),
+  ])
+
+  const due = pendingOccurrences(active, transactions, year, month, now)
+  const dueByRule = new Map<string, string>()
+  for (const occ of due) {
+    if (!dueByRule.has(occ.rule.id)) dueByRule.set(occ.rule.id, dayKey(occ.date))
+  }
+
+  const categoryName = (id: string) => categories.find((c) => c.id === id)?.name ?? 'Tanpa kategori'
+  return replies.recurringList(active, dueByRule, categoryName)
+}
+
+async function handleSkipRecurring(userId: string, payload: string): Promise<BotReply> {
+  const [ruleId, dk] = payload.split(':')
+  if (!ruleId || !dk) return replies.genericError()
+
+  const rules = await adminData.findRecurringRules(userId)
+  const rule = rules.find((r) => r.id === ruleId)
+  if (!rule || !rule.isActive) return replies.recurringSkipStale()
+
+  // Re-validate against the current month rather than trusting the callback payload —
+  // a tap on an old message could reference an occurrence that is no longer actually
+  // due (already generated, already skipped, or the month has since rolled over).
+  const now = new Date()
+  const transactions = await adminData.getMonthTransactions(userId, now.getFullYear(), now.getMonth() + 1)
+  const due = pendingOccurrences([rule], transactions, now.getFullYear(), now.getMonth() + 1, now)
+  const stillDue = due.some((occ) => dayKey(occ.date) === dk)
+  if (!stillDue) return replies.recurringSkipStale()
+
+  await adminData.skipRecurringOccurrence(userId, ruleId, dk)
+  return replies.recurringSkipped(rule.name)
+}
+
+// ─── /wishlist ───────────────────────────────────────────────────
+
+async function handleListWishlist(userId: string): Promise<BotReply> {
+  const items = await adminData.findWishlist(userId)
+  const relevant = items.filter((i) => i.status !== 'purchased' && i.status !== 'cancelled')
+  if (relevant.length === 0) return replies.noWishlist()
+
+  const now = new Date()
+  const context = await adminData.getFinancialContextAdmin(userId, now.getFullYear(), now.getMonth() + 1)
+  const rows = relevant.map((item) => ({ item, result: analyseWishlistItem(item, context) }))
+  return replies.wishlistList(rows)
 }
 
 // ─── Photo messages ──────────────────────────────────────────────
@@ -184,8 +385,8 @@ async function handleImage(
   userId: string,
   msg: Extract<BotIncoming, { kind: 'image' }>,
 ): Promise<BotReply> {
-  if (msg.imageBase64.length > MAX_BASE64_CHARS) return { text: replies.imageTooLarge() }
-  if (!ALLOWED_MIME.includes(msg.mimeType)) return { text: replies.notAReceipt() }
+  if (msg.imageBase64.length > MAX_BASE64_CHARS) return replies.imageTooLarge()
+  if (!ALLOWED_MIME.includes(msg.mimeType)) return replies.notAReceipt()
 
   const categories = await adminData.findCategories(userId)
   const spendCategories = categories.filter((c) => c.isActive && c.pillar !== 'income')
@@ -200,12 +401,12 @@ async function handleImage(
     )
   } catch (error) {
     console.error('bot handleImage extractReceipt error:', error)
-    return { text: replies.genericError() }
+    return replies.genericError()
   }
 
   // Same threshold the web scanner uses to flag "this probably isn't a receipt".
   if (result.totalConfidence < 20 || result.extraction.total <= 0) {
-    return { text: replies.notAReceipt() }
+    return replies.notAReceipt()
   }
 
   const amount = Math.round(result.extraction.total)
@@ -265,10 +466,10 @@ async function resolveCategoryOrAsk(
       ? validCandidates.map((id) => ({ categoryId: id, name: byId.get(id)!.name }))
       : categories.slice(0, 3).map((c) => ({ categoryId: c.id, name: c.name }))
 
-  if (options.length === 0) return { text: replies.categoryList([]) }
+  if (options.length === 0) return replies.categoryList([])
 
-  await adminData.setPending(userId, { draft, options, receipt })
-  return { text: replies.categoryConfirmPrompt(draft.amount, draft.description, options) }
+  await adminData.setPending(userId, { pendingKind: 'category_confirm', draft, options, receipt })
+  return replies.categoryConfirmPrompt(draft.amount, draft.description, options)
 }
 
 async function finalizeTransaction(
@@ -284,14 +485,14 @@ async function finalizeTransaction(
 
   const budget = await adminData.getMonthlyBudget(userId, year, month)
   if (adminData.isBudgetClosedAdmin(budget)) {
-    return { text: replies.monthClosed(year, month) }
+    return replies.monthClosed(year, month)
   }
 
   const categories = await adminData.findCategories(userId)
   const fullCategory = categories.find((c) => c.id === category.categoryId)
-  if (!fullCategory) return { text: replies.genericError() }
+  if (!fullCategory) return replies.genericError()
 
-  if (draft.amount <= 0) return { text: replies.amountNotFound() }
+  if (draft.amount <= 0) return replies.amountNotFound()
 
   await adminData.createTransaction(userId, {
     date,
@@ -306,5 +507,5 @@ async function finalizeTransaction(
   })
 
   const receiptStatus = receipt ? 'saved' : imageWithoutReceipt ? 'drive_not_linked' : 'none'
-  return { text: replies.transactionRecorded(draft.amount, fullCategory.name, receiptStatus) }
+  return replies.transactionRecorded(draft.amount, fullCategory.name, receiptStatus)
 }

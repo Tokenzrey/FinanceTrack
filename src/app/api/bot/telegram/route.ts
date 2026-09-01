@@ -1,10 +1,16 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { handleIncoming } from '@/shared/bot/core'
 import { downloadTelegramPhoto } from '@/shared/bot/media-telegram'
-import type { BotIncoming } from '@/shared/bot/types'
+import type { BotIncoming, BotReply } from '@/shared/bot/types'
 
 export const runtime = 'nodejs'
 export const maxDuration = 30
+
+interface TelegramCallbackQuery {
+  id: string
+  data?: string
+  message?: { chat: { id: number }; message_id: number }
+}
 
 interface TelegramUpdate {
   message?: {
@@ -13,44 +19,58 @@ interface TelegramUpdate {
     caption?: string
     photo?: { file_id: string }[]
   }
+  callback_query?: TelegramCallbackQuery
 }
 
-async function sendMessage(chatId: number, text: string): Promise<void> {
-  const token = process.env.TELEGRAM_BOT_TOKEN
+function botToken(): string | undefined {
+  return process.env.TELEGRAM_BOT_TOKEN
+}
+
+function toReplyMarkup(reply: BotReply): Record<string, unknown> | undefined {
+  if (!reply.keyboard) return undefined
+  return { inline_keyboard: reply.keyboard.map((row) => row.map((b) => ({ text: b.label, callback_data: b.value }))) }
+}
+
+async function callTelegram(method: string, payload: Record<string, unknown>): Promise<void> {
+  const token = botToken()
   if (!token) return
   try {
-    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    await fetch(`https://api.telegram.org/bot${token}/${method}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ chat_id: chatId, text }),
+      body: JSON.stringify(payload),
     })
   } catch (error) {
-    console.error('telegram sendMessage error:', error)
+    console.error(`telegram ${method} error:`, error)
   }
 }
 
-/**
- * Telegram webhook. Always responds 200 regardless of what happened while processing
- * — any non-200 makes Telegram retry the same update repeatedly, so failures are
- * reported to the user as a chat message instead, never as an HTTP status.
- */
-export async function POST(request: NextRequest): Promise<NextResponse> {
-  const secret = process.env.TELEGRAM_WEBHOOK_SECRET
-  const provided = request.headers.get('x-telegram-bot-api-secret-token')
-  if (!secret || provided !== secret) {
-    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-  }
+async function sendMessage(chatId: number, reply: BotReply): Promise<void> {
+  await callTelegram('sendMessage', {
+    chat_id: chatId,
+    text: reply.text,
+    parse_mode: reply.html === false ? undefined : 'HTML',
+    reply_markup: toReplyMarkup(reply),
+  })
+}
 
-  let update: TelegramUpdate
-  try {
-    update = (await request.json()) as TelegramUpdate
-  } catch {
-    return NextResponse.json({ ok: true })
-  }
+/** Replaces a tapped-button message with the result and removes its keyboard, so a
+ *  stale button can never be tapped a second time. */
+async function editMessage(chatId: number, messageId: number, reply: BotReply): Promise<void> {
+  await callTelegram('editMessageText', {
+    chat_id: chatId,
+    message_id: messageId,
+    text: reply.text,
+    parse_mode: reply.html === false ? undefined : 'HTML',
+    reply_markup: toReplyMarkup(reply) ?? {},
+  })
+}
 
-  const message = update.message
-  if (!message) return NextResponse.json({ ok: true })
+async function answerCallbackQuery(callbackQueryId: string): Promise<void> {
+  await callTelegram('answerCallbackQuery', { callback_query_id: callbackQueryId })
+}
 
+async function handleTextOrPhotoMessage(message: NonNullable<TelegramUpdate['message']>): Promise<void> {
   const chatId = message.chat.id
 
   try {
@@ -75,11 +95,60 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     if (incoming) {
       const reply = await handleIncoming(incoming)
-      await sendMessage(chatId, reply.text)
+      await sendMessage(chatId, reply)
     }
   } catch (error) {
     console.error('telegram webhook error:', error)
-    await sendMessage(chatId, 'Ada masalah di sisi kami — coba lagi sebentar lagi.')
+    await sendMessage(chatId, { text: 'Ada masalah di sisi kami — coba lagi sebentar lagi.' })
+  }
+}
+
+async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> {
+  // Answered first, before anything else can fail — otherwise the tapped button spins
+  // forever on the user's screen even though the tap was received.
+  await answerCallbackQuery(query.id)
+
+  if (!query.message || typeof query.data !== 'string') return
+  const chatId = query.message.chat.id
+
+  try {
+    const incoming: BotIncoming = {
+      platform: 'telegram',
+      externalId: String(chatId),
+      kind: 'text',
+      text: query.data,
+    }
+    const reply = await handleIncoming(incoming)
+    await editMessage(chatId, query.message.message_id, reply)
+  } catch (error) {
+    console.error('telegram callback_query error:', error)
+    await editMessage(chatId, query.message.message_id, { text: 'Ada masalah di sisi kami — coba lagi sebentar lagi.' })
+  }
+}
+
+/**
+ * Telegram webhook. Always responds 200 regardless of what happened while processing
+ * — any non-200 makes Telegram retry the same update repeatedly, so failures are
+ * reported to the user as a chat message instead, never as an HTTP status.
+ */
+export async function POST(request: NextRequest): Promise<NextResponse> {
+  const secret = process.env.TELEGRAM_WEBHOOK_SECRET
+  const provided = request.headers.get('x-telegram-bot-api-secret-token')
+  if (!secret || provided !== secret) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  let update: TelegramUpdate
+  try {
+    update = (await request.json()) as TelegramUpdate
+  } catch {
+    return NextResponse.json({ ok: true })
+  }
+
+  if (update.callback_query) {
+    await handleCallbackQuery(update.callback_query)
+  } else if (update.message) {
+    await handleTextOrPhotoMessage(update.message)
   }
 
   return NextResponse.json({ ok: true })

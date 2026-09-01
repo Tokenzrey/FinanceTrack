@@ -1,7 +1,20 @@
-import { FieldValue, Timestamp } from 'firebase-admin/firestore'
+import { FieldPath, FieldValue, Timestamp } from 'firebase-admin/firestore'
 import { getAdminDb } from '@/shared/lib/firebase-admin'
-import type { Category, MonthlyBudget, Transaction } from '@/shared/types/domain'
+import { liquidAssets } from '@/shared/lib/analytics'
+import type {
+  Asset,
+  Category,
+  Liability,
+  MonthlyBudget,
+  RecurringRule,
+  SavingsGoal,
+  Transaction,
+} from '@/shared/types/domain'
 import type { CreateTransactionDTO } from '@/shared/types/dto'
+import type { FinancialContext } from '@/shared/use-cases/wishlist/CalculateAffordability.usecase'
+import type { Wishlist } from '@/shared/types/wishlist.types'
+import { buildMonthlySummary } from '@/shared/lib/budget-math'
+import { DEFAULT_PILLAR_CONFIG } from '@/shared/types/domain'
 import type { BotPlatform } from './types'
 
 /**
@@ -137,9 +150,15 @@ export async function deleteLink(userId: string, platform: BotPlatform): Promise
   await batch.commit()
 }
 
-// ─── Pending draft (category confirmation, text or photo) ───────
+// ─── Pending draft (category confirmation, goal contribution) ───
+//
+// Two unrelated multi-step flows share one `meta/botPending` doc, so at most one can
+// be in flight per user at a time — starting a new one abandons whichever was already
+// there, same as a fresh message abandoning a stale category confirmation always has.
+// `pendingKind` tells `handlePendingReply` which flow a stored draft belongs to.
 
-export interface BotPendingDraft {
+interface CategoryConfirmDraft {
+  pendingKind: 'category_confirm'
   draft: {
     amount: number
     description: string | null
@@ -149,8 +168,20 @@ export interface BotPendingDraft {
   }
   options: { categoryId: string; name: string }[]
   receipt?: { gDriveFileId: string; gDriveWebViewLink: string }
-  expiresAt: Timestamp
 }
+
+interface GoalContributionDraft {
+  pendingKind: 'goal_contribution'
+  /** Candidate goals offered in step 1, in display order — `step: 'pick_goal'`
+   *  interprets a numeric reply as a 1-based index into this list, same convention as
+   *  `category_confirm.options`. */
+  options: { goalId: string; name: string }[]
+  step: 'pick_goal' | 'enter_amount'
+  goalId?: string
+  goalName?: string
+}
+
+export type BotPendingDraft = (CategoryConfirmDraft | GoalContributionDraft) & { expiresAt: Timestamp }
 
 function pendingRef(userId: string) {
   return getAdminDb().doc(`users/${userId}/meta/botPending`)
@@ -159,18 +190,24 @@ function pendingRef(userId: string) {
 export async function getPending(userId: string): Promise<BotPendingDraft | null> {
   const snap = await pendingRef(userId).get()
   if (!snap.exists) return null
-  const data = snap.data() as BotPendingDraft
-  if (data.expiresAt.toMillis() < Date.now()) {
+  const raw = snap.data() as Record<string, unknown> & { expiresAt: Timestamp }
+  if (raw.expiresAt.toMillis() < Date.now()) {
     await clearPending(userId)
     return null
   }
-  return data
+  // Docs written before `pendingKind` existed have no such field — they can only ever
+  // have been a category confirmation, since that was the only pending flow back then.
+  const data = raw.pendingKind ? raw : { ...raw, pendingKind: 'category_confirm' as const }
+  return data as unknown as BotPendingDraft
 }
 
-export async function setPending(userId: string, draft: Omit<BotPendingDraft, 'expiresAt'>): Promise<void> {
+export async function setPending(
+  userId: string,
+  payload: CategoryConfirmDraft | GoalContributionDraft,
+): Promise<void> {
   await pendingRef(userId).set(
     stripUndefined({
-      ...draft,
+      ...payload,
       expiresAt: Timestamp.fromMillis(Date.now() + PENDING_TTL_MS),
     }),
   )
@@ -221,6 +258,139 @@ export async function getMonthTransactions(
     .where('date', '<', to)
     .get()
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Transaction)
+}
+
+export async function getRecentTransactions(userId: string, limit = 5): Promise<Transaction[]> {
+  const snap = await getAdminDb()
+    .collection(`users/${userId}/transactions`)
+    .orderBy('date', 'desc')
+    .limit(limit)
+    .get()
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Transaction)
+}
+
+export async function getYearTransactions(userId: string, year: number): Promise<Transaction[]> {
+  const from = Timestamp.fromDate(new Date(year, 0, 1))
+  const to = Timestamp.fromDate(new Date(year + 1, 0, 1))
+  const snap = await getAdminDb()
+    .collection(`users/${userId}/transactions`)
+    .where('date', '>=', from)
+    .where('date', '<', to)
+    .get()
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Transaction)
+}
+
+/** Document ids are "YYYY-MM", so a lexical range on the id covers a whole year in one
+ *  query — same trick `FirestoreBudgetRepository.findRange` uses on the client side. */
+export async function getYearBudgets(userId: string, year: number): Promise<MonthlyBudget[]> {
+  const snap = await getAdminDb()
+    .collection(`users/${userId}/monthly_budgets`)
+    .where(FieldPath.documentId(), '>=', `${year}-01`)
+    .where(FieldPath.documentId(), '<=', `${year}-12`)
+    .get()
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as MonthlyBudget)
+}
+
+// ─── Savings goals ────────────────────────────────────────────────
+
+export async function findGoals(userId: string): Promise<SavingsGoal[]> {
+  const snap = await getAdminDb().collection(`users/${userId}/savings_goals`).get()
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as SavingsGoal)
+}
+
+export async function findGoalById(userId: string, goalId: string): Promise<SavingsGoal | null> {
+  const snap = await getAdminDb().doc(`users/${userId}/savings_goals/${goalId}`).get()
+  return snap.exists ? ({ id: snap.id, ...snap.data() } as SavingsGoal) : null
+}
+
+/** Mirrors `ISavingsGoalRepository.addContribution`: one contribution record plus an
+ *  atomic increment on the goal's running total, so two concurrent contributions can
+ *  never clobber each other. */
+export async function addGoalContribution(userId: string, goalId: string, amount: number): Promise<void> {
+  const db = getAdminDb()
+  const batch = db.batch()
+  batch.set(db.collection(`users/${userId}/goal_contributions`).doc(), {
+    goalId,
+    amount,
+    date: FieldValue.serverTimestamp(),
+  })
+  batch.update(db.doc(`users/${userId}/savings_goals/${goalId}`), {
+    currentAmount: FieldValue.increment(amount),
+  })
+  await batch.commit()
+}
+
+// ─── Net worth (assets & liabilities, read live — never a stale saved snapshot) ──
+
+export async function findAssets(userId: string): Promise<Asset[]> {
+  const snap = await getAdminDb().collection(`users/${userId}/assets`).get()
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Asset)
+}
+
+export async function findLiabilities(userId: string): Promise<Liability[]> {
+  const snap = await getAdminDb().collection(`users/${userId}/liabilities`).get()
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Liability)
+}
+
+// ─── Recurring rules ──────────────────────────────────────────────
+
+export async function findRecurringRules(userId: string): Promise<RecurringRule[]> {
+  const snap = await getAdminDb().collection(`users/${userId}/recurring_rules`).get()
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as RecurringRule)
+}
+
+/** Mirrors `IRecurringRuleRepository.skipOccurrence` — `arrayUnion` so two chats
+ *  skipping at once cannot clobber each other's entry. */
+export async function skipRecurringOccurrence(userId: string, ruleId: string, dayKey: string): Promise<void> {
+  await getAdminDb()
+    .doc(`users/${userId}/recurring_rules/${ruleId}`)
+    .update({ skippedDates: FieldValue.arrayUnion(dayKey) })
+}
+
+// ─── Wishlist ─────────────────────────────────────────────────────
+
+export async function findWishlist(userId: string): Promise<Wishlist[]> {
+  const snap = await getAdminDb().collection(`users/${userId}/wishlist`).get()
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Wishlist)
+}
+
+/**
+ * Server-side rebuild of `CalculateAffordability.usecase.ts`'s `getFinancialContext` —
+ * only the Firestore-reading part is reimplemented (Admin SDK vs. client SDK, same as
+ * every other function in this file); the actual affordability math
+ * (`analyseWishlistItem`/`calculateAffordability`) is imported and called unchanged by
+ * `core.ts`, never copied.
+ */
+export async function getFinancialContextAdmin(
+  userId: string,
+  year: number,
+  month: number,
+): Promise<FinancialContext> {
+  const [categories, transactions, budget, assets, liabilities] = await Promise.all([
+    findCategories(userId),
+    getMonthTransactions(userId, year, month),
+    getMonthlyBudget(userId, year, month),
+    findAssets(userId),
+    findLiabilities(userId),
+  ])
+
+  const summary = buildMonthlySummary(categories, transactions, {
+    year,
+    month,
+    totalIncome: budget?.totalIncome ?? 0,
+    pillarConfig: budget?.pillarConfig ?? DEFAULT_PILLAR_CONFIG,
+    overrides: budget?.categoryOverrides,
+  })
+
+  return {
+    liquidAssets: liquidAssets(assets),
+    existingMonthlyDebt: liabilities
+      .filter((item) => item.remainingAmount > 0)
+      .reduce((sum, item) => sum + item.monthlyPayment, 0),
+    monthlyIncome: summary.totalIncome,
+    monthlyExpenses: summary.totalUsed - summary.totalSaved,
+    remainingBudget: Math.max(0, summary.totalBudget - summary.totalUsed),
+  }
 }
 
 export async function createTransaction(userId: string, dto: CreateTransactionDTO): Promise<void> {

@@ -5,8 +5,16 @@ vi.mock('@/shared/lib/firebase-admin', () => ({
   getAdminDb: () => getAdminDb(),
 }))
 
-const { findLinkByExternalId, consumeLinkCode, deleteLink, getPending, createTransaction } =
-  await import('./admin-data')
+const {
+  findLinkByExternalId,
+  consumeLinkCode,
+  deleteLink,
+  getPending,
+  createTransaction,
+  addGoalContribution,
+  getYearBudgets,
+  getFinancialContextAdmin,
+} = await import('./admin-data')
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -180,6 +188,112 @@ describe('getPending', () => {
 
     expect(result).not.toBeNull()
     expect(del).not.toHaveBeenCalled()
+  })
+})
+
+describe('getPending — backward compatibility', () => {
+  it('treats a draft written before `pendingKind` existed as a category confirmation', async () => {
+    const get = vi.fn().mockResolvedValue({
+      exists: true,
+      data: () => ({
+        // No `pendingKind` field at all — the shape every draft had before this field existed.
+        draft: { amount: 1, description: null, dateIso: '2026-01-01' },
+        options: [{ categoryId: 'cat-food', name: 'Makan & Minum' }],
+        expiresAt: { toMillis: () => Date.now() + 10_000 },
+      }),
+    })
+    getAdminDb.mockReturnValue({ doc: vi.fn().mockReturnValue({ get, delete: vi.fn() }) })
+
+    const result = await getPending('user-1')
+    expect(result?.pendingKind).toBe('category_confirm')
+  })
+})
+
+describe('addGoalContribution', () => {
+  it('writes one contribution record and atomically increments the goal total, in a single batch', async () => {
+    const contributionDoc = { id: 'contrib-1' }
+    const goalRef = { id: 'goal-ref' }
+    const batchSet = vi.fn()
+    const batchUpdate = vi.fn()
+    const batchCommit = vi.fn().mockResolvedValue(undefined)
+
+    getAdminDb.mockReturnValue({
+      collection: vi.fn().mockReturnValue({ doc: vi.fn().mockReturnValue(contributionDoc) }),
+      doc: vi.fn().mockReturnValue(goalRef),
+      batch: vi.fn().mockReturnValue({ set: batchSet, update: batchUpdate, commit: batchCommit }),
+    })
+
+    await addGoalContribution('user-1', 'goal-1', 500_000)
+
+    expect(batchSet).toHaveBeenCalledWith(contributionDoc, expect.objectContaining({ goalId: 'goal-1', amount: 500_000 }))
+    expect(batchUpdate).toHaveBeenCalledTimes(1)
+    expect(batchUpdate.mock.calls[0][0]).toBe(goalRef)
+    expect(batchCommit).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('getYearBudgets', () => {
+  it('queries monthly_budgets by a "YYYY-01".."YYYY-12" document-id range', async () => {
+    const get = vi.fn().mockResolvedValue({ docs: [] })
+    const where = vi.fn()
+    const chain = { where, get }
+    where.mockReturnValue(chain)
+    const collection = vi.fn().mockReturnValue({ where })
+    getAdminDb.mockReturnValue({ collection })
+
+    await getYearBudgets('user-1', 2026)
+
+    expect(collection).toHaveBeenCalledWith('users/user-1/monthly_budgets')
+    expect(where).toHaveBeenCalledWith(expect.anything(), '>=', '2026-01')
+    expect(where).toHaveBeenCalledWith(expect.anything(), '<=', '2026-12')
+  })
+})
+
+describe('getFinancialContextAdmin', () => {
+  it('computes liquid assets and existing monthly debt from live reads, not a stored snapshot', async () => {
+    const emptyCollection = { get: vi.fn().mockResolvedValue({ docs: [] }) }
+    const collection = vi.fn((path: string) => {
+      if (path === 'users/user-1/assets') {
+        return { get: vi.fn().mockResolvedValue({ docs: [{ id: 'a1', data: () => ({ type: 'savings', value: 20_000_000 }) }] }) }
+      }
+      if (path === 'users/user-1/liabilities') {
+        return {
+          get: vi.fn().mockResolvedValue({
+            docs: [{ id: 'l1', data: () => ({ remainingAmount: 4_000_000, monthlyPayment: 500_000 }) }],
+          }),
+        }
+      }
+      if (path === 'users/user-1/transactions') {
+        return { where: vi.fn().mockReturnThis(), get: vi.fn().mockResolvedValue({ docs: [] }) }
+      }
+      return emptyCollection // categories
+    })
+    const doc = vi.fn().mockReturnValue({ get: vi.fn().mockResolvedValue({ exists: false }) })
+    getAdminDb.mockReturnValue({ collection, doc })
+
+    const context = await getFinancialContextAdmin('user-1', 2026, 9)
+
+    expect(context.liquidAssets).toBe(20_000_000)
+    expect(context.existingMonthlyDebt).toBe(500_000)
+  })
+
+  it('excludes a paid-off liability (remainingAmount 0) from existing monthly debt', async () => {
+    const collection = vi.fn((path: string) => {
+      if (path === 'users/user-1/liabilities') {
+        return {
+          get: vi.fn().mockResolvedValue({
+            docs: [{ id: 'l1', data: () => ({ remainingAmount: 0, monthlyPayment: 500_000 }) }],
+          }),
+        }
+      }
+      if (path === 'users/user-1/transactions') return { where: vi.fn().mockReturnThis(), get: vi.fn().mockResolvedValue({ docs: [] }) }
+      return { get: vi.fn().mockResolvedValue({ docs: [] }) }
+    })
+    const doc = vi.fn().mockReturnValue({ get: vi.fn().mockResolvedValue({ exists: false }) })
+    getAdminDb.mockReturnValue({ collection, doc })
+
+    const context = await getFinancialContextAdmin('user-1', 2026, 9)
+    expect(context.existingMonthlyDebt).toBe(0)
   })
 })
 
