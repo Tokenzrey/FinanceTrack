@@ -1,0 +1,20 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Firebase Storage is legacy as of the Google Drive migration (see
+    // implementation_add_feature.md). New receipts and exports go to the user's own
+    // Google Drive via the Drive REST API, not here. This rule stays in place only so
+    // pre-migration receipts already sitting under `receipts/` and `receipt_scans/`
+    // remain reachable — it protects no active upload path for those two prefixes.
+    //
+    // `avatars/` has never had an upload feature built against it. The rule is left
+    // harmless (still scoped to the owning uid, same size cap) rather than removed
+    // outright, so adding that feature later needs no rules change — but until then,
+    // nothing writes here.
+    match /users/{userId}/{allPaths=**} {
+      allow read, write: if request.auth != null
+                         && request.auth.uid == userId
+                         && request.resource.size < 10 * 1024 * 1024;
+    }
+  }
+}
