@@ -2,8 +2,26 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     match /users/{userId}/{document=**} {
-      allow read, write: if request.auth != null
-                         && request.auth.uid == userId;
+      // `meta/botLinks` and `meta/botPending` are written only by the bot's Admin SDK
+      // path (which bypasses these rules entirely) — the client may read them to show
+      // link status in Settings, but must never write them directly, or a buggy/
+      // malicious client script could fake a "linked" state or inject a fake pending
+      // transaction draft.
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null
+                   && request.auth.uid == userId
+                   && !(document.size() == 2 && document[0] == 'meta'
+                        && (document[1] == 'botLinks' || document[1] == 'botPending'));
+    }
+
+    // Root collections used only by the bot's server-side (Admin SDK) code — never
+    // read or written by the client. Admin SDK access bypasses these rules, so this
+    // is a deny-all for every other caller.
+    match /bot_links/{linkId} {
+      allow read, write: if false;
+    }
+    match /bot_link_codes/{codeId} {
+      allow read, write: if false;
     }
   }
 }

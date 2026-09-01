@@ -24,6 +24,7 @@ milikmu sendiri, bukan di server pihak ketiga mana pun.
   - [4. Siapkan Google Cloud OAuth (untuk Google Drive)](#4-siapkan-google-cloud-oauth-untuk-google-drive)
   - [5. Ambil API key Gemini (untuk scan struk AI)](#5-ambil-api-key-gemini-untuk-scan-struk-ai)
   - [6. Isi `.env.local`](#6-isi-envlocal)
+  - [7. (Opsional) Siapkan Bot WhatsApp & Telegram](#7-opsional-siapkan-bot-whatsapp--telegram)
 - [Menjalankan Aplikasi](#menjalankan-aplikasi)
 - [Script yang Tersedia](#script-yang-tersedia)
 - [Testing](#testing)
@@ -88,6 +89,24 @@ milikmu sendiri, bukan di server pihak ketiga mana pun.
   foto ulang.
 - Riwayat semua struk yang pernah discan, dengan status (belum ditinjau/tersimpan/
   dibuang) dan skor keyakinan AI.
+
+### Bot WhatsApp & Telegram
+- Tautkan akun sekali dari Pengaturan (kode 6 karakter, berlaku 15 menit), lalu catat
+  transaksi langsung dari chat — gratis, tanpa biaya tambahan.
+- Kirim teks bahasa natural ("makan siang 35rb", "gaji masuk 5jt") — nominal, jenis
+  (pemasukan/pengeluaran), dan kategori terdeteksi otomatis; kalau ragu, bot menawarkan
+  pilihan kategori bernomor untuk dikonfirmasi.
+- **Kirim foto struk** — dibaca dengan mesin AI yang sama dengan Scan Struk di web, lalu
+  otomatis tersimpan ke folder Drive `FinTrack/Receipts` kalau akun Google Drive-mu
+  sudah tertaut (kalau belum, transaksi tetap tercatat, hanya tanpa lampiran foto).
+- Perintah baca cepat: `ringkasan` (ringkasan bulan ini), `sisa`/`saldo` (sisa anggaran
+  per pilar), `kategori` (daftar kategori aktif), `bantuan`.
+- Aturan bisnis yang sama persis dengan web ditegakkan di jalur bot: pilar selalu ikut
+  kategori (tidak pernah ditebak dari kata-kata di pesan), bulan yang sudah ditutup
+  menolak pencatatan baru, nominal nol/negatif ditolak.
+- Setup lengkap (gratis, ~3 menit Telegram / ~15 menit WhatsApp): lihat langkah 7 di
+  [Instalasi & Konfigurasi](#7-opsional-siapkan-bot-whatsapp--telegram) atau
+  [`implementation_bot_integration.md`](implementation_bot_integration.md).
 
 ### Transaksi Rutin (Recurring)
 - Buat aturan tagihan/pemasukan berulang: harian, mingguan, bulanan, atau tahunan.
@@ -157,6 +176,7 @@ milikmu sendiri, bukan di server pihak ketiga mana pun.
   dan akunmu tidak ikut terhapus. Butuh ketik kata konfirmasi sebelum benar-benar
   jalan.
 - Status tautan Google Drive (tautkan/putuskan) dengan info akun yang tertaut.
+- Status tautan bot WhatsApp & Telegram per platform (hubungkan/putuskan).
 - Indikator privasi data: transparan soal apa yang tersimpan di Firestore, apa yang di
   Google Drive-mu sendiri, dan apa yang cuma di browser.
 
@@ -194,14 +214,15 @@ src/
 ├── app/                      # Next.js App Router
 │   ├── (auth)/                # login, register, forgot-password, onboarding
 │   ├── (main)/                 # semua halaman di balik AuthGuard (dashboard, transaksi, dst.)
-│   ├── api/                   # route server: scan-receipt, market, auth/google-drive/*
+│   ├── api/                   # route server: scan-receipt, market, auth/google-drive/*, bot/*
 │   └── share/report/           # halaman publik tanpa auth — laporan yang dibagikan
 ├── modules/                  # satu folder per fitur/halaman (UI + komponen turunannya)
 │   ├── dashboard/ transactions/ receipt-scanner/ recurring/ goals/
 │   ├── wishlist/ net-worth/ history/ analytics/ reports/ master-data/ settings/
 ├── shared/
+│   ├── bot/                   # inti bot WhatsApp/Telegram: parser, orkestrator, adapter media
 │   ├── components/            # UI generik (shadcn primitives, layout, komponen finance)
-│   ├── hooks/                 # mis. useGoogleDrive
+│   ├── hooks/                 # mis. useGoogleDrive, useBotLink
 │   ├── lib/                   # helper murni: format, csv, month-lock, budget-math, dst.
 │   ├── repositories/          # interfaces/ + firestore/ (satu class per koleksi)
 │   ├── stores/                # Zustand stores
@@ -212,7 +233,10 @@ src/
 
 Firestore disusun per-pengguna: semua koleksi berada di bawah `users/{uid}/...`, dan
 satu aturan keamanan (`request.auth.uid == userId`) mencakup seluruh pohon data —
-lihat `firestore.rules`.
+lihat `firestore.rules`. Dua koleksi root tambahan, `bot_links` dan `bot_link_codes`,
+menyimpan pemetaan chat bot ↔ pengguna (perlu dicari dari sisi chat, bukan dari sisi
+pengguna, jadi tidak muat di pola `users/{uid}/...`) — keduanya deny-all untuk client,
+hanya bisa diakses lewat Firebase Admin SDK di jalur bot.
 
 ---
 
@@ -299,6 +323,9 @@ cp .env.example .env.local
 | `TOKEN_ENCRYPTION_KEY` | Opsional* | **Wajib** kalau pakai Google Drive — 64 karakter hex, generate dengan perintah di bawah |
 | `GOLD_API_KEY` | Opsional | Widget harga emas di Market Pulse |
 | `NEXT_PUBLIC_BI_RATE_OVERRIDE` dkk. | Opsional | Override manual nilai referensi Market Pulse (BI Rate/inflasi/SBN) — lihat komentar di `.env.example` |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` | Opsional | **Wajib** untuk bot Telegram — lihat langkah 7 |
+| `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `META_APP_SECRET`, `META_VERIFY_TOKEN` | Opsional | **Wajib** untuk bot WhatsApp — lihat langkah 7 |
+| `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` | Opsional | **Wajib** untuk bot WhatsApp/Telegram (Admin SDK) — lihat catatan arsitektur & langkah 7 di bawah |
 
 Generate `TOKEN_ENCRYPTION_KEY` (dipakai mengenkripsi refresh token Drive di database,
 bukan sekali pakai/tidak boleh dibagikan):
@@ -307,14 +334,50 @@ bukan sekali pakai/tidak boleh dibagikan):
 node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
-> **Catatan arsitektur:** aplikasi ini **tidak memakai Firebase Admin SDK** — tidak
-> perlu men-download file service-account credential sama sekali. Token ID Firebase
-> diverifikasi langsung di server terhadap kunci publik JWKS Google (`jose`), dan
-> penautan Google Drive dilakukan lewat OAuth authorization-code flow yang menghasilkan
-> refresh token, dienkripsi (AES-256-GCM) sebelum disimpan di Firestore lewat REST API
-> dengan token milik pengguna sendiri sebagai kredensial. Kalau kamu pernah diarahkan
-> untuk mengisi `FIREBASE_PRIVATE_KEY`/`FIREBASE_CLIENT_EMAIL` — itu tidak dipakai di
-> sini dan aman diabaikan.
+> **Catatan arsitektur:** untuk **seluruh alur lewat browser** (login, transaksi, scan
+> struk, tautan Google Drive, dll.), aplikasi ini **tidak memakai Firebase Admin SDK** —
+> token ID Firebase diverifikasi langsung di server terhadap kunci publik JWKS Google
+> (`jose`), dan penautan Google Drive dilakukan lewat OAuth authorization-code flow yang
+> menghasilkan refresh token, dienkripsi (AES-256-GCM) sebelum disimpan di Firestore
+> lewat REST API dengan token milik pengguna sendiri sebagai kredensial. Kalau kamu
+> tidak memakai fitur bot WhatsApp/Telegram, `FIREBASE_PRIVATE_KEY`/`FIREBASE_CLIENT_EMAIL`/
+> `FIREBASE_PROJECT_ID` tidak dipakai dan aman dibiarkan kosong.
+>
+> Satu pengecualian sengaja: webhook bot (langkah 7) tidak punya sesi browser/token ID
+> untuk dibawa, jadi jalur itu — dan **hanya** jalur itu — memakai Firebase Admin SDK
+> (`src/shared/bot/admin-data.ts`) dengan service-account key sendiri. Semua jalur lain
+> di aplikasi ini tidak berubah dan tetap seperti di atas.
+
+---
+
+### 7. (Opsional) Siapkan Bot WhatsApp & Telegram
+
+Catat transaksi langsung dari chat — kirim teks ("makan siang 35rb") atau foto struk ke
+bot yang sudah ditautkan lewat Pengaturan → Bot WhatsApp & Telegram. Sepenuhnya opsional
+dan gratis (tanpa biaya tambahan apa pun); lewati langkah ini kalau tidak butuh.
+
+Ringkasan (panduan lengkap ada di [`implementation_bot_integration.md`](implementation_bot_integration.md)):
+
+1. **Telegram** (~3 menit): chat `@BotFather` → `/newbot` → salin token → isi
+   `TELEGRAM_BOT_TOKEN` + `TELEGRAM_WEBHOOK_SECRET` (bebas, acak) → deploy → daftarkan
+   webhook lewat `setWebhook` (lihat dokumen di atas untuk perintah `curl`-nya).
+2. **WhatsApp** (~15 menit): [developers.facebook.com](https://developers.facebook.com) →
+   buat app tipe Business → **Test Business Account** (tanpa verifikasi bisnis, gratis,
+   maks. 5 nomor penerima) → tambah produk WhatsApp → salin **Phone Number ID** →
+   buat **token System User permanen** (bukan token di halaman API Setup — itu
+   kedaluwarsa < 24 jam) → salin **App Secret** → isi
+   `WHATSAPP_ACCESS_TOKEN`/`WHATSAPP_PHONE_NUMBER_ID`/`META_APP_SECRET`/`META_VERIFY_TOKEN`
+   → deploy → daftarkan webhook di dashboard Meta (Callback URL + Verify token, lalu
+   subscribe ke field `messages`).
+3. **Firebase Admin SDK**: Firebase Console → Project settings → Service accounts →
+   Generate new private key → isi `FIREBASE_PROJECT_ID`/`FIREBASE_CLIENT_EMAIL`/
+   `FIREBASE_PRIVATE_KEY` (simpan `\n` yang ter-escape apa adanya, jangan diubah jadi
+   baris baru sungguhan). **Kalau kamu pernah membocorkan service-account key lama,
+   generate yang baru dan cabut yang lama dari Firebase Console dulu.**
+4. Isi semua variabel di atas juga di **Vercel → Project Settings → Environment
+   Variables** (tidak satu pun boleh berawalan `NEXT_PUBLIC_`).
+5. Dari FinanceTrack → Pengaturan → **Bot WhatsApp & Telegram** → Hubungkan → kirim kode
+   yang muncul ke bot Telegram/WhatsApp-mu.
 
 ---
 
@@ -349,12 +412,15 @@ npm run test
 
 Test mencakup logika bisnis murni di `use-cases` dan `lib` (perhitungan anggaran,
 penguncian bulan, generate transaksi rutin, skor efisiensi, dll.) memakai Vitest +
-Testing Library, dengan repository di-mock — tidak menyentuh Firestore sungguhan.
+Testing Library, dengan repository di-mock — tidak menyentuh Firestore sungguhan. Inti
+bot (`src/shared/bot/*.test.ts`) dan webhook-nya (`src/app/api/bot/webhook-auth.test.ts`)
+diuji dengan pola yang sama: Admin SDK, Gemini, dan Google Drive semua di-mock, jadi
+test-nya tidak pernah memanggil layanan sungguhan atau butuh kredensial nyata.
 
 ## Deploy ke Produksi
 
 Cara termudah: [Vercel](https://vercel.com) (pembuat Next.js) — repo ini sudah diuji
-untuk itu: build produksi bersih (typecheck + lint + 206 test + `next build`) baik
+untuk itu: build produksi bersih (typecheck + lint + seluruh test + `next build`) baik
 dengan env var lengkap maupun **kosong sama sekali** (build tidak pernah gagal hanya
 karena env belum diisi — halaman yang butuh Firebase/Drive/Gemini cukup menampilkan
 pesan "belum dikonfigurasi", bukan crash), satu `pnpm-lock.yaml` tanpa lockfile lain
@@ -378,7 +444,10 @@ yang bentrok (Vercel otomatis mendeteksi & memakai pnpm), dan tidak ada pemakaia
    `/api/ai/scan-receipt` (di kode diset `maxDuration = 60` detik, karena scan struk
    memanggil Gemini dua kali dengan satu retry) — paket/pengaturan Vercel-mu perlu
    benar-benar mengizinkan durasi itu, kalau tidak permintaan scan yang lambat bisa
-   terpotong sebelum selesai di production walau lancar di lokal.
+   terpotong sebelum selesai di production walau lancar di lokal. `/api/bot/telegram`
+   dan `/api/bot/whatsapp` diset `maxDuration = 30` detik dengan alasan sama (foto struk
+   lewat bot juga memanggil Gemini, lalu mengunggah ke Drive) — kalau pakai fitur bot,
+   berlaku pertimbangan yang sama.
 
 `package.json` sudah menyertakan `"packageManager"` (pin versi pnpm persis) dan
 `"engines"` (rentang Node minimum) supaya instalasi di Vercel deterministik dan tidak
@@ -400,6 +469,14 @@ diam-diam memakai versi Node yang berbeda dari yang diuji.
   respons lewat `middleware.ts`.
 - Refresh token Google Drive dienkripsi (AES-256-GCM) sebelum disimpan — lihat
   `TOKEN_ENCRYPTION_KEY` di atas.
+- **Bot WhatsApp/Telegram:** kode tautan sekali pakai, kedaluwarsa 15 menit, dikonsumsi
+  di satu transaksi Firestore (tidak mungkin dipakai dua chat sekaligus). Setiap webhook
+  diverifikasi sebelum diproses — Telegram lewat header rahasia
+  (`X-Telegram-Bot-Api-Secret-Token`), WhatsApp lewat tanda tangan HMAC atas raw body
+  (`X-Hub-Signature-256`, dibandingkan dengan `crypto.timingSafeEqual`). Koleksi
+  `bot_links`/`bot_link_codes` dan dokumen internal (`meta/botLinks`, `meta/botPending`)
+  ditolak untuk ditulis client secara langsung di `firestore.rules` — hanya bisa diubah
+  lewat Firebase Admin SDK di jalur bot sendiri.
 
 ## SEO
 

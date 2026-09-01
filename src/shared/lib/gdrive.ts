@@ -142,6 +142,18 @@ export async function getOrCreateFinTrackFolders(accessToken: string): Promise<D
 }
 
 /**
+ * Every prior caller of `uploadFileToGDrive` ran in the browser, where
+ * `globalThis.crypto` is always present. The bot's `drive-upload.ts` is the first
+ * caller running this in a Node.js server runtime, where the global Web Crypto API is
+ * only guaranteed on newer Node versions — this only needs a unique-enough boundary
+ * string, not cryptographic randomness, so a fallback is cheap and safe.
+ */
+function uploadBoundary(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID()
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
+}
+
+/**
  * Multipart upload: one request carrying both the metadata and the bytes.
  *
  * Drive's multipart format needs a hand-built body — the browser's FormData picks its
@@ -153,7 +165,7 @@ export async function uploadFileToGDrive(
   folderId: string,
   accessToken: string,
 ): Promise<DriveFile> {
-  const boundary = `fintrack-${crypto.randomUUID()}`
+  const boundary = `fintrack-${uploadBoundary()}`
   const metadata = { name: fileName, parents: [folderId] }
 
   const body = new Blob([

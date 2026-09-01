@@ -16,6 +16,7 @@ import {
   Lock,
   LockOpen,
   Mail,
+  MessageCircle,
   Monitor,
   Moon,
   Sun,
@@ -47,6 +48,8 @@ import { fireConfetti } from '@/shared/lib/confetti'
 import { requestNotificationPermission } from '@/shared/lib/notifications'
 import { authErrorMessage } from '@/shared/lib/auth-errors'
 import { useGoogleDrive, isGoogleDriveConfigured } from '@/shared/hooks/useGoogleDrive'
+import { useBotLink } from '@/shared/hooks/useBotLink'
+import type { BotPlatform } from '@/shared/bot/types'
 import {
   changeEmailSchema,
   changePasswordSchema,
@@ -89,6 +92,16 @@ export function SettingsPage() {
   } = useGoogleDrive()
   const [unlinking, setUnlinking] = useState(false)
   const [confirmUnlinkDrive, setConfirmUnlinkDrive] = useState(false)
+
+  const {
+    status: botLinkStatus,
+    creating: botCreatingCode,
+    unlinking: botUnlinking,
+    createCode: createBotCode,
+    unlink: unlinkBot,
+  } = useBotLink(userId)
+  const [botLinkCode, setBotLinkCode] = useState<{ code: string; expiresAt: Date } | null>(null)
+  const [botLinkSecondsLeft, setBotLinkSecondsLeft] = useState(0)
 
   const [passwordDialogOpen, setPasswordDialogOpen] = useState(false)
   const [emailDialogOpen, setEmailDialogOpen] = useState(false)
@@ -133,6 +146,32 @@ export function SettingsPage() {
     if (!userId || !isGoogleDriveConfigured) return
     void checkLinkStatus()
   }, [userId, checkLinkStatus])
+
+  useEffect(() => {
+    if (!botLinkCode) return
+    const tick = () =>
+      setBotLinkSecondsLeft(Math.max(0, Math.round((botLinkCode.expiresAt.getTime() - Date.now()) / 1000)))
+    tick()
+    const interval = setInterval(tick, 1000)
+    return () => clearInterval(interval)
+  }, [botLinkCode])
+
+  const handleCreateBotCode = async () => {
+    try {
+      setBotLinkCode(await createBotCode())
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Gagal membuat kode.')
+    }
+  }
+
+  const handleUnlinkBot = async (platform: BotPlatform) => {
+    try {
+      await unlinkBot(platform)
+      toast.success('Tautan bot diputus.')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Gagal memutuskan tautan.')
+    }
+  }
 
   const handleLinkDrive = async () => {
     try {
@@ -363,6 +402,86 @@ export function SettingsPage() {
               </Button>
             </div>
           )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <MessageCircle className="size-4" aria-hidden />
+            Bot WhatsApp &amp; Telegram
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            Catat transaksi langsung dari chat — kirim teks (&ldquo;makan siang 35rb&rdquo;) atau foto
+            struk ke bot yang sudah tertaut.
+          </p>
+
+          {(['telegram', 'whatsapp'] as const).map((platform) => {
+            const entry = botLinkStatus[platform]
+            const label = platform === 'telegram' ? 'Telegram' : 'WhatsApp'
+            return (
+              <div
+                key={platform}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">{label}</p>
+                  <p className={cn('truncate text-xs', entry ? 'text-safe' : 'text-muted-foreground')}>
+                    {entry ? (entry.displayName ?? 'Tertaut') : 'Belum tertaut'}
+                  </p>
+                </div>
+                {entry ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0 gap-2"
+                    disabled={botUnlinking === platform}
+                    onClick={() => void handleUnlinkBot(platform)}
+                  >
+                    {botUnlinking === platform ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <Unlink className="size-3.5" aria-hidden />
+                    )}
+                    Putuskan
+                  </Button>
+                ) : null}
+              </div>
+            )
+          })}
+
+          {botLinkCode ? (
+            <div className="space-y-2 rounded-lg border bg-muted/40 p-3">
+              <p className="text-xs text-muted-foreground">
+                Kirim kode ini ke chat bot Telegram atau WhatsApp kamu untuk menautkan:
+              </p>
+              <p className="text-center font-mono text-2xl font-semibold tracking-widest">
+                {botLinkCode.code}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {botLinkSecondsLeft > 0
+                  ? `Berlaku ${botLinkSecondsLeft}s lagi.`
+                  : 'Sudah kedaluwarsa — buat kode baru.'}
+              </p>
+            </div>
+          ) : null}
+
+          <Button
+            size="sm"
+            variant="secondary"
+            className="gap-2"
+            disabled={botCreatingCode}
+            onClick={() => void handleCreateBotCode()}
+          >
+            {botCreatingCode ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Link2 className="size-3.5" aria-hidden />
+            )}
+            {botLinkCode ? 'Buat kode baru' : 'Hubungkan'}
+          </Button>
         </CardContent>
       </Card>
 
