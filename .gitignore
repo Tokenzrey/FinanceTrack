@@ -45,3 +45,4 @@ next-env.d.ts
 # markdown
 implementation_*.md
 KNOWN_ISSUES.md
+BOT_*.md
