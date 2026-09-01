@@ -1,7 +1,13 @@
 import type { Metadata } from 'next'
 import { LegalList, LegalSection, LegalTitle } from '../_components/LegalContent'
 
-export const metadata: Metadata = { title: 'Kebijakan Privasi' }
+export const metadata: Metadata = {
+  title: 'Kebijakan Privasi',
+  description:
+    'Data apa yang FinTrack kumpulkan, di mana data itu disimpan (Firestore dan Google Drive milikmu sendiri), dan hak apa yang kamu miliki atasnya.',
+  alternates: { canonical: '/privacy' },
+  openGraph: { title: 'Kebijakan Privasi FinTrack', url: '/privacy' },
+}
 
 export default function PrivacyPage() {
   return (

@@ -29,6 +29,7 @@ milikmu sendiri, bukan di server pihak ketiga mana pun.
 - [Testing](#testing)
 - [Deploy ke Produksi](#deploy-ke-produksi)
 - [Keamanan & Privasi Data](#keamanan--privasi-data)
+- [SEO](#seo)
 - [PWA (Instal ke Layar Utama)](#pwa-instal-ke-layar-utama)
 - [Status Pengembangan](#status-pengembangan)
 
@@ -285,6 +286,7 @@ cp .env.example .env.local
 
 | Variabel | Wajib? | Keterangan |
 |---|---|---|
+| `NEXT_PUBLIC_APP_URL` | Opsional | Domain produksi (tanpa trailing slash) — dipakai `sitemap.xml`, `robots.txt`, dan tag OpenGraph/canonical. Tanpa ini, otomatis memakai URL deployment Vercel, lalu localhost |
 | `NEXT_PUBLIC_FIREBASE_API_KEY` | Ya | Dari konfigurasi web app Firebase (langkah 2) |
 | `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN` | Ya | idem |
 | `NEXT_PUBLIC_FIREBASE_PROJECT_ID` | Ya | idem |
@@ -398,6 +400,26 @@ diam-diam memakai versi Node yang berbeda dari yang diuji.
   respons lewat `middleware.ts`.
 - Refresh token Google Drive dienkripsi (AES-256-GCM) sebelum disimpan — lihat
   `TOKEN_ENCRYPTION_KEY` di atas.
+
+## SEO
+
+Dibangun murni dengan tooling bawaan Next.js (App Router file conventions) — tidak ada
+dependency tambahan:
+
+| Bagian | Implementasi |
+|---|---|
+| `sitemap.xml` | `src/app/sitemap.ts` — hanya halaman publik yang benar-benar terindeks (`/login`, `/register`, `/about`, `/privacy`, `/terms`). Halaman `(main)/*` (butuh login), `/forgot-password`, `/onboarding`, dan `/share/report` (dinamis per-pengguna) sengaja tidak dimasukkan. |
+| `robots.txt` | `src/app/robots.ts` — mengizinkan halaman publik, memblokir seluruh rute berbasis akun dan `/api/*` (tidak ada gunanya di-crawl tanpa sesi login). |
+| Metadata per halaman | Judul, deskripsi, dan `alternates.canonical` unik di tiap halaman publik. `/login` dan `/register` dipecah jadi server page (metadata) + client view (form interaktif) karena Next.js tidak mengizinkan `export const metadata` dari Client Component. |
+| OpenGraph & Twitter Card | `src/app/opengraph-image.tsx` — gambar share otomatis (`next/og`, tanpa aset gambar manual), dipakai semua halaman kecuali yang override sendiri. |
+| Structured data | Skema `WebApplication` (JSON-LD) di halaman `/about` — hanya field yang benar-benar akurat, tanpa rating/organisasi palsu. |
+| `noindex` selektif | `/share/report` (laporan yang dibagikan) ditandai `noindex` di metadata-nya sendiri — tautan itu sekali pakai per pengguna, tidak untuk muncul di hasil pencarian siapa pun. |
+| `metadataBase` | `src/shared/lib/site.ts` — pakai `NEXT_PUBLIC_APP_URL`, jatuh ke URL deployment Vercel otomatis kalau belum diisi. |
+
+Root `/` sendiri redirect langsung ke `/login` (bukan `/dashboard`) — pengguna yang
+sudah masuk tetap otomatis diteruskan lagi ke dashboard dari halaman login, tapi
+pengunjung baru/crawler mendarat di konten yang benar-benar bisa diindeks dalam satu
+langkah, bukan memantul lewat shell halaman yang butuh login.
 
 ## PWA (Instal ke Layar Utama)
 

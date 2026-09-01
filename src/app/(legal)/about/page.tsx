@@ -1,11 +1,42 @@
 import type { Metadata } from 'next'
 import { LegalList, LegalSection, LegalTitle } from '../_components/LegalContent'
+import { SITE_URL } from '@/shared/lib/site'
 
-export const metadata: Metadata = { title: 'Tentang' }
+/**
+ * `WebApplication` structured data — only fields that are actually true (no fake
+ * ratings, no fabricated organization/address). `offers.price: '0'` is honest: there
+ * is no billing or subscription anywhere in this app.
+ */
+const JSON_LD = {
+  '@context': 'https://schema.org',
+  '@type': 'WebApplication',
+  name: 'FinTrack',
+  url: SITE_URL,
+  description:
+    'Aplikasi pencatat dan perencana keuangan pribadi untuk pengguna Indonesia — anggaran tiga pilar, scan struk AI, target tabungan, dan laporan, dalam Rupiah.',
+  applicationCategory: 'FinanceApplication',
+  operatingSystem: 'Web',
+  inLanguage: 'id-ID',
+  offers: { '@type': 'Offer', price: '0', priceCurrency: 'IDR' },
+}
+
+export const metadata: Metadata = {
+  title: 'Tentang',
+  description:
+    'FinTrack — aplikasi pencatat dan perencana keuangan pribadi untuk pengguna Indonesia. Anggaran tiga pilar, scan struk AI, target tabungan, dan laporan, dalam Rupiah.',
+  alternates: { canonical: '/about' },
+  openGraph: { title: 'Tentang FinTrack', url: '/about' },
+}
 
 export default function AboutPage() {
   return (
     <article>
+      {/* eslint-disable-next-line react/no-danger */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(JSON_LD) }}
+      />
+
       <LegalTitle updatedAt="1 September 2026">Tentang FinTrack</LegalTitle>
 
       <LegalSection title="Apa itu FinTrack?">

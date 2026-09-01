@@ -1,7 +1,13 @@
 import type { Metadata } from 'next'
 import { LegalList, LegalSection, LegalTitle } from '../_components/LegalContent'
 
-export const metadata: Metadata = { title: 'Syarat & Ketentuan' }
+export const metadata: Metadata = {
+  title: 'Syarat & Ketentuan',
+  description:
+    'Syarat penggunaan FinTrack — deskripsi layanan, batasan tanggung jawab, dan penegasan bahwa fitur di aplikasi ini bukan nasihat keuangan profesional.',
+  alternates: { canonical: '/terms' },
+  openGraph: { title: 'Syarat & Ketentuan FinTrack', url: '/terms' },
+}
 
 export default function TermsPage() {
   return (

@@ -26,6 +26,10 @@ export function generateMetadata({ searchParams }: PageProps): Metadata {
     title: payload
       ? `Laporan ${formatMonthLong(payload.year, payload.month)}`
       : 'Laporan tidak ditemukan',
+    // Ephemeral, per-user, zero aggregate search value — and each link, unmodified,
+    // is a specific person's income/spending summary. Also disallowed in robots.ts;
+    // this is the authoritative signal, robots.txt is just crawl-budget hygiene.
+    robots: { index: false, follow: false },
   }
 }
 
