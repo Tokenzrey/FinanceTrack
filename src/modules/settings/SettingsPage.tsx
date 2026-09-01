@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import Link from 'next/link'
 import { useTheme } from 'next-themes'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -544,6 +545,23 @@ export function SettingsPage() {
             <strong className="text-foreground">Browser (perangkat ini saja):</strong> tema, status
             sidebar, dan cache offline Firestore — tidak pernah terkirim ke mana pun.
           </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Tentang aplikasi</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-x-4 gap-y-2 text-sm">
+          <Link href="/about" className="text-primary hover:underline">
+            Tentang FinTrack
+          </Link>
+          <Link href="/privacy" className="text-primary hover:underline">
+            Kebijakan Privasi
+          </Link>
+          <Link href="/terms" className="text-primary hover:underline">
+            Syarat &amp; Ketentuan
+          </Link>
         </CardContent>
       </Card>
 

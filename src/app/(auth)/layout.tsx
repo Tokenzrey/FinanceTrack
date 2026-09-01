@@ -1,3 +1,4 @@
+import Link from 'next/link'
 import { Wallet } from 'lucide-react'
 import { ThemeToggle } from '@/shared/components/layout/TopBar'
 
@@ -22,6 +23,18 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           <h1 className="font-display text-2xl font-bold">FinTrack</h1>
         </div>
         {children}
+
+        <nav className="flex justify-center gap-4 text-xs text-muted-foreground">
+          <Link href="/about" className="hover:text-foreground">
+            Tentang
+          </Link>
+          <Link href="/privacy" className="hover:text-foreground">
+            Kebijakan Privasi
+          </Link>
+          <Link href="/terms" className="hover:text-foreground">
+            Syarat &amp; Ketentuan
+          </Link>
+        </nav>
       </div>
     </div>
   )
