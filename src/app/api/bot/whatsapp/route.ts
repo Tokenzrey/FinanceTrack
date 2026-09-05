@@ -7,42 +7,31 @@ import type { BotIncoming, BotReply } from '@/shared/bot/types'
 export const runtime = 'nodejs'
 export const maxDuration = 30
 
-interface WhatsAppMessage {
+interface GowaMessage {
+  id: string
+  chat_id: string
   from: string
-  type: string
-  text?: { body: string }
-  image?: { id: string; caption?: string }
+  from_name?: string
+  timestamp: string
+  is_from_me: boolean
+  body: string
+  image?: { path?: string; url?: string; caption?: string } | string
 }
 
-interface WhatsAppWebhookBody {
-  entry?: {
-    changes?: {
-      value?: {
-        messages?: WhatsAppMessage[]
-      }
-    }[]
-  }[]
+interface GowaWebhookBody {
+  event: string
+  device_id: string
+  payload?: GowaMessage
 }
 
 /**
- * Meta's verification handshake, required once to register the webhook URL in the
- * developer console. Echoes `hub.challenge` back only if `hub.verify_token` matches.
+ * GOWA (go-whatsapp-web-multidevice) — self-hosted WhatsApp bridge, not the WhatsApp
+ * Cloud API. No handshake to serve: unlike Meta, GOWA doesn't require a `GET`
+ * challenge/response before it will send webhooks (configured directly in its own
+ * `src/.env`, see BOT_SETUP_CHECKLIST.md) — this route is `POST`-only.
  */
-export async function GET(request: NextRequest): Promise<NextResponse> {
-  const { searchParams } = new URL(request.url)
-  const mode = searchParams.get('hub.mode')
-  const token = searchParams.get('hub.verify_token')
-  const challenge = searchParams.get('hub.challenge')
-  const verifyToken = process.env.META_VERIFY_TOKEN
-
-  if (mode === 'subscribe' && verifyToken && token === verifyToken && challenge) {
-    return new NextResponse(challenge, { status: 200 })
-  }
-  return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
-}
-
 function verifySignature(rawBody: string, signatureHeader: string | null): boolean {
-  const secret = process.env.META_APP_SECRET
+  const secret = process.env.WHATSAPP_WEBHOOK_SECRET
   if (!secret || !signatureHeader) return false
 
   const expected = createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex')
@@ -58,8 +47,8 @@ function verifySignature(rawBody: string, signatureHeader: string | null): boole
 
 /**
  * WhatsApp has no HTML/inline-keyboard support, so a `BotReply` is downgraded here,
- * once, in the one place that actually sends to Graph API — `core.ts`/`replies.ts`
- * stay platform-agnostic.
+ * once, in the one place that actually sends via GOWA — `core.ts`/`replies.ts` stay
+ * platform-agnostic.
  *
  * A keyboard whose every value is either a bare number or `"batal"` (the
  * category-confirm and goal-contribution flows) renders as a plain numbered list —
@@ -94,56 +83,75 @@ function renderForWhatsApp(reply: BotReply): string {
   return text
 }
 
-async function sendMessage(to: string, reply: BotReply): Promise<void> {
-  const token = process.env.WHATSAPP_ACCESS_TOKEN
-  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID
-  if (!token || !phoneNumberId) return
+async function sendMessage(chatId: string, reply: BotReply): Promise<void> {
+  const baseUrl = process.env.GOWA_BASE_URL
+  const user = process.env.GOWA_BASIC_AUTH_USER
+  const password = process.env.GOWA_BASIC_AUTH_PASSWORD
+  if (!baseUrl || !user || !password) return
   try {
-    await fetch(`https://graph.facebook.com/v22.0/${phoneNumberId}/messages`, {
+    const authHeader = `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`
+    await fetch(`${baseUrl}/send/message`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body: renderForWhatsApp(reply) } }),
+      headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: chatId, message: renderForWhatsApp(reply) }),
     })
   } catch (error) {
-    console.error('whatsapp sendMessage error:', error)
+    console.error('whatsapp (gowa) sendMessage error:', error)
   }
 }
 
-async function processMessage(message: WhatsAppMessage): Promise<void> {
+/** `bot_links`/`externalId` stay plain digits (matching Telegram's convention) — the
+ *  full JID (with `@s.whatsapp.net`/`@g.us`) is kept separately for replying, since
+ *  that's the format GOWA's `phone` field expects. */
+function stripJidSuffix(jid: string): string {
+  return jid.replace(/@(s\.whatsapp\.net|g\.us)$/, '')
+}
+
+function imageCaption(image: GowaMessage['image']): string | undefined {
+  return typeof image === 'object' ? image.caption : undefined
+}
+
+async function processMessage(payload: GowaMessage): Promise<void> {
+  if (!payload.chat_id) return
+  const externalId = stripJidSuffix(payload.chat_id)
+
   try {
     let incoming: BotIncoming | null = null
 
-    if (message.type === 'image' && message.image?.id) {
-      const image = await downloadWhatsAppMedia(message.image.id)
+    if (payload.image) {
+      const image = await downloadWhatsAppMedia(payload.id)
       incoming = {
         platform: 'whatsapp',
-        externalId: message.from,
+        externalId,
         kind: 'image',
         imageBase64: image.base64,
         mimeType: image.mimeType,
-        caption: message.image.caption,
+        caption: imageCaption(payload.image),
       }
-    } else if (message.type === 'text' && message.text?.body) {
-      incoming = { platform: 'whatsapp', externalId: message.from, kind: 'text', text: message.text.body }
+    } else if (payload.body) {
+      incoming = { platform: 'whatsapp', externalId, kind: 'text', text: payload.body }
     }
 
     if (incoming) {
       const reply = await handleIncoming(incoming)
-      await sendMessage(message.from, reply)
+      await sendMessage(payload.chat_id, reply)
     }
   } catch (error) {
-    console.error('whatsapp webhook message error:', error)
-    await sendMessage(message.from, { text: 'Ada masalah di sisi kami — coba lagi sebentar lagi.' })
+    console.error('whatsapp (gowa) webhook message error:', error)
+    await sendMessage(payload.chat_id, { text: 'Ada masalah di sisi kami — coba lagi sebentar lagi.' })
   }
 }
 
 /**
- * WhatsApp webhook. Signature is verified over the exact raw bytes Meta signed —
+ * GOWA webhook. Signature is verified over the exact raw bytes GOWA signed —
  * `request.text()`, never `.json()` then re-stringified, which would produce
- * different bytes and never match. `value.statuses` (sent/delivered/read receipts)
- * has no `messages` array and is silently skipped, same as any other update with no
- * user message in it. Always responds 200 once past auth, for the same retry reason
- * as the Telegram adapter.
+ * different bytes and never match. Only `event: "message"` is processed — GOWA also
+ * forwards `message.ack`, reactions, receipts, etc. to the same URL if configured to
+ * (see `WHATSAPP_WEBHOOK_EVENTS` in BOT_SETUP_CHECKLIST.md), and those are not user
+ * messages. `payload.is_from_me` filters out echoes of the bot's own outbound sends —
+ * GOWA reports those on the same webhook since they originate from the linked device.
+ * Always responds 200 once past auth, for the same reason as the Telegram adapter:
+ * failures are reported to the user as a chat message, never as an HTTP status.
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const rawBody = await request.text()
@@ -152,19 +160,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
-  let body: WhatsAppWebhookBody
+  let body: GowaWebhookBody
   try {
-    body = JSON.parse(rawBody) as WhatsAppWebhookBody
+    body = JSON.parse(rawBody) as GowaWebhookBody
   } catch {
     return NextResponse.json({ ok: true })
   }
 
-  const messages = (body.entry ?? []).flatMap((entry) =>
-    (entry.changes ?? []).flatMap((change) => change.value?.messages ?? []),
-  )
-
-  for (const message of messages) {
-    await processMessage(message)
+  if (body.event === 'message' && body.payload && !body.payload.is_from_me) {
+    await processMessage(body.payload)
   }
 
   return NextResponse.json({ ok: true })

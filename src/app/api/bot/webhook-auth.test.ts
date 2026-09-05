@@ -12,7 +12,7 @@ vi.mock('@/shared/bot/core', () => ({
 }))
 
 const { POST: telegramPost } = await import('./telegram/route')
-const { GET: whatsappGet, POST: whatsappPost } = await import('./whatsapp/route')
+const { POST: whatsappPost } = await import('./whatsapp/route')
 
 const originalEnv = { ...process.env }
 
@@ -23,10 +23,10 @@ beforeEach(() => {
 
   process.env.TELEGRAM_WEBHOOK_SECRET = 'tg-secret'
   process.env.TELEGRAM_BOT_TOKEN = 'tg-token'
-  process.env.META_APP_SECRET = 'meta-secret'
-  process.env.META_VERIFY_TOKEN = 'verify-me'
-  process.env.WHATSAPP_ACCESS_TOKEN = 'wa-token'
-  process.env.WHATSAPP_PHONE_NUMBER_ID = 'phone-1'
+  process.env.WHATSAPP_WEBHOOK_SECRET = 'gowa-secret'
+  process.env.GOWA_BASE_URL = 'https://gowa.example.com'
+  process.env.GOWA_BASIC_AUTH_USER = 'admin'
+  process.env.GOWA_BASIC_AUTH_PASSWORD = 'pw'
 })
 
 afterEach(() => {
@@ -64,68 +64,81 @@ describe('Telegram webhook — X-Telegram-Bot-Api-Secret-Token', () => {
   })
 })
 
-describe('WhatsApp webhook — GET handshake', () => {
-  const base = 'https://example.com/api/bot/whatsapp'
-
-  it('echoes hub.challenge when hub.verify_token matches', async () => {
-    const res = await whatsappGet(
-      new NextRequest(`${base}?hub.mode=subscribe&hub.verify_token=verify-me&hub.challenge=12345`),
-    )
-    expect(res.status).toBe(200)
-    expect(await res.text()).toBe('12345')
-  })
-
-  it('rejects a wrong verify token with 403', async () => {
-    const res = await whatsappGet(
-      new NextRequest(`${base}?hub.mode=subscribe&hub.verify_token=nope&hub.challenge=12345`),
-    )
-    expect(res.status).toBe(403)
-  })
-})
-
-describe('WhatsApp webhook — X-Hub-Signature-256', () => {
+describe('WhatsApp webhook (GOWA) — X-Hub-Signature-256', () => {
   const url = 'https://example.com/api/bot/whatsapp'
   // The exact same string is used to compute the signature and as the request body —
   // this is the point of the raw-body check: no JSON.parse/stringify round-trip
   // between signing and sending.
   const rawBody = JSON.stringify({
-    entry: [{ changes: [{ value: { messages: [{ from: '62812', type: 'text', text: { body: 'ringkasan' } }] } }] }],
+    event: 'message',
+    device_id: '628987654321@s.whatsapp.net',
+    payload: {
+      id: 'msg-1',
+      chat_id: '628123456789@s.whatsapp.net',
+      from: '628123456789@s.whatsapp.net',
+      from_name: 'Budi',
+      timestamp: '2026-09-01T10:00:00Z',
+      is_from_me: false,
+      body: 'ringkasan',
+    },
   })
 
   function sign(payload: string): string {
-    return `sha256=${createHmac('sha256', 'meta-secret').update(payload, 'utf8').digest('hex')}`
+    return `sha256=${createHmac('sha256', 'gowa-secret').update(payload, 'utf8').digest('hex')}`
+  }
+
+  function req(body: string, headers: Record<string, string> = {}): NextRequest {
+    return new NextRequest(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body,
+    })
   }
 
   it('rejects a missing signature with 403', async () => {
-    const req = new NextRequest(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: rawBody,
-    })
-    const res = await whatsappPost(req)
+    const res = await whatsappPost(req(rawBody))
     expect(res.status).toBe(403)
     expect(handleIncoming).not.toHaveBeenCalled()
   })
 
   it('rejects a well-formed but incorrect signature with 403', async () => {
-    const req = new NextRequest(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-hub-signature-256': `sha256=${'0'.repeat(64)}` },
-      body: rawBody,
-    })
-    const res = await whatsappPost(req)
+    const res = await whatsappPost(req(rawBody, { 'x-hub-signature-256': `sha256=${'0'.repeat(64)}` }))
     expect(res.status).toBe(403)
     expect(handleIncoming).not.toHaveBeenCalled()
   })
 
   it('accepts a correctly signed payload with 200 and processes the message', async () => {
-    const req = new NextRequest(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-hub-signature-256': sign(rawBody) },
-      body: rawBody,
-    })
-    const res = await whatsappPost(req)
+    const res = await whatsappPost(req(rawBody, { 'x-hub-signature-256': sign(rawBody) }))
     expect(res.status).toBe(200)
     expect(handleIncoming).toHaveBeenCalledTimes(1)
+  })
+
+  it('ignores a non-"message" event (e.g. message.ack) even with a valid signature', async () => {
+    const ackBody = JSON.stringify({
+      event: 'message.ack',
+      device_id: '628987654321@s.whatsapp.net',
+      payload: { id: 'msg-1', chat_id: '628123456789@s.whatsapp.net', from: '628123456789@s.whatsapp.net', timestamp: '2026-09-01T10:00:00Z', is_from_me: false, body: '' },
+    })
+    const res = await whatsappPost(req(ackBody, { 'x-hub-signature-256': sign(ackBody) }))
+    expect(res.status).toBe(200)
+    expect(handleIncoming).not.toHaveBeenCalled()
+  })
+
+  it('ignores an echo of the bot\'s own outbound message (is_from_me: true)', async () => {
+    const selfBody = JSON.stringify({
+      event: 'message',
+      device_id: '628987654321@s.whatsapp.net',
+      payload: {
+        id: 'msg-2',
+        chat_id: '628123456789@s.whatsapp.net',
+        from: '628987654321@s.whatsapp.net',
+        timestamp: '2026-09-01T10:00:01Z',
+        is_from_me: true,
+        body: 'balasan bot',
+      },
+    })
+    const res = await whatsappPost(req(selfBody, { 'x-hub-signature-256': sign(selfBody) }))
+    expect(res.status).toBe(200)
+    expect(handleIncoming).not.toHaveBeenCalled()
   })
 })

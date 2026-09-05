@@ -340,7 +340,7 @@ cp .env.example .env.local
 | `GOLD_API_KEY` | Opsional | Widget harga emas di Market Pulse |
 | `NEXT_PUBLIC_BI_RATE_OVERRIDE` dkk. | Opsional | Override manual nilai referensi Market Pulse (BI Rate/inflasi/SBN) — lihat komentar di `.env.example` |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET` | Opsional | **Wajib** untuk bot Telegram — lihat langkah 7 |
-| `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `META_APP_SECRET`, `META_VERIFY_TOKEN` | Opsional | **Wajib** untuk bot WhatsApp — lihat langkah 7 |
+| `GOWA_BASE_URL`, `GOWA_BASIC_AUTH_USER`, `GOWA_BASIC_AUTH_PASSWORD`, `WHATSAPP_WEBHOOK_SECRET` | Opsional | **Wajib** untuk bot WhatsApp — lewat [GOWA](https://github.com/aldinokemal/go-whatsapp-web-multidevice) (bukan WhatsApp Cloud API resmi), instance terpisah yang harus sudah di-deploy sendiri — lihat langkah 7 |
 | `FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` | Opsional | **Wajib** untuk bot WhatsApp/Telegram (Admin SDK) — lihat catatan arsitektur & langkah 7 di bawah |
 
 Generate `TOKEN_ENCRYPTION_KEY` (dipakai mengenkripsi refresh token Drive di database,
@@ -377,14 +377,12 @@ Ringkasan (panduan lengkap ada di [`implementation_bot_integration.md`](implemen
 1. **Telegram** (~3 menit): chat `@BotFather` → `/newbot` → salin token → isi
    `TELEGRAM_BOT_TOKEN` + `TELEGRAM_WEBHOOK_SECRET` (bebas, acak) → deploy → daftarkan
    webhook lewat `setWebhook` (lihat dokumen di atas untuk perintah `curl`-nya).
-2. **WhatsApp** (~15 menit): [developers.facebook.com](https://developers.facebook.com) →
-   buat app tipe Business → **Test Business Account** (tanpa verifikasi bisnis, gratis,
-   maks. 5 nomor penerima) → tambah produk WhatsApp → salin **Phone Number ID** →
-   buat **token System User permanen** (bukan token di halaman API Setup — itu
-   kedaluwarsa < 24 jam) → salin **App Secret** → isi
-   `WHATSAPP_ACCESS_TOKEN`/`WHATSAPP_PHONE_NUMBER_ID`/`META_APP_SECRET`/`META_VERIFY_TOKEN`
-   → deploy → daftarkan webhook di dashboard Meta (Callback URL + Verify token, lalu
-   subscribe ke field `messages`).
+2. **WhatsApp** (~5 menit, dengan asumsi [GOWA](https://github.com/aldinokemal/go-whatsapp-web-multidevice)
+   sudah di-deploy — **bukan** WhatsApp Cloud API resmi Meta, lihat catatan risiko di
+   `implementation_bot_integration.md` §11): isi
+   `GOWA_BASE_URL`/`GOWA_BASIC_AUTH_USER`/`GOWA_BASIC_AUTH_PASSWORD`/`WHATSAPP_WEBHOOK_SECRET`
+   → deploy → set `WHATSAPP_WEBHOOK` + `WHATSAPP_WEBHOOK_SECRET` (nilai yang sama) di
+   env GOWA sendiri.
 3. **Firebase Admin SDK**: Firebase Console → Project settings → Service accounts →
    Generate new private key → isi `FIREBASE_PROJECT_ID`/`FIREBASE_CLIENT_EMAIL`/
    `FIREBASE_PRIVATE_KEY` (simpan `\n` yang ter-escape apa adanya, jangan diubah jadi
