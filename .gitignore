@@ -5,6 +5,7 @@
 /.pnp
 .pnp.js
 .yarn/install-state.gz
+/.claude
 
 # testing
 /coverage
@@ -46,3 +47,4 @@ next-env.d.ts
 implementation_*.md
 KNOWN_ISSUES.md
 BOT_*.md
+context.md
