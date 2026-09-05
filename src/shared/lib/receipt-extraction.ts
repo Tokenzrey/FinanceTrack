@@ -141,12 +141,34 @@ Aturan mapping:
 `.trim()
 }
 
-/** One automatic retry: the flash models return a transient 503 under load, and a
- *  single retry turns that into a slow success, not a failure. */
+/** The numeric HTTP status on a `@google/genai` ApiError (`429`, `503`, …), if any. */
+function aiErrorStatus(err: unknown): number | undefined {
+  const s = (err as { status?: unknown } | null)?.status
+  return typeof s === 'number' ? s : undefined
+}
+
+/**
+ * True for the two Gemini failures the caller should treat as "try again later, this
+ * isn't broken": 429 RESOURCE_EXHAUSTED (rate limit / daily free-tier quota) and 503
+ * UNAVAILABLE (model overloaded). Checks the numeric status first, then the message
+ * body for SDK paths that only surface it there.
+ */
+export function isAiQuotaOrOverloadError(err: unknown): boolean {
+  const status = aiErrorStatus(err)
+  if (status === 429 || status === 503) return true
+  const msg = err instanceof Error ? err.message : String(err ?? '')
+  return /RESOURCE_EXHAUSTED|UNAVAILABLE|"code":\s*(?:429|503)\b/.test(msg)
+}
+
+/** One automatic retry for transient failures (503 overload, network blips): a single
+ *  retry turns those into a slow success. A 429 is NOT retried — a daily quota won't
+ *  clear in 800ms and an immediate retry just burns another request against a small
+ *  free-tier limit. */
 async function withRetry<T>(operation: () => Promise<T>): Promise<T> {
   try {
     return await operation()
-  } catch {
+  } catch (err) {
+    if (aiErrorStatus(err) === 429) throw err
     await new Promise((resolve) => setTimeout(resolve, 800))
     return operation()
   }

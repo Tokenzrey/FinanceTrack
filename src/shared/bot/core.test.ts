@@ -76,6 +76,10 @@ vi.mock('@/shared/lib/receipt-extraction', () => ({
   extractReceipt: (...args: unknown[]) => extractReceipt(...args),
   ALLOWED_MIME: ['image/jpeg', 'image/png', 'image/webp', 'image/heic'],
   MAX_BASE64_CHARS: 6 * 1024 * 1024,
+  isAiQuotaOrOverloadError: (err: unknown) => {
+    const status = (err as { status?: unknown } | null)?.status
+    return status === 429 || status === 503
+  },
 }))
 
 const uploadReceiptForUser = vi.fn()
@@ -489,6 +493,25 @@ describe('handleIncoming — photos', () => {
     const reply = await handleIncoming(imageMsg({ imageBase64: 'x'.repeat(7 * 1024 * 1024) }))
     expect(extractReceipt).not.toHaveBeenCalled()
     expect(reply.text).toContain('terlalu besar')
+  })
+
+  it('replies with the AI-unavailable line (not the generic error) when Gemini returns 429/503', async () => {
+    extractReceipt.mockRejectedValue(Object.assign(new Error('RESOURCE_EXHAUSTED'), { status: 429 }))
+
+    const reply = await handleIncoming(imageMsg())
+
+    expect(uploadReceiptForUser).not.toHaveBeenCalled()
+    expect(createTransaction).not.toHaveBeenCalled()
+    expect(reply.text).toContain('kuota')
+    expect(reply.text).not.toContain('Ada masalah di sisi kami')
+  })
+
+  it('falls back to the generic error line for a non-quota extraction failure', async () => {
+    extractReceipt.mockRejectedValue(new Error('boom'))
+
+    const reply = await handleIncoming(imageMsg())
+
+    expect(reply.text).toContain('Ada masalah di sisi kami')
   })
 
   it('drops a stale pending text draft when a photo arrives instead, and processes the photo', async () => {

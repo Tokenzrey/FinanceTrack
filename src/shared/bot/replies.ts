@@ -92,6 +92,15 @@ export const replies = {
 
   imageTooLarge: (): BotReply => reply('⚠️ Foto itu terlalu besar. Coba kirim ulang dengan ukuran yang lebih kecil.'),
 
+  /** Gemini returned 429 (kuota/rate limit) or 503 (overload) — distinct from
+   *  `genericError` so the user knows to wait rather than that something is broken.
+   *  The photo is safe on Drive already (see `handleImage`); nothing was recorded. */
+  aiUnavailable: (): BotReply =>
+    reply(
+      '⏳ Layanan AI-nya lagi sibuk atau kuota hariannya sudah habis, jadi struk ini belum bisa dibaca. ' +
+        'Coba kirim ulang beberapa saat lagi, atau catat manual lewat teks.',
+    ),
+
   categoryConfirmPrompt: (amount: number, description: string | null, options: { name: string }[]): BotReply => {
     const label = description ? ` — <i>${escapeHtml(description)}</i>` : ''
     const keyboard: BotKeyboardButton[][] = [

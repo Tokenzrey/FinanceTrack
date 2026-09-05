@@ -136,6 +136,39 @@ export async function consumeLinkCode(
   })
 }
 
+// ─── Inbound message de-duplication ────────────────────────────
+//
+// GOWA's webhook client has a hardcoded 10s timeout and retries a failed delivery up
+// to 5 times; Telegram redelivers on any non-2xx too. The bot pipeline (Gemini vision
+// on a receipt photo especially) routinely runs longer than 10s, so without this
+// guard a single photo gets processed 5× — 5 Gemini calls, 5 Drive uploads, 5
+// transactions. `claimInboundMessage` claims a message id atomically (`.create()`
+// fails if the doc already exists) so exactly one delivery does the work.
+
+const PROCESSED_MSG_TTL_MS = 24 * 60 * 60 * 1000
+
+/** Returns true if THIS call claimed the message (caller should process it), false if
+ *  another delivery already claimed it (caller should skip). */
+export async function claimInboundMessage(platform: BotPlatform, messageId: string): Promise<boolean> {
+  if (!messageId) return true
+  const ref = getAdminDb().collection('bot_processed_messages').doc(`${platform}_${messageId}`)
+  try {
+    await ref.create({
+      platform,
+      messageId,
+      claimedAt: FieldValue.serverTimestamp(),
+      // ponytail: TTL enforced by a Firestore native TTL policy on this field (set in
+      // console/gcloud), not app code — nothing here reaps old claim docs.
+      expiresAt: Timestamp.fromMillis(Date.now() + PROCESSED_MSG_TTL_MS),
+    })
+    return true
+  } catch (err) {
+    // gRPC ALREADY_EXISTS = 6 → a concurrent or earlier delivery owns this message.
+    if ((err as { code?: number }).code === 6) return false
+    throw err
+  }
+}
+
 export async function deleteLink(userId: string, platform: BotPlatform): Promise<void> {
   const db = getAdminDb()
   const mirrorRef = db.doc(`users/${userId}/meta/botLinks`)

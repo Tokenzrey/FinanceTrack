@@ -17,6 +17,21 @@ vi.mock('@/shared/bot/media-whatsapp', () => ({
   downloadWhatsAppMedia: (...args: unknown[]) => downloadWhatsAppMedia(...args),
 }))
 
+const claimInboundMessage = vi.fn()
+vi.mock('@/shared/bot/admin-data', () => ({
+  claimInboundMessage: (...args: unknown[]) => claimInboundMessage(...args),
+}))
+
+// The route hands the pipeline to `waitUntil` and returns 200 before it finishes.
+// Collect those promises so each test can await the pipeline explicitly via `flush()`.
+const { waitUntilPromises } = vi.hoisted(() => ({ waitUntilPromises: [] as Promise<unknown>[] }))
+vi.mock('@vercel/functions', () => ({
+  waitUntil: (p: Promise<unknown>) => {
+    waitUntilPromises.push(Promise.resolve(p))
+  },
+}))
+const flush = () => Promise.all(waitUntilPromises.splice(0))
+
 const { POST } = await import('./whatsapp/route')
 
 const originalEnv = { ...process.env }
@@ -37,7 +52,9 @@ function req(body: object): NextRequest {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  waitUntilPromises.length = 0
   handleIncoming.mockResolvedValue({ text: 'ok' })
+  claimInboundMessage.mockResolvedValue(true)
   global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as unknown as typeof fetch
 
   process.env.WHATSAPP_WEBHOOK_SECRET = 'gowa-secret'
@@ -66,6 +83,7 @@ describe('WhatsApp (GOWA) — message normalization', () => {
         },
       }),
     )
+    await flush()
 
     expect(handleIncoming).toHaveBeenCalledWith({
       platform: 'whatsapp',
@@ -94,7 +112,31 @@ describe('WhatsApp (GOWA) — message normalization', () => {
         },
       }),
     )
+    await flush()
     expect(handleIncoming).toHaveBeenCalledWith(expect.objectContaining({ externalId: '120363012345678901' }))
+  })
+
+  it('skips processing entirely when the message id was already claimed (GOWA retry / redelivery)', async () => {
+    claimInboundMessage.mockResolvedValue(false)
+
+    await POST(
+      req({
+        event: 'message',
+        device_id: '628987654321@s.whatsapp.net',
+        payload: {
+          id: 'msg-dup',
+          chat_id: '628123456789@s.whatsapp.net',
+          from: '628123456789@s.whatsapp.net',
+          timestamp: '2026-09-01T10:00:00Z',
+          is_from_me: false,
+          body: 'ringkasan',
+        },
+      }),
+    )
+    await flush()
+
+    expect(claimInboundMessage).toHaveBeenCalledWith('whatsapp', 'msg-dup')
+    expect(handleIncoming).not.toHaveBeenCalled()
   })
 
   it('downloads media via the message id when the payload carries an image (object form, with caption)', async () => {
@@ -115,6 +157,7 @@ describe('WhatsApp (GOWA) — message normalization', () => {
         },
       }),
     )
+    await flush()
 
     expect(downloadWhatsAppMedia).toHaveBeenCalledWith('msg-3', '628123456789@s.whatsapp.net')
     expect(handleIncoming).toHaveBeenCalledWith(
@@ -140,6 +183,7 @@ describe('WhatsApp (GOWA) — message normalization', () => {
         },
       }),
     )
+    await flush()
 
     expect(downloadWhatsAppMedia).toHaveBeenCalledWith('msg-4', '628123456789@s.whatsapp.net')
     const incoming = handleIncoming.mock.calls[0][0]
@@ -165,6 +209,7 @@ describe('WhatsApp (GOWA) — message normalization', () => {
         },
       }),
     )
+    await flush()
 
     expect(res.status).toBe(200)
     expect(handleIncoming).not.toHaveBeenCalled()

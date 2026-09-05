@@ -1,7 +1,12 @@
 import { projectSavings } from '@/shared/lib/analytics'
 import { buildMonthlySummary } from '@/shared/lib/budget-math'
 import { formatIDR, formatMonthLong } from '@/shared/lib/format'
-import { ALLOWED_MIME, MAX_BASE64_CHARS, extractReceipt } from '@/shared/lib/receipt-extraction'
+import {
+  ALLOWED_MIME,
+  MAX_BASE64_CHARS,
+  extractReceipt,
+  isAiQuotaOrOverloadError,
+} from '@/shared/lib/receipt-extraction'
 import { dayKey, pendingOccurrences } from '@/shared/lib/recurring'
 import { buildYearSummary } from '@/shared/lib/year-summary'
 import { DEFAULT_PILLAR_CONFIG, type Category } from '@/shared/types/domain'
@@ -401,6 +406,9 @@ async function handleImage(
     )
   } catch (error) {
     console.error('bot handleImage extractReceipt error:', error)
+    // 429 (quota/rate limit) and 503 (overload) are "wait and retry", not "broken" —
+    // tell the user that specifically instead of the generic failure line.
+    if (isAiQuotaOrOverloadError(error)) return replies.aiUnavailable()
     return replies.genericError()
   }
 

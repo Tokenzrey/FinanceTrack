@@ -1,11 +1,16 @@
 import { createHmac, timingSafeEqual } from 'node:crypto'
 import { NextResponse, type NextRequest } from 'next/server'
+import { waitUntil } from '@vercel/functions'
+import { claimInboundMessage } from '@/shared/bot/admin-data'
 import { handleIncoming } from '@/shared/bot/core'
 import { downloadWhatsAppMedia } from '@/shared/bot/media-whatsapp'
 import type { BotIncoming, BotReply } from '@/shared/bot/types'
 
 export const runtime = 'nodejs'
-export const maxDuration = 30
+// The 200 is returned in well under a second (see POST); this budget is for the
+// `waitUntil` pipeline that keeps running after it — Gemini vision on a receipt photo
+// is the long pole.
+export const maxDuration = 180
 
 interface GowaMessage {
   id: string
@@ -153,8 +158,13 @@ async function processMessage(payload: GowaMessage): Promise<void> {
  * (see `WHATSAPP_WEBHOOK_EVENTS` in BOT_SETUP_CHECKLIST.md), and those are not user
  * messages. `payload.is_from_me` filters out echoes of the bot's own outbound sends —
  * GOWA reports those on the same webhook since they originate from the linked device.
- * Always responds 200 once past auth, for the same reason as the Telegram adapter:
- * failures are reported to the user as a chat message, never as an HTTP status.
+ *
+ * The 200 is returned immediately and `processMessage` runs in `waitUntil` AFTER the
+ * response: GOWA's webhook client times out at a hardcoded 10s and then retries 5×,
+ * and the pipeline (GOWA media fetch → Gemini vision → Drive upload → reply) does not
+ * fit in 10s. Acking first stops the retry storm; `claimInboundMessage` makes the
+ * already-queued retries no-ops. Failures still reach the user as a chat message,
+ * never as an HTTP status.
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const rawBody = await request.text()
@@ -170,8 +180,18 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ ok: true })
   }
 
-  if (body.event === 'message' && body.payload && !body.payload.is_from_me) {
-    await processMessage(body.payload)
+  const payload = body.payload
+  if (body.event === 'message' && payload && !payload.is_from_me) {
+    let shouldProcess = true
+    try {
+      // false => another delivery of this same message id already owns it (GOWA
+      // retries a slow webhook up to 5×). A thrown error here (Firestore blip) is
+      // fail-open: better a rare duplicate than a dropped message with no reply.
+      shouldProcess = await claimInboundMessage('whatsapp', payload.id)
+    } catch (error) {
+      console.error('whatsapp (gowa) claimInboundMessage error (processing anyway):', error)
+    }
+    if (shouldProcess) waitUntil(processMessage(payload))
   }
 
   return NextResponse.json({ ok: true })

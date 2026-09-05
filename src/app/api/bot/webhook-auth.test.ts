@@ -11,6 +11,21 @@ vi.mock('@/shared/bot/core', () => ({
   handleIncoming: (...args: unknown[]) => handleIncoming(...args),
 }))
 
+const claimInboundMessage = vi.fn()
+vi.mock('@/shared/bot/admin-data', () => ({
+  claimInboundMessage: (...args: unknown[]) => claimInboundMessage(...args),
+}))
+
+// WhatsApp route hands processing to `waitUntil`; collect + flush so the happy-path
+// assertion can await it.
+const { waitUntilPromises } = vi.hoisted(() => ({ waitUntilPromises: [] as Promise<unknown>[] }))
+vi.mock('@vercel/functions', () => ({
+  waitUntil: (p: Promise<unknown>) => {
+    waitUntilPromises.push(Promise.resolve(p))
+  },
+}))
+const flush = () => Promise.all(waitUntilPromises.splice(0))
+
 const { POST: telegramPost } = await import('./telegram/route')
 const { POST: whatsappPost } = await import('./whatsapp/route')
 
@@ -18,7 +33,9 @@ const originalEnv = { ...process.env }
 
 beforeEach(() => {
   vi.clearAllMocks()
+  waitUntilPromises.length = 0
   handleIncoming.mockResolvedValue({ text: 'ok' })
+  claimInboundMessage.mockResolvedValue(true)
   global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as unknown as typeof fetch
 
   process.env.TELEGRAM_WEBHOOK_SECRET = 'tg-secret'
@@ -109,6 +126,7 @@ describe('WhatsApp webhook (GOWA) — X-Hub-Signature-256', () => {
 
   it('accepts a correctly signed payload with 200 and processes the message', async () => {
     const res = await whatsappPost(req(rawBody, { 'x-hub-signature-256': sign(rawBody) }))
+    await flush()
     expect(res.status).toBe(200)
     expect(handleIncoming).toHaveBeenCalledTimes(1)
   })

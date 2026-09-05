@@ -10,7 +10,7 @@ vi.mock('@google/genai', () => ({
 }))
 
 // Imported after the mock so the module under test picks up the mocked SDK.
-const { extractReceipt } = await import('./receipt-extraction')
+const { extractReceipt, isAiQuotaOrOverloadError } = await import('./receipt-extraction')
 
 const CATEGORIES = [
   { id: 'cat-food', name: 'Makan & Minum', pillar: 'needs' as const },
@@ -117,5 +117,30 @@ describe('extractReceipt', () => {
 
     const result = await extractReceipt('base64', 'image/jpeg', CATEGORIES, [])
     expect(result.extraction.merchant).toBe('Indomaret')
+  })
+
+  it('does NOT retry a 429 — it rethrows immediately without burning a second request', async () => {
+    generateContent.mockRejectedValueOnce(Object.assign(new Error('RESOURCE_EXHAUSTED'), { status: 429 }))
+
+    await expect(extractReceipt('base64', 'image/jpeg', CATEGORIES, [])).rejects.toThrow('RESOURCE_EXHAUSTED')
+    expect(generateContent).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('isAiQuotaOrOverloadError', () => {
+  it('is true for a 429 or 503 numeric status', () => {
+    expect(isAiQuotaOrOverloadError(Object.assign(new Error('x'), { status: 429 }))).toBe(true)
+    expect(isAiQuotaOrOverloadError(Object.assign(new Error('x'), { status: 503 }))).toBe(true)
+  })
+
+  it('is true when only the message body carries the signal', () => {
+    expect(isAiQuotaOrOverloadError(new Error('{"error":{"code":429,"status":"RESOURCE_EXHAUSTED"}}'))).toBe(true)
+    expect(isAiQuotaOrOverloadError(new Error('model is UNAVAILABLE'))).toBe(true)
+  })
+
+  it('is false for other errors', () => {
+    expect(isAiQuotaOrOverloadError(Object.assign(new Error('bad'), { status: 400 }))).toBe(false)
+    expect(isAiQuotaOrOverloadError(new Error('network blip'))).toBe(false)
+    expect(isAiQuotaOrOverloadError(null)).toBe(false)
   })
 })
