@@ -76,6 +76,7 @@ describe('Telegram webhook — X-Telegram-Bot-Api-Secret-Token', () => {
 
   it('accepts the correct secret header with 200 and processes the update', async () => {
     const res = await telegramPost(req({ 'x-telegram-bot-api-secret-token': 'tg-secret' }))
+    await flush()
     expect(res.status).toBe(200)
     expect(handleIncoming).toHaveBeenCalledTimes(1)
   })

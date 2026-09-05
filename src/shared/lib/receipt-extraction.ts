@@ -1,4 +1,9 @@
-import { GoogleGenAI, Type } from '@google/genai'
+import {
+  GoogleGenAI,
+  Type,
+  type GenerateContentParameters,
+  type GenerateContentResponse,
+} from '@google/genai'
 import type {
   ExtractedReceiptItem,
   MappedReceiptItem,
@@ -17,11 +22,19 @@ import type {
  */
 
 /**
- * `gemini-1.5-flash` from the plan has been retired and is no longer served.
- * `gemini-3.5-flash` is the current stable flash model — verified against this
- * project's key. Override with GEMINI_MODEL if a newer one is preferred.
+ * Models tried in order. The free tier meters requests *per model per day* (e.g. 20/day
+ * for some newer flash models), so when the primary's daily quota is spent — or it's
+ * momentarily overloaded (503) — the call falls through to the next candidate instead
+ * of failing the whole feature. `GEMINI_MODEL` overrides the primary; the rest stay as
+ * fallbacks. Duplicates (if the override equals a fallback) are collapsed.
+ *
+ * `gemini-1.5-flash` from the original plan has been retired and is no longer served.
  */
-const MODEL = process.env.GEMINI_MODEL ?? 'gemini-3.5-flash'
+const MODELS: string[] = [
+  process.env.GEMINI_MODEL ?? 'gemini-3.5-flash',
+  'gemini-2.5-flash',
+  'gemini-flash-latest',
+].filter((m, i, arr) => m && arr.indexOf(m) === i)
 
 /** Base64 of a compressed receipt. Anything larger is a mis-sized upload, not a receipt. */
 export const MAX_BASE64_CHARS = 6 * 1024 * 1024
@@ -175,6 +188,30 @@ async function withRetry<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 /**
+ * Runs one generateContent request, walking `MODELS` in order: the primary gets the
+ * `withRetry` transient-503 retry, each fallback gets a single attempt. Any error —
+ * quota (429), overload (503), or a model id this key cannot use — falls through to
+ * the next candidate; the last error is rethrown once every candidate is exhausted, so
+ * a genuine failure (unreadable image, bad key) still surfaces to the caller.
+ */
+async function generateWithModels(
+  ai: GoogleGenAI,
+  params: Omit<GenerateContentParameters, 'model'>,
+): Promise<GenerateContentResponse> {
+  let lastErr: unknown
+  for (let i = 0; i < MODELS.length; i++) {
+    const model = MODELS[i]
+    try {
+      const call = () => ai.models.generateContent({ model, ...params })
+      return i === 0 ? await withRetry(call) : await call()
+    } catch (err) {
+      lastErr = err
+    }
+  }
+  throw lastErr
+}
+
+/**
  * Extracts a receipt and maps its items to categories. Assumes the caller has already
  * checked `GEMINI_API_KEY` is set and the image passed size/format validation — see
  * `MAX_BASE64_CHARS`/`ALLOWED_MIME` above, which both callers (the web route and the
@@ -192,13 +229,10 @@ export async function extractReceipt(
   const ai = new GoogleGenAI({ apiKey })
 
   // 1. Extract the receipt.
-  const extractionResponse = await withRetry(() =>
-    ai.models.generateContent({
-      model: MODEL,
-      contents: [{ text: EXTRACTION_PROMPT }, { inlineData: { mimeType, data: imageBase64 } }],
-      config: { responseMimeType: 'application/json', responseSchema: extractionSchema, temperature: 0 },
-    }),
-  )
+  const extractionResponse = await generateWithModels(ai, {
+    contents: [{ text: EXTRACTION_PROMPT }, { inlineData: { mimeType, data: imageBase64 } }],
+    config: { responseMimeType: 'application/json', responseSchema: extractionSchema, temperature: 0 },
+  })
 
   const raw = JSON.parse(extractionResponse.text ?? '{}')
 
@@ -226,13 +260,10 @@ export async function extractReceipt(
 
   if (worthMapping) {
     try {
-      const mappingResponse = await withRetry(() =>
-        ai.models.generateContent({
-          model: MODEL,
-          contents: buildMappingPrompt(extraction.items, categories, extraction.merchantType, hints),
-          config: { responseMimeType: 'application/json', responseSchema: mappingSchema, temperature: 0 },
-        }),
-      )
+      const mappingResponse = await generateWithModels(ai, {
+        contents: buildMappingPrompt(extraction.items, categories, extraction.merchantType, hints),
+        config: { responseMimeType: 'application/json', responseSchema: mappingSchema, temperature: 0 },
+      })
       const parsed = JSON.parse(mappingResponse.text ?? '[]')
       if (Array.isArray(parsed)) mappings = parsed
     } catch {

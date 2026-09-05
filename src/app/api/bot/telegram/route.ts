@@ -1,10 +1,16 @@
 import { NextResponse, type NextRequest } from 'next/server'
+import { waitUntil } from '@vercel/functions'
+import { claimInboundMessage } from '@/shared/bot/admin-data'
 import { handleIncoming } from '@/shared/bot/core'
 import { downloadTelegramPhoto } from '@/shared/bot/media-telegram'
 import type { BotIncoming, BotReply } from '@/shared/bot/types'
 
 export const runtime = 'nodejs'
-export const maxDuration = 30
+// The 200 is returned immediately; this budget is for the `waitUntil` pipeline that
+// keeps running after it — Gemini vision on a receipt photo is the long pole. Telegram
+// retries an update whose webhook call it considers failed (slow / non-2xx), so the
+// same fast-ack + de-dup pattern as the GOWA route applies here.
+export const maxDuration = 180
 
 interface TelegramCallbackQuery {
   id: string
@@ -13,6 +19,8 @@ interface TelegramCallbackQuery {
 }
 
 interface TelegramUpdate {
+  /** Monotonic per-update id Telegram assigns; the de-dup key for a redelivered update. */
+  update_id?: number
   message?: {
     chat: { id: number }
     text?: string
@@ -70,6 +78,18 @@ async function answerCallbackQuery(callbackQueryId: string): Promise<void> {
   await callTelegram('answerCallbackQuery', { callback_query_id: callbackQueryId })
 }
 
+/** false => this update was already handled by an earlier delivery; skip. A thrown
+ *  error (Firestore blip) is fail-open: a rare duplicate beats a dropped message. */
+async function claimUpdate(kind: 'msg' | 'cb', updateId: number | undefined): Promise<boolean> {
+  if (updateId == null) return true
+  try {
+    return await claimInboundMessage('telegram', `${kind}_${updateId}`)
+  } catch (error) {
+    console.error('telegram claimInboundMessage error (processing anyway):', error)
+    return true
+  }
+}
+
 async function handleTextOrPhotoMessage(message: NonNullable<TelegramUpdate['message']>): Promise<void> {
   const chatId = message.chat.id
 
@@ -103,12 +123,17 @@ async function handleTextOrPhotoMessage(message: NonNullable<TelegramUpdate['mes
   }
 }
 
-async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> {
+async function handleCallbackQuery(query: TelegramCallbackQuery, updateId: number | undefined): Promise<void> {
   // Answered first, before anything else can fail — otherwise the tapped button spins
-  // forever on the user's screen even though the tap was received.
+  // forever on the user's screen even though the tap was received. Cheap and safe to
+  // repeat on a Telegram redelivery, so it runs before the de-dup gate.
   await answerCallbackQuery(query.id)
 
   if (!query.message || typeof query.data !== 'string') return
+  // A redelivered callback update must not run the action (goal contribution, category
+  // pick, "skip") twice.
+  if (!(await claimUpdate('cb', updateId))) return
+
   const chatId = query.message.chat.id
 
   try {
@@ -130,6 +155,11 @@ async function handleCallbackQuery(query: TelegramCallbackQuery): Promise<void> 
  * Telegram webhook. Always responds 200 regardless of what happened while processing
  * — any non-200 makes Telegram retry the same update repeatedly, so failures are
  * reported to the user as a chat message instead, never as an HTTP status.
+ *
+ * Processing runs in `waitUntil` AFTER the 200: a receipt photo goes through Gemini
+ * vision + a Drive upload, well past the few seconds Telegram waits before treating
+ * the delivery as failed and retrying it. `claimInboundMessage` on `update_id` makes
+ * any retry Telegram still sends a no-op instead of a second transaction / reply.
  */
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET
@@ -146,9 +176,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   if (update.callback_query) {
-    await handleCallbackQuery(update.callback_query)
+    waitUntil(handleCallbackQuery(update.callback_query, update.update_id))
   } else if (update.message) {
-    await handleTextOrPhotoMessage(update.message)
+    const message = update.message
+    if (await claimUpdate('msg', update.update_id)) {
+      waitUntil(handleTextOrPhotoMessage(message))
+    }
   }
 
   return NextResponse.json({ ok: true })

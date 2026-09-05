@@ -119,11 +119,34 @@ describe('extractReceipt', () => {
     expect(result.extraction.merchant).toBe('Indomaret')
   })
 
-  it('does NOT retry a 429 — it rethrows immediately without burning a second request', async () => {
-    generateContent.mockRejectedValueOnce(Object.assign(new Error('RESOURCE_EXHAUSTED'), { status: 429 }))
+  it('does NOT retry a 429 on the same model — it moves straight to the next model', async () => {
+    // 3 models configured (primary + 2 fallbacks); every one is quota-exhausted.
+    generateContent.mockRejectedValue(Object.assign(new Error('RESOURCE_EXHAUSTED'), { status: 429 }))
 
     await expect(extractReceipt('base64', 'image/jpeg', CATEGORIES, [])).rejects.toThrow('RESOURCE_EXHAUSTED')
-    expect(generateContent).toHaveBeenCalledTimes(1)
+    // One call per model, NOT two — a 429 is never retried on the model that threw it.
+    expect(generateContent).toHaveBeenCalledTimes(3)
+  })
+
+  it('falls through to a fallback model when the primary is quota-exhausted (429)', async () => {
+    generateContent
+      .mockRejectedValueOnce(Object.assign(new Error('RESOURCE_EXHAUSTED'), { status: 429 })) // primary: extraction
+      .mockResolvedValueOnce(extractionResult()) // fallback model: extraction OK
+      .mockResolvedValueOnce({ text: JSON.stringify([]) }) // mapping (primary model, back in quota by now)
+
+    const result = await extractReceipt('base64', 'image/jpeg', CATEGORIES, [])
+    expect(result.extraction.merchant).toBe('Indomaret')
+  })
+
+  it('falls through to a fallback model on a 503 overload too', async () => {
+    generateContent
+      .mockRejectedValueOnce(Object.assign(new Error('overloaded'), { status: 503 })) // primary attempt 1
+      .mockRejectedValueOnce(Object.assign(new Error('overloaded'), { status: 503 })) // primary withRetry attempt 2
+      .mockResolvedValueOnce(extractionResult()) // first fallback model succeeds
+      .mockResolvedValueOnce({ text: JSON.stringify([]) })
+
+    const result = await extractReceipt('base64', 'image/jpeg', CATEGORIES, [])
+    expect(result.extraction.merchant).toBe('Indomaret')
   })
 })
 
