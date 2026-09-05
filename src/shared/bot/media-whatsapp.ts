@@ -27,7 +27,20 @@ export async function downloadWhatsAppMedia(messageId: string): Promise<Download
   })
   if (!res.ok) throw new Error('Gagal mengunduh foto dari WhatsApp (GOWA).')
 
+  const contentType = res.headers.get('content-type') ?? ''
+  if (contentType.includes('application/json')) {
+    // This endpoint's exact response shape was never verifiable against GOWA's own
+    // OpenAPI spec at implementation time — raw image bytes was the assumption made.
+    // A JSON response means that assumption is wrong for this deployment; fail loudly
+    // and diagnosably here instead of silently treating JSON text as image bytes,
+    // which would otherwise surface only as a confusing "not a receipt" reply once
+    // Gemini fails to read the resulting garbage image.
+    throw new Error(
+      'GOWA mengembalikan JSON, bukan byte gambar mentah, dari /message/:id/download — bentuk respons endpoint ini perlu ditinjau ulang terhadap docs/openapi.yaml.',
+    )
+  }
+
   const buffer = Buffer.from(await res.arrayBuffer())
-  const mimeType = res.headers.get('content-type')?.split(';')[0]?.trim() || 'image/jpeg'
+  const mimeType = contentType.split(';')[0]?.trim() || 'image/jpeg'
   return { base64: buffer.toString('base64'), mimeType }
 }

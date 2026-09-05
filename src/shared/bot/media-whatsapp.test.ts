@@ -49,6 +49,20 @@ describe('downloadWhatsAppMedia', () => {
     await expect(downloadWhatsAppMedia('msg-1')).rejects.toThrow('Gagal mengunduh foto')
   })
 
+  it('fails loudly, not silently, if the endpoint ever returns JSON instead of raw bytes', async () => {
+    // The exact response shape of this endpoint was never verifiable against GOWA's
+    // own OpenAPI spec — if it turns out to be JSON-wrapped on some deployment, this
+    // must surface as a clear error, not a corrupted "image" that Gemini quietly
+    // fails to read later.
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: new Headers({ 'content-type': 'application/json; charset=utf-8' }),
+      arrayBuffer: async () => new ArrayBuffer(0),
+    }) as unknown as typeof fetch
+
+    await expect(downloadWhatsAppMedia('msg-1')).rejects.toThrow('mengembalikan JSON')
+  })
+
   it('throws when GOWA credentials are not configured, before ever calling fetch', async () => {
     delete process.env.GOWA_BASIC_AUTH_PASSWORD
     const fetchMock = vi.fn()
