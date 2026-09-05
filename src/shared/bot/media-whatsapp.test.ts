@@ -44,9 +44,27 @@ describe('downloadWhatsAppMedia', () => {
     expect(result.mimeType).toBe('image/jpeg')
   })
 
-  it('throws when the download request fails', async () => {
-    global.fetch = vi.fn().mockResolvedValue({ ok: false }) as unknown as typeof fetch
-    await expect(downloadWhatsAppMedia('msg-1')).rejects.toThrow('Gagal mengunduh foto')
+  it('throws with the actual status and response body when the download request fails', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      text: async () => '{"code":"NOT_FOUND","message":"message not found"}',
+    }) as unknown as typeof fetch
+
+    await expect(downloadWhatsAppMedia('msg-1')).rejects.toThrow('HTTP 404')
+    await expect(downloadWhatsAppMedia('msg-1')).rejects.toThrow('NOT_FOUND')
+  })
+
+  it('still throws a usable error when the failed response has no readable body', async () => {
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      text: async () => {
+        throw new Error('body already consumed')
+      },
+    }) as unknown as typeof fetch
+
+    await expect(downloadWhatsAppMedia('msg-1')).rejects.toThrow('HTTP 500')
   })
 
   it('fails loudly, not silently, if the endpoint ever returns JSON instead of raw bytes', async () => {

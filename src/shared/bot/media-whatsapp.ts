@@ -25,7 +25,17 @@ export async function downloadWhatsAppMedia(messageId: string): Promise<Download
   const res = await fetch(`${baseUrl}/message/${messageId}/download`, {
     headers: { Authorization: authHeader },
   })
-  if (!res.ok) throw new Error('Gagal mengunduh foto dari WhatsApp (GOWA).')
+  if (!res.ok) {
+    // The status/body are the one thing that actually explains *why* — 401 (bad
+    // Basic Auth), 404 (wrong id / media no longer cached on GOWA's side), 400 (GOWA
+    // validation error), 5xx (GOWA-side failure) each point somewhere completely
+    // different. Swallowing that into one generic message is why this was hard to
+    // diagnose from server logs alone.
+    const detail = await res.text().catch(() => '')
+    throw new Error(
+      `Gagal mengunduh foto dari WhatsApp (GOWA): HTTP ${res.status}${detail ? ` — ${detail.slice(0, 300)}` : ''}`,
+    )
+  }
 
   const contentType = res.headers.get('content-type') ?? ''
   if (contentType.includes('application/json')) {
