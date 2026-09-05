@@ -119,7 +119,10 @@ async function processMessage(payload: GowaMessage): Promise<void> {
     let incoming: BotIncoming | null = null
 
     if (payload.image) {
-      const image = await downloadWhatsAppMedia(payload.id)
+      // `chat_id` (full JID) is required by GOWA's download endpoint as `phone` — it
+      // rejects a blank one with HTTP 400 and cross-checks it against the message's
+      // own chat.
+      const image = await downloadWhatsAppMedia(payload.id, payload.chat_id)
       incoming = {
         platform: 'whatsapp',
         externalId,

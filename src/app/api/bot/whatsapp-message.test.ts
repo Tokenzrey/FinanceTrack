@@ -116,7 +116,7 @@ describe('WhatsApp (GOWA) — message normalization', () => {
       }),
     )
 
-    expect(downloadWhatsAppMedia).toHaveBeenCalledWith('msg-3')
+    expect(downloadWhatsAppMedia).toHaveBeenCalledWith('msg-3', '628123456789@s.whatsapp.net')
     expect(handleIncoming).toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'image', imageBase64: 'ZmFrZQ==', mimeType: 'image/jpeg', caption: 'Check this out!' }),
     )
@@ -141,7 +141,7 @@ describe('WhatsApp (GOWA) — message normalization', () => {
       }),
     )
 
-    expect(downloadWhatsAppMedia).toHaveBeenCalledWith('msg-4')
+    expect(downloadWhatsAppMedia).toHaveBeenCalledWith('msg-4', '628123456789@s.whatsapp.net')
     const incoming = handleIncoming.mock.calls[0][0]
     expect(incoming.kind).toBe('image')
     expect(incoming.caption).toBeUndefined()

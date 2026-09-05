@@ -7,30 +7,59 @@ function gowaAuth(): { baseUrl: string; authHeader: string } {
   if (!baseUrl || !user || !password) {
     throw new Error('GOWA_BASE_URL/GOWA_BASIC_AUTH_USER/GOWA_BASIC_AUTH_PASSWORD belum dikonfigurasi.')
   }
-  return { baseUrl, authHeader: `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}` }
+  return {
+    baseUrl: baseUrl.replace(/\/+$/, ''),
+    authHeader: `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`,
+  }
+}
+
+interface GowaDownloadResult {
+  file_url?: string
+  file_path?: string
+  media_type?: string
+}
+
+/** GOWA emits `file_url` from its own request scheme/host (`c.Scheme()://c.Host()`).
+ *  Behind a reverse proxy / tunnel that can come back as `http://localhost:3000/...`
+ *  even though the public base is something else — unusable from here. Detect that and
+ *  rebuild the URL from the always-relative `file_path` against our configured base. */
+function resolveMediaUrl(baseUrl: string, result: GowaDownloadResult): string {
+  const fileUrl = result.file_url?.trim()
+  const isLoopback = fileUrl ? /^https?:\/\/(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?\//i.test(fileUrl) : true
+
+  if (fileUrl && !isLoopback) return fileUrl
+
+  const filePath = result.file_path?.trim()
+  if (!filePath) {
+    throw new Error(
+      `GOWA /message/:id/download tidak mengembalikan file_url maupun file_path yang bisa dipakai — respons: ${JSON.stringify(result).slice(0, 300)}`,
+    )
+  }
+  return `${baseUrl}/${filePath.replace(/^\/+/, '')}`
 }
 
 /**
- * Downloads WhatsApp media via GOWA's own authenticated `GET /message/:id/download` —
- * deliberately not the `image.url`/`image.path` fields in the webhook payload, which
- * shift shape depending on GOWA's `WHATSAPP_AUTO_DOWNLOAD_MEDIA` setting (a raw,
- * possibly-encrypted WhatsApp CDN URL vs. a path on GOWA's own local disk). The
- * download endpoint always hands back the actual bytes regardless of that setting —
- * same "one authenticated endpoint, not raw webhook fields" pattern already used for
- * Telegram (`getFile`) and the WhatsApp Cloud API adapter this replaces.
+ * Downloads WhatsApp media via GOWA's `GET /message/:id/download`.
+ *
+ * That endpoint requires a `phone` query param (the chat JID the message belongs to —
+ * GOWA cross-checks `message.ChatJID == phone`), and it does NOT stream the bytes: it
+ * saves the media under GOWA's own `statics/` dir and returns JSON with a `file_url` /
+ * `file_path`. So this is a two-hop fetch — download endpoint for the location, then
+ * the static file itself (still behind the same Basic Auth). A GOWA build that streams
+ * raw bytes directly (image/* content-type) is still handled, for forward/back compat.
  */
-export async function downloadWhatsAppMedia(messageId: string): Promise<DownloadedImage> {
+export async function downloadWhatsAppMedia(messageId: string, phone: string): Promise<DownloadedImage> {
   const { baseUrl, authHeader } = gowaAuth()
 
-  const res = await fetch(`${baseUrl}/message/${messageId}/download`, {
-    headers: { Authorization: authHeader },
-  })
+  const res = await fetch(
+    `${baseUrl}/message/${encodeURIComponent(messageId)}/download?phone=${encodeURIComponent(phone)}`,
+    { headers: { Authorization: authHeader } },
+  )
   if (!res.ok) {
     // The status/body are the one thing that actually explains *why* — 401 (bad
     // Basic Auth), 404 (wrong id / media no longer cached on GOWA's side), 400 (GOWA
-    // validation error), 5xx (GOWA-side failure) each point somewhere completely
-    // different. Swallowing that into one generic message is why this was hard to
-    // diagnose from server logs alone.
+    // validation error, e.g. a missing/mismatched phone), 5xx (GOWA-side failure)
+    // each point somewhere completely different.
     const detail = await res.text().catch(() => '')
     throw new Error(
       `Gagal mengunduh foto dari WhatsApp (GOWA): HTTP ${res.status}${detail ? ` — ${detail.slice(0, 300)}` : ''}`,
@@ -38,19 +67,33 @@ export async function downloadWhatsAppMedia(messageId: string): Promise<Download
   }
 
   const contentType = res.headers.get('content-type') ?? ''
-  if (contentType.includes('application/json')) {
-    // This endpoint's exact response shape was never verifiable against GOWA's own
-    // OpenAPI spec at implementation time — raw image bytes was the assumption made.
-    // A JSON response means that assumption is wrong for this deployment; fail loudly
-    // and diagnosably here instead of silently treating JSON text as image bytes,
-    // which would otherwise surface only as a confusing "not a receipt" reply once
-    // Gemini fails to read the resulting garbage image.
+
+  // Legacy / alternate GOWA build: media streamed straight back as raw bytes.
+  if (!contentType.includes('application/json')) {
+    const buffer = Buffer.from(await res.arrayBuffer())
+    const mimeType = contentType.split(';')[0]?.trim() || 'image/jpeg'
+    return { base64: buffer.toString('base64'), mimeType }
+  }
+
+  // Documented shape: { code, message, results: { file_url, file_path, media_type, ... } }
+  const body = (await res.json().catch(() => null)) as { results?: GowaDownloadResult } | null
+  if (!body?.results) {
+    throw new Error('GOWA /message/:id/download mengembalikan JSON tanpa field `results` — bentuk respons tak dikenali.')
+  }
+
+  const mediaUrl = resolveMediaUrl(baseUrl, body.results)
+  const fileRes = await fetch(mediaUrl, { headers: { Authorization: authHeader } })
+  if (!fileRes.ok) {
+    const detail = await fileRes.text().catch(() => '')
     throw new Error(
-      'GOWA mengembalikan JSON, bukan byte gambar mentah, dari /message/:id/download — bentuk respons endpoint ini perlu ditinjau ulang terhadap docs/openapi.yaml.',
+      `Gagal mengambil file media dari GOWA (${mediaUrl}): HTTP ${fileRes.status}${detail ? ` — ${detail.slice(0, 200)}` : ''}`,
     )
   }
 
-  const buffer = Buffer.from(await res.arrayBuffer())
-  const mimeType = contentType.split(';')[0]?.trim() || 'image/jpeg'
+  const buffer = Buffer.from(await fileRes.arrayBuffer())
+  const fileContentType = fileRes.headers.get('content-type')?.split(';')[0]?.trim()
+  // GOWA's `media_type` is a coarse bucket ("image"), not a real MIME — only useful
+  // as a last resort when the static route sends no content-type of its own.
+  const mimeType = fileContentType || body.results.media_type || 'image/jpeg'
   return { base64: buffer.toString('base64'), mimeType }
 }
