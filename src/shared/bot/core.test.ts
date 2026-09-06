@@ -62,6 +62,9 @@ vi.mock('./admin-data', () => ({
   skipRecurringOccurrence: (...args: unknown[]) => skipRecurringOccurrence(...args),
   findWishlist: (...args: unknown[]) => findWishlist(...args),
   getFinancialContextAdmin: (...args: unknown[]) => getFinancialContextAdmin(...args),
+  // `transactionRecorded` now stamps the reply in the user's zone; the legacy
+  // single-transaction path reads it here. No test asserts on the stamp itself.
+  getUserTimezone: async () => 'Asia/Jakarta',
   // Gemini quota ledger — core.ts wires these into the router on every call. No test
   // here drives a real router call (extractReceipt is mocked), so plain stubs suffice.
   getModelHealth: async () => ({ dayKey: '', models: {} }),
@@ -467,7 +470,7 @@ describe('handleIncoming — photos', () => {
       categoryId: 'cat-food',
       gDriveFileId: 'file-1',
     })
-    expect(reply.text.toLowerCase()).toContain('struk tersimpan ke drive')
+    expect(reply.text.toLowerCase()).toContain('struk tersimpan ke google drive')
   })
 
   it('rejects a photo that is not a receipt, without uploading or recording anything', async () => {

@@ -528,5 +528,12 @@ async function finalizeTransaction(
   })
 
   const receiptStatus = receipt ? 'saved' : imageWithoutReceipt ? 'drive_not_linked' : 'none'
-  return replies.transactionRecorded(draft.amount, fullCategory.name, receiptStatus)
+  const tz = await adminData.getUserTimezone(userId)
+  return replies.transactionRecorded(
+    draft.amount,
+    fullCategory.name,
+    receiptStatus,
+    new Date(draft.dateIso),
+    tz,
+  )
 }

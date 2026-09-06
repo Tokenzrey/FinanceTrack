@@ -1,8 +1,10 @@
-import { formatDay, formatIDR, formatMonthLong } from '@/shared/lib/format'
+import { formatDateTime, formatDay, formatIDR, formatMonthLong } from '@/shared/lib/format'
 import { PILLAR_LABELS, type Category, type MonthlySummary, type RecurringRule, type Transaction } from '@/shared/types/domain'
 import type { YearSummary } from '@/shared/lib/year-summary'
 import type { AffordabilityDecision, SmartAffordabilityResult, Wishlist } from '@/shared/types/wishlist.types'
-import type { BotKeyboardButton, BotReply } from './types'
+import { batchTotals, collapseToSingle } from './draft'
+import { reviewToken } from './review-commands'
+import type { BotKeyboardButton, BotReply, DraftBatch, DraftLine } from './types'
 
 /** Every text the bot ever sends, in one place — kept in Bahasa Indonesia to match the
  *  rest of the app's user-facing copy. All balasan are HTML (`parse_mode: 'HTML'` on
@@ -25,6 +27,63 @@ const DECISION_EMOJI: Record<AffordabilityDecision, string> = {
   'Aman Dibeli': '🟢',
   'Gunakan Tabungan': '🟡',
   'Tunda (Risiko Tinggi)': '🔴',
+}
+
+/** `formatIDR` (Intl `id-ID`) joins "Rp" to the number with a non-breaking space;
+ *  chat clients and the review card's byte-exact tests both want a plain one. */
+function idr(value: number): string {
+  return formatIDR(value).replace(/ /g, ' ')
+}
+
+const TYPE_MARK: Record<DraftLine['type'], string> = {
+  expense: '🔻',
+  income: '🔺',
+  transfer: '🔁',
+}
+
+const TYPE_LABEL: Record<DraftLine['type'], string> = {
+  expense: 'Pengeluaran',
+  income: 'Pemasukan',
+  transfer: 'Transfer',
+}
+
+/** Right-aligns the digits so the totals block reads as a column — the "Rp" mark stays
+ *  flush left and the padding goes between it and the number (§5). Wrapped in <code> by
+ *  the caller: WhatsApp and Telegram both render monospace, the only way it survives. */
+function padAmount(value: number, width: number): string {
+  const s = idr(value)
+  const gap = s.indexOf(' ')
+  if (gap < 0) return s.padStart(width, ' ')
+  const mark = s.slice(0, gap)
+  return `${mark} ${s.slice(gap + 1).padStart(width - mark.length - 1, ' ')}`
+}
+
+function amountColumnWidth(values: number[]): number {
+  return Math.max(...values.map((v) => idr(v).length))
+}
+
+function renderLine(line: DraftLine, tz: string, showDate: boolean): string {
+  const category = line.categoryName
+    ? escapeHtml(line.categoryName)
+    : '⚠️ <i>belum ada kategori</i>'
+  const head = `<b>${line.n}.</b> ${TYPE_MARK[line.type]} <b>${idr(line.amount)}</b> · ${category}`
+
+  const details: string[] = []
+  if (line.description) {
+    const qty = line.quantity && line.quantity > 1 ? ` ×${line.quantity}` : ''
+    details.push(`<i>${escapeHtml(line.description)}</i>${qty}`)
+  }
+  if (showDate) details.push(formatDateTime(new Date(line.dateIso), tz))
+
+  return details.length > 0 ? `${head}\n    ${details.join(' · ')}` : head
+}
+
+/** True when every line in the batch falls on the same calendar day — then the date is
+ *  printed once in the header instead of repeated on every line. */
+function sameDay(lines: DraftLine[], tz: string): boolean {
+  if (lines.length === 0) return true
+  const first = formatDateTime(new Date(lines[0].dateIso), tz)
+  return lines.every((l) => formatDateTime(new Date(l.dateIso), tz) === first)
 }
 
 export const replies = {
@@ -116,14 +175,24 @@ export const replies = {
 
   invalidCategoryChoice: (max: number): BotReply => reply(`Balas dengan angka 1-${max}, atau "batal" untuk membatalkan.`),
 
-  transactionRecorded: (amount: number, categoryName: string, receiptStatus: 'saved' | 'none' | 'drive_not_linked'): BotReply => {
+  transactionRecorded: (
+    amount: number,
+    categoryName: string,
+    receiptStatus: 'saved' | 'none' | 'drive_not_linked',
+    date: Date,
+    tz: string,
+  ): BotReply => {
     const note =
       receiptStatus === 'saved'
-        ? '\n<i>Struk tersimpan ke Drive-mu</i>'
+        ? '\n<i>Struk tersimpan ke Google Drive-mu.</i>'
         : receiptStatus === 'drive_not_linked'
-          ? '\n<i>Struk tidak tersimpan — tautkan Google Drive di Pengaturan supaya foto struk ikut tersimpan</i>'
+          ? '\n<i>Struk tidak tersimpan — tautkan Google Drive di Pengaturan agar fotonya ikut tersimpan.</i>'
           : ''
-    return reply(`✅ <b>Tercatat</b>\n\n<b>${formatIDR(amount)}</b> — ${escapeHtml(categoryName)}\n🗓 Hari ini${note}`)
+    return reply(
+      `✅ <b>Tercatat</b>\n\n<b>${idr(amount)}</b> · ${escapeHtml(categoryName)}\n` +
+        `🗓 ${formatDateTime(date, tz)}${note}\n\n` +
+        'Salah? Ketik <code>/undo</code>.',
+    )
   },
 
   summary: (summary: MonthlySummary): BotReply =>
@@ -291,4 +360,218 @@ export const replies = {
     reply('✅ Tautan diputus. Kirim kode baru dari Pengaturan kalau mau menautkan lagi.'),
 
   unlinkCancelled: (): BotReply => reply('Dibatalkan. Tautan akun tidak berubah.'),
+
+  // ─── Kartu tinjauan ────────────────────────────────────────────
+
+  batchReview: (batch: DraftBatch, tz: string): BotReply => {
+    const isSingle = batch.mode === 'single' && batch.lines.length > 0
+    const shown = isSingle ? [collapseToSingle(batch)] : batch.lines
+    const totals = batchTotals(batch)
+    const uniformDate = sameDay(shown, tz)
+
+    const title =
+      shown.length === 1
+        ? '🧾 <b>Tinjau Transaksi</b>'
+        : `🧾 <b>Tinjau ${shown.length} Transaksi</b>`
+    const header = batch.merchant ? `${title} · <i>${escapeHtml(batch.merchant)}</i>` : title
+
+    const parts: string[] = [header]
+    if (uniformDate && shown.length > 0) {
+      parts.push(`<blockquote>${formatDateTime(new Date(shown[0].dateIso), tz)}</blockquote>`)
+    }
+    parts.push('')
+    parts.push(shown.map((l) => renderLine(l, tz, !uniformDate)).join('\n\n'))
+
+    // Totals block: only the types actually present, plus the receipt cross-check.
+    const totalValues = [totals.expense, totals.income, totals.transfer, batch.receiptTotal ?? 0]
+    const width = amountColumnWidth(totalValues.filter((v) => v > 0).concat(0))
+    const totalLines: string[] = []
+    if (totals.expense > 0) totalLines.push(`Pengeluaran  <code>${padAmount(totals.expense, width)}</code>`)
+    if (totals.income > 0) totalLines.push(`Pemasukan    <code>${padAmount(totals.income, width)}</code>`)
+    if (totals.transfer > 0) totalLines.push(`Transfer     <code>${padAmount(totals.transfer, width)}</code>`)
+
+    if (batch.receiptTotal !== null) {
+      const lineSum = batch.lines.reduce((sum, l) => sum + l.amount, 0)
+      const diff = batch.receiptTotal - lineSum
+      // 500 rupiah is the same tolerance the web scanner uses for rounding noise.
+      const verdict =
+        Math.abs(diff) <= 500 ? '✅ cocok' : `⚠️ selisih ${idr(Math.abs(diff))}`
+      totalLines.push(`Total struk  <code>${padAmount(batch.receiptTotal, width)}</code> ${verdict}`)
+    }
+
+    if (totalLines.length > 0) {
+      parts.push('')
+      parts.push('────────────────')
+      parts.push(totalLines.join('\n'))
+    }
+
+    if (batch.warnings.length > 0) {
+      parts.push('')
+      parts.push(batch.warnings.map((w) => `⚠️ ${escapeHtml(w)}`).join('\n'))
+    }
+
+    const keyboard: BotKeyboardButton[][] = [
+      [{ label: `✅ Simpan ${shown.length}`, value: reviewToken({ kind: 'save' })! }],
+    ]
+    if (batch.source === 'receipt' && batch.lines.length > 1) {
+      keyboard[0].push(
+        isSingle
+          ? { label: '🧩 Pisah per item', value: reviewToken({ kind: 'set_mode', mode: 'itemized' })! }
+          : { label: '🧩 Gabung jadi 1', value: reviewToken({ kind: 'set_mode', mode: 'single' })! },
+      )
+    }
+    if (!isSingle && batch.lines.length > 1) {
+      // One row of pencils, at most 5 per row so the buttons stay tappable.
+      for (let i = 0; i < batch.lines.length; i += 5) {
+        keyboard.push(
+          batch.lines.slice(i, i + 5).map((l) => ({
+            label: `✏️ ${l.n}`,
+            value: reviewToken({ kind: 'focus', n: l.n })!,
+          })),
+        )
+      }
+    }
+    keyboard.push([{ label: '❌ Batal', value: reviewToken({ kind: 'cancel' })! }])
+
+    const blockingLine = batch.lines.find((l) => l.categoryId === null)
+    const catExample = blockingLine ? `kat ${blockingLine.n} 1` : 'kat 1 1'
+
+    return {
+      text: parts.join('\n'),
+      html: true,
+      keyboard,
+      whatsappHints: [
+        '<b>Balas untuk mengubah:</b>',
+        '<b>ok</b> — simpan semua',
+        `<b>${catExample}</b> — set kategori`,
+        '<b>nom 1 40rb</b> — ubah nominal',
+        '<b>ket 1 kopi susu</b> — ubah keterangan',
+        '<b>tgl 1 kemarin</b> — ubah tanggal',
+        '<b>hapus 2</b> — buang satu baris',
+        ...(batch.source === 'receipt' && batch.lines.length > 1
+          ? [isSingle ? '<b>pisah</b> — rinci per item' : '<b>gabung</b> — jadikan 1 transaksi']
+          : []),
+        '<b>batal</b> — batalkan semua',
+      ],
+    }
+  },
+
+  batchSaved: (
+    lines: DraftLine[],
+    mode: DraftBatch['mode'],
+    tz: string,
+    receiptStatus: 'saved' | 'none' | 'drive_not_linked',
+  ): BotReply => {
+    const title = lines.length === 1 ? '✅ <b>Tercatat</b>' : `✅ <b>${lines.length} transaksi tercatat</b>`
+    const body = lines
+      .map(
+        (l) =>
+          `${TYPE_MARK[l.type]} <b>${idr(l.amount)}</b> · ${escapeHtml(l.categoryName ?? '')}` +
+          (l.description ? `\n    <i>${escapeHtml(l.description)}</i>` : '') +
+          `\n    🗓 ${formatDateTime(new Date(l.dateIso), tz)}`,
+      )
+      .join('\n\n')
+
+    const footer: string[] = []
+    if (receiptStatus === 'saved') footer.push('<i>Struk tersimpan ke Google Drive-mu.</i>')
+    if (receiptStatus === 'drive_not_linked')
+      footer.push('<i>Struk tidak tersimpan — tautkan Google Drive di Pengaturan agar fotonya ikut tersimpan.</i>')
+    if (mode === 'single' && lines.length === 1) footer.push('<i>Digabung jadi satu transaksi.</i>')
+    footer.push('Salah? Ketik <code>/undo</code> untuk membatalkan pencatatan ini.')
+
+    return reply([title, '', body, '', footer.join('\n')].join('\n'))
+  },
+
+  batchCancelled: (count: number): BotReply =>
+    reply(
+      `🗑 Dibatalkan — ${count} transaksi <b>tidak</b> disimpan.\n` +
+        'Kirim struk atau ketik transaksi baru kapan saja.',
+    ),
+
+  batchEmpty: (): BotReply =>
+    reply(
+      '🤔 Tidak ada baris tersisa untuk disimpan.\n' +
+        'Kirim struk atau ketik transaksinya lagi, mis. <code>makan siang 35rb</code>.',
+    ),
+
+  reviewHelp: (): BotReply =>
+    reply(
+      [
+        '✏️ <b>Perintah saat meninjau</b>',
+        '',
+        '<code>ok</code> — simpan semua baris',
+        '<code>batal</code> — buang semuanya',
+        '<code>hapus 2</code> — buang baris ke-2',
+        '<code>kat 2 1</code> — kategori baris 2 → pilihan 1',
+        '<code>nom 1 40rb</code> — ubah nominal baris 1',
+        '<code>ket 1 kopi susu</code> — ubah keterangan baris 1',
+        '<code>tgl 1 kemarin</code> — ubah tanggal (juga <code>3/9</code>, <code>2026-09-03</code>)',
+        '<code>tipe 1 transfer</code> — ubah jenis (keluar/masuk/transfer)',
+        '<code>gabung</code> — jadikan satu transaksi',
+        '<code>pisah</code> — rinci kembali per item',
+      ].join('\n'),
+    ),
+
+  reviewUnknownCommand: (lineCount: number): BotReply =>
+    reply(
+      `🤔 Belum paham perintah itu. Masih ada <b>${lineCount}</b> transaksi menunggu konfirmasi.\n\n` +
+        'Ketik <code>ok</code> untuk menyimpan, <code>batal</code> untuk membuang, ' +
+        'atau <code>bantuedit</code> untuk daftar perintah edit.',
+    ),
+
+  reviewLineFocus: (line: DraftLine, tz: string): BotReply => {
+    const keyboard: BotKeyboardButton[][] = [
+      line.options.map((option, index) => ({
+        label: option.name,
+        value: reviewToken({ kind: 'set_category', n: line.n, option: index + 1 })!,
+      })),
+      [
+        { label: '🔻 Keluar', value: reviewToken({ kind: 'set_type', n: line.n, type: 'expense' })! },
+        { label: '🔺 Masuk', value: reviewToken({ kind: 'set_type', n: line.n, type: 'income' })! },
+        { label: '🔁 Transfer', value: reviewToken({ kind: 'set_type', n: line.n, type: 'transfer' })! },
+      ],
+      [{ label: `🗑 Hapus baris ${line.n}`, value: reviewToken({ kind: 'remove', n: line.n })! }],
+    ]
+
+    const options = line.options
+      .map((option, index) => `<code>kat ${line.n} ${index + 1}</code> — ${escapeHtml(option.name)}`)
+      .join('\n')
+
+    return {
+      text: [
+        `✏️ <b>Baris ${line.n}</b> — ${TYPE_LABEL[line.type]}`,
+        `<b>${idr(line.amount)}</b>${line.description ? ` · <i>${escapeHtml(line.description)}</i>` : ''}`,
+        `🗓 ${formatDateTime(new Date(line.dateIso), tz)}`,
+        '',
+        '<b>Pilihan kategori</b>',
+        options || '<i>Belum ada kategori aktif yang cocok.</i>',
+      ].join('\n'),
+      html: true,
+      keyboard,
+      whatsappHints: [
+        '<b>Balas:</b>',
+        options,
+        `<b>nom ${line.n} 40rb</b> — ubah nominal`,
+        `<b>ket ${line.n} teks baru</b> — ubah keterangan`,
+        `<b>hapus ${line.n}</b> — buang baris ini`,
+        '<b>ok</b> — simpan semua',
+      ],
+    }
+  },
+
+  reviewInvalidLine: (n: number, max: number): BotReply =>
+    reply(`🤔 Baris ${n} tidak ada. Yang tersedia: <b>1-${max}</b>.`),
+
+  reviewNeedsCategory: (numbers: number[]): BotReply =>
+    reply(
+      `⚠️ Belum bisa disimpan — baris <b>${numbers.join(', ')}</b> belum punya kategori.\n\n` +
+        `Set dengan <code>kat ${numbers[0]} 1</code>, atau buang dengan <code>hapus ${numbers[0]}</code>.`,
+    ),
+
+  busyReviewing: (lineCount: number): BotReply =>
+    reply(
+      `📋 Masih ada <b>${lineCount}</b> transaksi menunggu konfirmasi.\n\n` +
+        'Selesaikan dulu: <code>ok</code> untuk menyimpan, <code>batal</code> untuk membuang — ' +
+        'baru kirim yang berikutnya.',
+    ),
 }

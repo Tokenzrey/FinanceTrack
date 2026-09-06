@@ -2,6 +2,37 @@ import { describe, expect, it } from 'vitest'
 import type { MonthlySummary } from '@/shared/types/domain'
 import type { YearSummary } from '@/shared/lib/year-summary'
 import { replies } from './replies'
+import type { DraftBatch, DraftLine } from './types'
+
+const TZ = 'Asia/Jakarta'
+const NOW_ISO = new Date(Date.UTC(2026, 8, 6, 7, 32, 0)).toISOString()
+
+function line(over: Partial<DraftLine> = {}): DraftLine {
+  return {
+    n: 1,
+    type: 'expense',
+    amount: 35000,
+    description: 'Nasi goreng',
+    categoryId: 'c-food',
+    categoryName: 'Makan & Minum',
+    dateIso: NOW_ISO,
+    options: [{ categoryId: 'c-food', name: 'Makan & Minum' }],
+    ...over,
+  }
+}
+
+function batch(over: Partial<DraftBatch> = {}): DraftBatch {
+  return {
+    pendingKind: 'transaction_batch',
+    source: 'receipt',
+    lines: [line({ n: 1 }), line({ n: 2, amount: 24000, description: 'Teh botol', categoryId: null, categoryName: null, quantity: 2 })],
+    mode: 'itemized',
+    merchant: 'Indomaret',
+    receiptTotal: 59000,
+    warnings: ['Gambar kurang jelas — periksa setiap angka sebelum menyimpan.'],
+    ...over,
+  }
+}
 
 // A minimal but well-formed MonthlySummary — only the fields `summary`/`balance`
 // actually read are populated; the pillar math itself is `budget-math.ts`'s job and
@@ -74,8 +105,8 @@ describe('every templated reply produces balanced HTML tags', () => {
     ['monthClosed', replies.monthClosed(2026, 9)],
     ['notAReceipt', replies.notAReceipt()],
     ['categoryConfirmPrompt', replies.categoryConfirmPrompt(50000, 'beli & sesuatu', [{ name: 'Makan & Minum' }])],
-    ['transactionRecorded(saved)', replies.transactionRecorded(35000, 'Makan & Minum', 'saved')],
-    ['transactionRecorded(drive_not_linked)', replies.transactionRecorded(35000, 'Makan & Minum', 'drive_not_linked')],
+    ['transactionRecorded(saved)', replies.transactionRecorded(35000, 'Makan & Minum', 'saved', new Date('2026-09-06T07:32:00Z'), 'Asia/Jakarta')],
+    ['transactionRecorded(drive_not_linked)', replies.transactionRecorded(35000, 'Makan & Minum', 'drive_not_linked', new Date('2026-09-06T07:32:00Z'), 'Asia/Jakarta')],
     ['summary', replies.summary(summary)],
     ['balance', replies.balance(summary)],
     ['categoryList', replies.categoryList([{ name: 'Makan & Minum' }])],
@@ -135,5 +166,122 @@ describe('wishlistList — decision → emoji mapping', () => {
       },
     ])
     expect(reply.text).toContain(emoji)
+  })
+})
+
+describe('replies.batchReview', () => {
+  it('numbers every line and shows its amount and category', () => {
+    const out = replies.batchReview(batch(), TZ)
+    expect(out.text).toContain('<b>1.</b>')
+    expect(out.text).toContain('<b>2.</b>')
+    expect(out.text).toContain('Rp 35.000')
+    expect(out.text).toContain('Makan &amp; Minum')
+  })
+
+  it('flags a line that still has no category', () => {
+    expect(replies.batchReview(batch(), TZ).text).toContain('belum ada kategori')
+  })
+
+  it('carries a full date and time stamp', () => {
+    expect(replies.batchReview(batch(), TZ).text).toContain('6 Sep 2026 · 14.32 WIB')
+  })
+
+  it('shows the receipt total and whether it matches the line sum', () => {
+    const matching = replies.batchReview(batch(), TZ).text
+    expect(matching).toContain('Total struk')
+    expect(matching).toContain('cocok')
+
+    const mismatched = replies.batchReview(batch({ receiptTotal: 90000 }), TZ).text
+    expect(mismatched).toContain('selisih')
+  })
+
+  it('lists each extraction warning', () => {
+    expect(replies.batchReview(batch(), TZ).text).toContain('Gambar kurang jelas')
+  })
+
+  it('escapes a merchant name that contains HTML-significant characters', () => {
+    const out = replies.batchReview(batch({ merchant: 'Toko <B&B>' }), TZ)
+    expect(out.text).toContain('Toko &lt;B&amp;B&gt;')
+    expect(out.text).not.toContain('<B&B>')
+  })
+
+  it('offers a Telegram keyboard whose tokens all fit callback_data', () => {
+    const out = replies.batchReview(batch(), TZ)
+    const values = (out.keyboard ?? []).flat().map((b) => b.value)
+    expect(values).toContain('rv:save')
+    expect(values).toContain('rv:cancel')
+    expect(values.every((v) => Buffer.byteLength(v, 'utf8') <= 64)).toBe(true)
+  })
+
+  it('offers WhatsApp the typed equivalents instead of the keyboard', () => {
+    const out = replies.batchReview(batch(), TZ)
+    expect(out.whatsappHints?.join('\n')).toContain('ok')
+    expect(out.whatsappHints?.join('\n')).toContain('kat 2 1')
+    expect(out.whatsappHints?.join('\n')).toContain('batal')
+  })
+
+  it('shows a merge button for a receipt batch and none for a text batch', () => {
+    const receipt = (replies.batchReview(batch(), TZ).keyboard ?? []).flat().map((b) => b.value)
+    expect(receipt).toContain('rv:mode:single')
+
+    const text = (replies.batchReview(batch({ source: 'text' }), TZ).keyboard ?? []).flat().map((b) => b.value)
+    expect(text).not.toContain('rv:mode:single')
+  })
+
+  it('renders the collapsed single line when mode is single', () => {
+    const out = replies.batchReview(batch({ mode: 'single' }), TZ)
+    expect(out.text).toContain('Rp 59.000')
+    expect(out.text).not.toContain('<b>2.</b>')
+    expect((out.keyboard ?? []).flat().map((b) => b.value)).toContain('rv:mode:itemized')
+  })
+})
+
+describe('replies.batchSaved', () => {
+  it('confirms every saved line with its own full timestamp', () => {
+    const out = replies.batchSaved([line({ n: 1 }), line({ n: 2, type: 'income', amount: 5_000_000 })], 'itemized', TZ, 'saved')
+    expect(out.text).toContain('2 transaksi')
+    expect(out.text).toContain('6 Sep 2026 · 14.32 WIB')
+    expect(out.text).toContain('Struk tersimpan')
+  })
+
+  it('tells the user Drive is not linked when the upload could not happen', () => {
+    const out = replies.batchSaved([line()], 'itemized', TZ, 'drive_not_linked')
+    expect(out.text).toContain('tautkan Google Drive')
+  })
+
+  it('mentions /undo so a mistake is one word away', () => {
+    expect(replies.batchSaved([line()], 'itemized', TZ, 'none').text).toContain('/undo')
+  })
+})
+
+describe('replies — review helpers', () => {
+  it('reviewHelp lists every edit command with an example', () => {
+    const text = replies.reviewHelp().text
+    for (const cmd of ['ok', 'batal', 'hapus', 'kat', 'nom', 'ket', 'tgl', 'tipe', 'gabung', 'pisah']) {
+      expect(text).toContain(cmd)
+    }
+  })
+
+  it('reviewNeedsCategory names the exact lines still blocking the save', () => {
+    expect(replies.reviewNeedsCategory([2, 4]).text).toContain('2')
+    expect(replies.reviewNeedsCategory([2, 4]).text).toContain('4')
+  })
+
+  it('reviewInvalidLine states the valid range', () => {
+    expect(replies.reviewInvalidLine(9, 3).text).toContain('1-3')
+  })
+
+  it('busyReviewing explains what to do instead of silently dropping the draft', () => {
+    const text = replies.busyReviewing(2).text
+    expect(text).toContain('2')
+    expect(text).toContain('batal')
+  })
+})
+
+describe('replies.transactionRecorded', () => {
+  it('now carries a full date and time', () => {
+    const out = replies.transactionRecorded(35000, 'Makan & Minum', 'none', new Date(NOW_ISO), TZ)
+    expect(out.text).toContain('6 Sep 2026 · 14.32 WIB')
+    expect(out.text).not.toContain('Hari ini')
   })
 })
