@@ -1,9 +1,5 @@
-import {
-  GoogleGenAI,
-  Type,
-  type GenerateContentParameters,
-  type GenerateContentResponse,
-} from '@google/genai'
+import { Type } from '@google/genai'
+import { generateWithRouter } from '@/shared/lib/gemini-router'
 import type {
   ExtractedReceiptItem,
   MappedReceiptItem,
@@ -20,21 +16,6 @@ import type {
  * The route keeps its own auth check and payload validation — only the part that
  * actually talks to Gemini moved.
  */
-
-/**
- * Models tried in order. The free tier meters requests *per model per day* (e.g. 20/day
- * for some newer flash models), so when the primary's daily quota is spent — or it's
- * momentarily overloaded (503) — the call falls through to the next candidate instead
- * of failing the whole feature. `GEMINI_MODEL` overrides the primary; the rest stay as
- * fallbacks. Duplicates (if the override equals a fallback) are collapsed.
- *
- * `gemini-1.5-flash` from the original plan has been retired and is no longer served.
- */
-const MODELS: string[] = [
-  process.env.GEMINI_MODEL ?? 'gemini-3.5-flash',
-  'gemini-2.5-flash',
-  'gemini-flash-latest',
-].filter((m, i, arr) => m && arr.indexOf(m) === i)
 
 /** Base64 of a compressed receipt. Anything larger is a mis-sized upload, not a receipt. */
 export const MAX_BASE64_CHARS = 6 * 1024 * 1024
@@ -154,61 +135,19 @@ Aturan mapping:
 `.trim()
 }
 
-/** The numeric HTTP status on a `@google/genai` ApiError (`429`, `503`, …), if any. */
-function aiErrorStatus(err: unknown): number | undefined {
-  const s = (err as { status?: unknown } | null)?.status
-  return typeof s === 'number' ? s : undefined
-}
-
 /**
  * True for the two Gemini failures the caller should treat as "try again later, this
  * isn't broken": 429 RESOURCE_EXHAUSTED (rate limit / daily free-tier quota) and 503
  * UNAVAILABLE (model overloaded). Checks the numeric status first, then the message
- * body for SDK paths that only surface it there.
+ * body for SDK paths that only surface it there. Still exported from here — `core.ts`
+ * imports it to decide when to show the "AI unavailable" reply; the router imports it
+ * to classify a rotation cause.
  */
 export function isAiQuotaOrOverloadError(err: unknown): boolean {
-  const status = aiErrorStatus(err)
+  const status = (err as { status?: unknown } | null)?.status
   if (status === 429 || status === 503) return true
   const msg = err instanceof Error ? err.message : String(err ?? '')
   return /RESOURCE_EXHAUSTED|UNAVAILABLE|"code":\s*(?:429|503)\b/.test(msg)
-}
-
-/** One automatic retry for transient failures (503 overload, network blips): a single
- *  retry turns those into a slow success. A 429 is NOT retried — a daily quota won't
- *  clear in 800ms and an immediate retry just burns another request against a small
- *  free-tier limit. */
-async function withRetry<T>(operation: () => Promise<T>): Promise<T> {
-  try {
-    return await operation()
-  } catch (err) {
-    if (aiErrorStatus(err) === 429) throw err
-    await new Promise((resolve) => setTimeout(resolve, 800))
-    return operation()
-  }
-}
-
-/**
- * Runs one generateContent request, walking `MODELS` in order: the primary gets the
- * `withRetry` transient-503 retry, each fallback gets a single attempt. Any error —
- * quota (429), overload (503), or a model id this key cannot use — falls through to
- * the next candidate; the last error is rethrown once every candidate is exhausted, so
- * a genuine failure (unreadable image, bad key) still surfaces to the caller.
- */
-async function generateWithModels(
-  ai: GoogleGenAI,
-  params: Omit<GenerateContentParameters, 'model'>,
-): Promise<GenerateContentResponse> {
-  let lastErr: unknown
-  for (let i = 0; i < MODELS.length; i++) {
-    const model = MODELS[i]
-    try {
-      const call = () => ai.models.generateContent({ model, ...params })
-      return i === 0 ? await withRetry(call) : await call()
-    } catch (err) {
-      lastErr = err
-    }
-  }
-  throw lastErr
 }
 
 /**
@@ -223,13 +162,10 @@ export async function extractReceipt(
   categories: ScanReceiptApiRequest['categories'],
   hints: ScanReceiptApiRequest['hints'],
 ): Promise<ReceiptScanResult> {
-  const apiKey = process.env.GEMINI_API_KEY
-  if (!apiKey) throw new Error('GEMINI_API_KEY belum dikonfigurasi.')
+  if (!process.env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY belum dikonfigurasi.')
 
-  const ai = new GoogleGenAI({ apiKey })
-
-  // 1. Extract the receipt.
-  const extractionResponse = await generateWithModels(ai, {
+  // 1. Extract the receipt. Vision tier — only it accepts an inlineData image.
+  const extractionResponse = await generateWithRouter('vision', {
     contents: [{ text: EXTRACTION_PROMPT }, { inlineData: { mimeType, data: imageBase64 } }],
     config: { responseMimeType: 'application/json', responseSchema: extractionSchema, temperature: 0 },
   })
@@ -260,7 +196,10 @@ export async function extractReceipt(
 
   if (worthMapping) {
     try {
-      const mappingResponse = await generateWithModels(ai, {
+      // Item mapping is pure text. Keeping it on the vision tier used to spend the
+      // scarcest quota (20/day) on work the 500/day tier does just as well — moving it
+      // doubles how many receipts a day the bot can read.
+      const mappingResponse = await generateWithRouter('text', {
         contents: buildMappingPrompt(extraction.items, categories, extraction.merchantType, hints),
         config: { responseMimeType: 'application/json', responseSchema: mappingSchema, temperature: 0 },
       })

@@ -1,6 +1,7 @@
 import { projectSavings } from '@/shared/lib/analytics'
 import { buildMonthlySummary } from '@/shared/lib/budget-math'
 import { formatIDR, formatMonthLong } from '@/shared/lib/format'
+import { configureRouterIO } from '@/shared/lib/gemini-router'
 import {
   ALLOWED_MIME,
   MAX_BASE64_CHARS,
@@ -42,6 +43,11 @@ interface Draft {
 type GoalContributionDraft = Extract<BotPendingDraft, { pendingKind: 'goal_contribution' }>
 
 export async function handleIncoming(msg: BotIncoming): Promise<BotReply> {
+  // Point the Gemini router at the Firestore-backed quota ledger. Idempotent, and done
+  // here rather than in `firebase-admin.ts` because wiring it there would create a
+  // `firebase-admin → admin-data → firebase-admin` import cycle.
+  configureRouterIO({ load: adminData.getModelHealth, save: adminData.saveModelHealth })
+
   const link = await adminData.findLinkByExternalId(msg.platform, msg.externalId)
 
   if (!link) {

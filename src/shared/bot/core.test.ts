@@ -62,6 +62,10 @@ vi.mock('./admin-data', () => ({
   skipRecurringOccurrence: (...args: unknown[]) => skipRecurringOccurrence(...args),
   findWishlist: (...args: unknown[]) => findWishlist(...args),
   getFinancialContextAdmin: (...args: unknown[]) => getFinancialContextAdmin(...args),
+  // Gemini quota ledger — core.ts wires these into the router on every call. No test
+  // here drives a real router call (extractReceipt is mocked), so plain stubs suffice.
+  getModelHealth: async () => ({ dayKey: '', models: {} }),
+  saveModelHealth: async () => {},
 }))
 
 const matchReadCommand = vi.fn()

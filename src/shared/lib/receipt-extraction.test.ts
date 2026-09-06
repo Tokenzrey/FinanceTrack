@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const generateContent = vi.fn()
+const generateWithRouter = vi.fn()
+vi.mock('@/shared/lib/gemini-router', () => ({
+  generateWithRouter: (...a: unknown[]) => generateWithRouter(...a),
+}))
 
 vi.mock('@google/genai', () => ({
-  GoogleGenAI: vi.fn().mockImplementation(function GoogleGenAI(this: { models: { generateContent: typeof generateContent } }) {
-    this.models = { generateContent }
-  }),
   Type: { OBJECT: 'OBJECT', ARRAY: 'ARRAY', STRING: 'STRING', NUMBER: 'NUMBER' },
 }))
 
-// Imported after the mock so the module under test picks up the mocked SDK.
+// Imported after the mock so the module under test picks up the mocked router.
 const { extractReceipt, isAiQuotaOrOverloadError } = await import('./receipt-extraction')
 
 const CATEGORIES = [
@@ -38,7 +38,7 @@ describe('extractReceipt', () => {
 
   beforeEach(() => {
     process.env.GEMINI_API_KEY = 'test-key'
-    generateContent.mockReset()
+    generateWithRouter.mockReset()
   })
 
   afterEach(() => {
@@ -53,7 +53,7 @@ describe('extractReceipt', () => {
   })
 
   it('normalises a 0-1 confidence to 0-100', async () => {
-    generateContent
+    generateWithRouter
       .mockResolvedValueOnce(extractionResult({ confidence: 0.9 }))
       .mockResolvedValueOnce({ text: JSON.stringify([]) })
 
@@ -62,17 +62,17 @@ describe('extractReceipt', () => {
   })
 
   it('flags a low-confidence extraction as likely not a receipt, and skips mapping entirely', async () => {
-    generateContent.mockResolvedValueOnce(extractionResult({ confidence: 5, items: [], total: 0 }))
+    generateWithRouter.mockResolvedValueOnce(extractionResult({ confidence: 5, items: [], total: 0 }))
 
     const result = await extractReceipt('base64', 'image/jpeg', CATEGORIES, [])
     expect(result.totalConfidence).toBe(5)
     expect(result.warnings).toContain('Sepertinya ini bukan struk belanja, atau gambarnya terlalu tidak jelas.')
-    // Confidence < 20 means mapping is not worth a second call — only one generateContent call happened.
-    expect(generateContent).toHaveBeenCalledTimes(1)
+    // Confidence < 20 means mapping is not worth a second call — only one router call happened.
+    expect(generateWithRouter).toHaveBeenCalledTimes(1)
   })
 
   it('rejects a mapped categoryId the user does not actually own', async () => {
-    generateContent
+    generateWithRouter
       .mockResolvedValueOnce(extractionResult())
       .mockResolvedValueOnce({
         text: JSON.stringify([{ itemIndex: 0, categoryId: 'made-up-id', confidence: 90 }]),
@@ -84,7 +84,7 @@ describe('extractReceipt', () => {
   })
 
   it('accepts a mapped categoryId that exists in the caller-supplied category list', async () => {
-    generateContent
+    generateWithRouter
       .mockResolvedValueOnce(extractionResult())
       .mockResolvedValueOnce({
         text: JSON.stringify([{ itemIndex: 0, categoryId: 'cat-food', confidence: 85 }]),
@@ -96,7 +96,7 @@ describe('extractReceipt', () => {
   })
 
   it('warns when the receipt total does not match the sum of mapped items', async () => {
-    generateContent
+    generateWithRouter
       .mockResolvedValueOnce(
         extractionResult({
           items: [{ name: 'Kopi', totalPrice: 20000 }],
@@ -109,44 +109,26 @@ describe('extractReceipt', () => {
     expect(result.warnings.some((w) => w.includes('tidak cocok dengan jumlah item'))).toBe(true)
   })
 
-  it('retries once on a transient failure, then succeeds', async () => {
-    generateContent
-      .mockRejectedValueOnce(new Error('503 transient'))
+  it('reads the image on the vision tier and maps categories on the text tier', async () => {
+    generateWithRouter
       .mockResolvedValueOnce(extractionResult())
       .mockResolvedValueOnce({ text: JSON.stringify([]) })
 
-    const result = await extractReceipt('base64', 'image/jpeg', CATEGORIES, [])
-    expect(result.extraction.merchant).toBe('Indomaret')
+    await extractReceipt('base64', 'image/jpeg', CATEGORIES, [])
+
+    expect(generateWithRouter.mock.calls[0][0]).toBe('vision')
+    expect(generateWithRouter.mock.calls[1][0]).toBe('text')
   })
 
-  it('does NOT retry a 429 on the same model — it moves straight to the next model', async () => {
-    // 3 models configured (primary + 2 fallbacks); every one is quota-exhausted.
-    generateContent.mockRejectedValue(Object.assign(new Error('RESOURCE_EXHAUSTED'), { status: 429 }))
-
-    await expect(extractReceipt('base64', 'image/jpeg', CATEGORIES, [])).rejects.toThrow('RESOURCE_EXHAUSTED')
-    // One call per model, NOT two — a 429 is never retried on the model that threw it.
-    expect(generateContent).toHaveBeenCalledTimes(3)
-  })
-
-  it('falls through to a fallback model when the primary is quota-exhausted (429)', async () => {
-    generateContent
-      .mockRejectedValueOnce(Object.assign(new Error('RESOURCE_EXHAUSTED'), { status: 429 })) // primary: extraction
-      .mockResolvedValueOnce(extractionResult()) // fallback model: extraction OK
-      .mockResolvedValueOnce({ text: JSON.stringify([]) }) // mapping (primary model, back in quota by now)
-
-    const result = await extractReceipt('base64', 'image/jpeg', CATEGORIES, [])
-    expect(result.extraction.merchant).toBe('Indomaret')
-  })
-
-  it('falls through to a fallback model on a 503 overload too', async () => {
-    generateContent
-      .mockRejectedValueOnce(Object.assign(new Error('overloaded'), { status: 503 })) // primary attempt 1
-      .mockRejectedValueOnce(Object.assign(new Error('overloaded'), { status: 503 })) // primary withRetry attempt 2
-      .mockResolvedValueOnce(extractionResult()) // first fallback model succeeds
+  it('passes the prompt and image through to the router as contents', async () => {
+    generateWithRouter
+      .mockResolvedValueOnce(extractionResult())
       .mockResolvedValueOnce({ text: JSON.stringify([]) })
 
-    const result = await extractReceipt('base64', 'image/jpeg', CATEGORIES, [])
-    expect(result.extraction.merchant).toBe('Indomaret')
+    await extractReceipt('base64', 'image/jpeg', CATEGORIES, [])
+
+    const visionContents = generateWithRouter.mock.calls[0][1].contents
+    expect(visionContents[1].inlineData).toEqual({ mimeType: 'image/jpeg', data: 'base64' })
   })
 })
 

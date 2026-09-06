@@ -15,6 +15,7 @@ import type { FinancialContext } from '@/shared/use-cases/wishlist/CalculateAffo
 import type { Wishlist } from '@/shared/types/wishlist.types'
 import { buildMonthlySummary } from '@/shared/lib/budget-math'
 import { DEFAULT_PILLAR_CONFIG } from '@/shared/types/domain'
+import type { ModelHealth } from '@/shared/lib/gemini-router'
 import type { BotPlatform } from './types'
 
 /**
@@ -452,4 +453,29 @@ export async function createTransaction(userId: string, dto: CreateTransactionDT
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   })
+}
+
+// ─── Gemini quota ledger ───────────────────────────────────────
+
+/**
+ * Shared Gemini quota ledger. Not scoped to a user: the free-tier quota belongs to the
+ * API key, so every user's traffic draws from the same pool.
+ *
+ * ponytail: read-modify-write without a transaction. Two concurrent webhooks can both
+ * read `used: 19` and both fire — worst case one extra 429, which the router already
+ * handles by rotating. A transaction here would add a round trip to every model call
+ * to prevent an error that is already harmless.
+ */
+export async function getModelHealth(): Promise<{ dayKey: string; models: Record<string, ModelHealth> }> {
+  const snap = await getAdminDb().doc('bot_meta/geminiHealth').get()
+  if (!snap.exists) return { dayKey: '', models: {} }
+  const data = snap.data() as { dayKey?: string; models?: Record<string, ModelHealth> }
+  return { dayKey: data.dayKey ?? '', models: data.models ?? {} }
+}
+
+export async function saveModelHealth(
+  dayKey: string,
+  models: Record<string, ModelHealth>,
+): Promise<void> {
+  await getAdminDb().doc('bot_meta/geminiHealth').set({ dayKey, models, updatedAt: FieldValue.serverTimestamp() })
 }
