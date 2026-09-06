@@ -16,9 +16,9 @@ import type { Wishlist } from '@/shared/types/wishlist.types'
 import { buildMonthlySummary } from '@/shared/lib/budget-math'
 import { DEFAULT_PILLAR_CONFIG } from '@/shared/types/domain'
 import type { ModelHealth } from '@/shared/lib/gemini-router'
-import type { CategoryHint } from '@/shared/types/receipt-scanner.types'
+import type { CategoryHint, ReceiptScanResult } from '@/shared/types/receipt-scanner.types'
 import { DEFAULT_BOT_PREFS } from './types'
-import type { BotPlatform, BotPrefs, DraftBatch } from './types'
+import type { BotPlatform, BotPrefs, DraftBatch, ParsedLine } from './types'
 
 /**
  * The one module in the bot subsystem that talks to Firestore. Everything here reads
@@ -626,4 +626,43 @@ export async function saveModelHealth(
   models: Record<string, ModelHealth>,
 ): Promise<void> {
   await getAdminDb().doc('bot_meta/geminiHealth').set({ dayKey, models, updatedAt: FieldValue.serverTimestamp() })
+}
+
+// ─── Model-result cache (keyed by content hash — see cache.ts) ──
+//
+// The same photo or sentence arriving twice is routine: GOWA retries a webhook it
+// thinks failed, and a user who saw no reply re-sends. Each repeat used to cost two
+// calls out of a twenty-a-day budget.
+
+/** 30 days. Long enough that a re-send weeks later is free; short enough that a
+ *  Firestore native TTL policy on `expiresAt` keeps the collection from growing. */
+const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000
+
+export async function getCachedReceipt(userId: string, hash: string): Promise<ReceiptScanResult | null> {
+  const snap = await getAdminDb().doc(`users/${userId}/bot_receipt_cache/${hash}`).get()
+  if (!snap.exists) return null
+  return (snap.data()?.result ?? null) as ReceiptScanResult | null
+}
+
+export async function saveCachedReceipt(
+  userId: string,
+  hash: string,
+  result: ReceiptScanResult,
+): Promise<void> {
+  await getAdminDb()
+    .doc(`users/${userId}/bot_receipt_cache/${hash}`)
+    .set({ result, expiresAt: Timestamp.fromMillis(Date.now() + CACHE_TTL_MS) })
+}
+
+export async function getCachedParse(userId: string, hash: string): Promise<ParsedLine[] | null> {
+  const snap = await getAdminDb().doc(`users/${userId}/bot_parse_cache/${hash}`).get()
+  if (!snap.exists) return null
+  const lines = snap.data()?.lines
+  return Array.isArray(lines) ? (lines as ParsedLine[]) : null
+}
+
+export async function saveCachedParse(userId: string, hash: string, lines: ParsedLine[]): Promise<void> {
+  await getAdminDb()
+    .doc(`users/${userId}/bot_parse_cache/${hash}`)
+    .set({ lines, expiresAt: Timestamp.fromMillis(Date.now() + CACHE_TTL_MS) })
 }

@@ -6,6 +6,7 @@ import {
 } from '@/shared/lib/receipt-extraction'
 import type { Category } from '@/shared/types/domain'
 import * as adminData from './admin-data'
+import { hashImage, hashParse, stripForCache } from './cache'
 import { batchToDTOs, buildLinesFromParsed, buildLinesFromReceipt, renumber } from './draft'
 import { uploadReceiptForUser } from './drive-upload'
 import { startReview } from './flow-review'
@@ -89,8 +90,18 @@ export async function handleTextTransaction(userId: string, text: string): Promi
     return startReview(userId, batch)
   }
 
-  // L1 — text tier (flash-lite): 500/day per model, and lower latency than flash.
-  const parsed = await parseTransactionBatch(text, active)
+  // L0.5 — the same sentence, with the same categories, has the same answer.
+  const parseKey = hashParse(text, active.map((c) => c.id))
+  let parsed = await adminData.getCachedParse(userId, parseKey)
+  if (!parsed) {
+    // L1 — text tier (flash-lite): 500/day per model, and lower latency than flash.
+    parsed = await parseTransactionBatch(text, active)
+    // A fallback line means the model never actually answered; caching it would pin
+    // the failure in place for 30 days.
+    if (parsed.length > 0 && parsed[0].confidence > 0) {
+      await adminData.saveCachedParse(userId, parseKey, parsed)
+    }
+  }
   const lines = buildLinesFromParsed(parsed, active, now)
 
   // Every segment failed to yield an amount — the message simply has no number in it.
@@ -117,23 +128,35 @@ export async function handlePhoto(
   ])
   const spendCategories = categories.filter((c) => c.isActive && c.pillar !== 'income')
 
-  let result
-  try {
-    // The caption is extra extraction context: on a blurry or long itemised receipt
-    // "yang buram itu teh botol 2x12rb" recovers lines OCR drops. Also still feeds the
-    // fallback line's description below.
-    result = await extractReceipt(
-      msg.imageBase64,
-      msg.mimeType,
-      spendCategories.map((c) => ({ id: c.id, name: c.name, pillar: c.pillar })),
-      // Was `[]` — the bot never used the memory the web scanner had been building.
-      hints,
-      msg.caption,
-    )
-  } catch (error) {
-    console.error('bot handlePhoto extractReceipt error:', error)
-    if (isAiQuotaOrOverloadError(error)) return replies.aiUnavailable()
-    return replies.genericError()
+  // The same photo arriving twice is routine — GOWA retries, or the user re-sends after
+  // seeing no reply. A cached read costs nothing from the vision budget.
+  const imageKey = hashImage(msg.imageBase64)
+  let result = await adminData.getCachedReceipt(userId, imageKey)
+
+  if (!result) {
+    try {
+      // The caption is extra extraction context: on a blurry or long itemised receipt
+      // "yang buram itu teh botol 2x12rb" recovers lines OCR drops. Also still feeds the
+      // fallback line's description below.
+      result = await extractReceipt(
+        msg.imageBase64,
+        msg.mimeType,
+        spendCategories.map((c) => ({ id: c.id, name: c.name, pillar: c.pillar })),
+        // Was `[]` — the bot never used the memory the web scanner had been building.
+        hints,
+        msg.caption,
+      )
+    } catch (error) {
+      console.error('bot handlePhoto extractReceipt error:', error)
+      if (isAiQuotaOrOverloadError(error)) return replies.aiUnavailable()
+      return replies.genericError()
+    }
+
+    // Cache only a usable read. A "not a receipt" verdict on a bad angle must not
+    // survive the user re-taking the photo, and a quota error must not be pinned.
+    if (result.totalConfidence >= 20 && result.extraction.total > 0) {
+      await adminData.saveCachedReceipt(userId, imageKey, stripForCache(result))
+    }
   }
 
   if (result.totalConfidence < 20 || result.extraction.total <= 0) return replies.notAReceipt()

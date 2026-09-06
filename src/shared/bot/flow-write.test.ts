@@ -13,6 +13,10 @@ const setPending = vi.fn()
 const getScanHints = vi.fn()
 const saveScanHints = vi.fn()
 const getBotPrefs = vi.fn()
+const getCachedReceipt = vi.fn()
+const saveCachedReceipt = vi.fn()
+const getCachedParse = vi.fn()
+const saveCachedParse = vi.fn()
 
 vi.mock('./admin-data', () => ({
   findCategories: (...a: unknown[]) => findCategories(...a),
@@ -25,6 +29,10 @@ vi.mock('./admin-data', () => ({
   getScanHints: (...a: unknown[]) => getScanHints(...a),
   saveScanHints: (...a: unknown[]) => saveScanHints(...a),
   getBotPrefs: (...a: unknown[]) => getBotPrefs(...a),
+  getCachedReceipt: (...a: unknown[]) => getCachedReceipt(...a),
+  saveCachedReceipt: (...a: unknown[]) => saveCachedReceipt(...a),
+  getCachedParse: (...a: unknown[]) => getCachedParse(...a),
+  saveCachedParse: (...a: unknown[]) => saveCachedParse(...a),
 }))
 
 const parseTransactionBatch = vi.fn()
@@ -91,6 +99,10 @@ beforeEach(() => {
   getScanHints.mockResolvedValue([])
   saveScanHints.mockResolvedValue(undefined)
   getBotPrefs.mockResolvedValue(DEFAULT_BOT_PREFS)
+  getCachedReceipt.mockResolvedValue(null)
+  saveCachedReceipt.mockResolvedValue(undefined)
+  getCachedParse.mockResolvedValue(null)
+  saveCachedParse.mockResolvedValue(undefined)
 })
 
 describe('handleTextTransaction', () => {
@@ -178,6 +190,22 @@ describe('handleTextTransaction', () => {
     expect(createTransactionsBatch).not.toHaveBeenCalled()
     expect(setPending).toHaveBeenCalledTimes(1)
   })
+
+  it('re-uses a cached parse instead of calling the model again', async () => {
+    getScanHints.mockResolvedValue([])
+    getCachedParse.mockResolvedValue([parsed()])
+    const reply = await handleTextTransaction('u1', 'makan siang 35rb')
+    expect(parseTransactionBatch).not.toHaveBeenCalled()
+    expect(reply.text).toContain('Tercatat')
+  })
+
+  it('does not cache a parse that came back as the zero-confidence fallback', async () => {
+    getScanHints.mockResolvedValue([])
+    getCachedParse.mockResolvedValue(null)
+    parseTransactionBatch.mockResolvedValue([parsed({ confidence: 0 })])
+    await handleTextTransaction('u1', 'entah 35rb')
+    expect(saveCachedParse).not.toHaveBeenCalled()
+  })
 })
 
 describe('handlePhoto', () => {
@@ -255,5 +283,25 @@ describe('handlePhoto', () => {
     const reply = await handlePhoto('u1', { ...photo(), mimeType: 'application/pdf' })
     expect(extractReceipt).not.toHaveBeenCalled()
     expect(reply.text).toContain('bukan foto struk')
+  })
+
+  it('re-uses a cached receipt read instead of spending vision quota again', async () => {
+    getCachedReceipt.mockResolvedValue(receiptResult())
+    const reply = await handlePhoto('u1', photo())
+    expect(extractReceipt).not.toHaveBeenCalled()
+    expect(reply.text).toContain('Tinjau')
+  })
+
+  it('caches a usable read, but not a rejected one', async () => {
+    getCachedReceipt.mockResolvedValue(null)
+    extractReceipt.mockResolvedValue(receiptResult())
+    await handlePhoto('u1', photo())
+    expect(saveCachedReceipt).toHaveBeenCalledTimes(1)
+
+    vi.clearAllMocks()
+    getCachedReceipt.mockResolvedValue(null)
+    extractReceipt.mockResolvedValue(receiptResult({ totalConfidence: 5 }))
+    await handlePhoto('u1', photo())
+    expect(saveCachedReceipt).not.toHaveBeenCalled()
   })
 })
