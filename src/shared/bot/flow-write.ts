@@ -98,13 +98,15 @@ export async function handlePhoto(
 
   let result
   try {
-    // The caption as extraction context (`userNote`) is a deferred task — `extractReceipt`
-    // still takes 4 args. For now the caption only feeds the fallback line's description.
+    // The caption is extra extraction context: on a blurry or long itemised receipt
+    // "yang buram itu teh botol 2x12rb" recovers lines OCR drops. Also still feeds the
+    // fallback line's description below.
     result = await extractReceipt(
       msg.imageBase64,
       msg.mimeType,
       spendCategories.map((c) => ({ id: c.id, name: c.name, pillar: c.pillar })),
       [],
+      msg.caption,
     )
   } catch (error) {
     console.error('bot handlePhoto extractReceipt error:', error)

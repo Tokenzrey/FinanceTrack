@@ -181,6 +181,12 @@ describe('handlePhoto', () => {
     expect(reply.text).toContain('Tinjau Transaksi')
   })
 
+  it('passes the photo caption to extractReceipt as extraction context', async () => {
+    extractReceipt.mockResolvedValue(receiptResult())
+    await handlePhoto('u1', photo('struk indomaret, yang buram teh botol 2x12rb'))
+    expect(extractReceipt.mock.calls[0][4]).toBe('struk indomaret, yang buram teh botol 2x12rb')
+  })
+
   it('reports a quota failure distinctly and writes nothing', async () => {
     extractReceipt.mockRejectedValue(Object.assign(new Error('quota'), { status: 429 }))
     const reply = await handlePhoto('u1', photo())

@@ -130,6 +130,63 @@ describe('extractReceipt', () => {
     const visionContents = generateWithRouter.mock.calls[0][1].contents
     expect(visionContents[1].inlineData).toEqual({ mimeType: 'image/jpeg', data: 'base64' })
   })
+
+  it('injects the user caption into the extraction prompt as extra context', async () => {
+    generateWithRouter
+      .mockResolvedValueOnce(extractionResult())
+      .mockResolvedValueOnce({ text: JSON.stringify([]) })
+
+    await extractReceipt('base64', 'image/jpeg', CATEGORIES, [], 'yang buram itu teh botol 2x12rb')
+
+    const prompt = generateWithRouter.mock.calls[0][1].contents[0].text as string
+    expect(prompt).toContain('Catatan dari pengguna')
+    expect(prompt).toContain('yang buram itu teh botol 2x12rb')
+  })
+
+  it('injects the caption into the category-mapping prompt too', async () => {
+    generateWithRouter
+      .mockResolvedValueOnce(extractionResult())
+      .mockResolvedValueOnce({ text: JSON.stringify([]) })
+
+    await extractReceipt('base64', 'image/jpeg', CATEGORIES, [], 'belanja bulanan kantor')
+
+    const mappingPrompt = generateWithRouter.mock.calls[1][1].contents as string
+    expect(mappingPrompt).toContain('belanja bulanan kantor')
+  })
+
+  it('leaves both prompts unchanged when there is no caption', async () => {
+    generateWithRouter
+      .mockResolvedValueOnce(extractionResult())
+      .mockResolvedValueOnce({ text: JSON.stringify([]) })
+
+    await extractReceipt('base64', 'image/jpeg', CATEGORIES, [])
+
+    const prompt = generateWithRouter.mock.calls[0][1].contents[0].text as string
+    expect(prompt).not.toContain('Catatan dari pengguna')
+  })
+
+  it('ignores a caption that is only whitespace', async () => {
+    generateWithRouter
+      .mockResolvedValueOnce(extractionResult())
+      .mockResolvedValueOnce({ text: JSON.stringify([]) })
+
+    await extractReceipt('base64', 'image/jpeg', CATEGORIES, [], '   ')
+
+    const prompt = generateWithRouter.mock.calls[0][1].contents[0].text as string
+    expect(prompt).not.toContain('Catatan dari pengguna')
+  })
+
+  it('truncates an absurdly long caption instead of blowing up the prompt', async () => {
+    generateWithRouter
+      .mockResolvedValueOnce(extractionResult())
+      .mockResolvedValueOnce({ text: JSON.stringify([]) })
+
+    await extractReceipt('base64', 'image/jpeg', CATEGORIES, [], 'x'.repeat(2000))
+
+    const prompt = generateWithRouter.mock.calls[0][1].contents[0].text as string
+    expect(prompt).toContain('x'.repeat(500))
+    expect(prompt).not.toContain('x'.repeat(501))
+  })
 })
 
 describe('isAiQuotaOrOverloadError', () => {

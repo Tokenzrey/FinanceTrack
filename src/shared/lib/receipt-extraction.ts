@@ -22,6 +22,20 @@ export const MAX_BASE64_CHARS = 6 * 1024 * 1024
 
 export const ALLOWED_MIME = ['image/jpeg', 'image/png', 'image/webp', 'image/heic']
 
+/** A caption is free user text pasted into a prompt; cap it so a runaway paste cannot
+ *  crowd out the instructions (or the image) in the context window. */
+const MAX_USER_NOTE_CHARS = 500
+
+function userNoteBlock(userNote: string | undefined): string {
+  const note = userNote?.trim()
+  if (!note) return ''
+  return `
+
+Catatan dari pengguna tentang struk ini (PRIORITASKAN sebagai konteks — pengguna
+melihat struk aslinya, kamu hanya melihat fotonya yang mungkin buram atau terpotong):
+"${note.slice(0, MAX_USER_NOTE_CHARS)}"`
+}
+
 const EXTRACTION_PROMPT = `
 Kamu adalah AI yang ahli membaca struk belanja/kwitansi, terutama dari Indonesia.
 
@@ -100,6 +114,7 @@ function buildMappingPrompt(
   categories: ScanReceiptApiRequest['categories'],
   merchantType: string | null,
   hints: ScanReceiptApiRequest['hints'],
+  userNote?: string,
 ): string {
   const hintLines = hints
     .map((hint) => {
@@ -122,7 +137,7 @@ ${JSON.stringify(
   null,
   2,
 )}
-${hintLines.length > 0 ? `\nPreferensi user yang sudah dipelajari (PRIORITASKAN ini):\n${hintLines.join('\n')}` : ''}
+${hintLines.length > 0 ? `\nPreferensi user yang sudah dipelajari (PRIORITASKAN ini):\n${hintLines.join('\n')}` : ''}${userNoteBlock(userNote)}
 
 Aturan mapping:
 - Makanan/minuman dari supermarket ke kategori bahan makanan harian
@@ -161,12 +176,19 @@ export async function extractReceipt(
   mimeType: string,
   categories: ScanReceiptApiRequest['categories'],
   hints: ScanReceiptApiRequest['hints'],
+  /** Caption the user sent with the photo. The one thing the model does not have: a
+   *  human who saw the paper receipt. Especially load-bearing on a blurry photo or a
+   *  long itemised one, where OCR alone drops lines. */
+  userNote?: string,
 ): Promise<ReceiptScanResult> {
   if (!process.env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY belum dikonfigurasi.')
 
   // 1. Extract the receipt. Vision tier — only it accepts an inlineData image.
   const extractionResponse = await generateWithRouter('vision', {
-    contents: [{ text: EXTRACTION_PROMPT }, { inlineData: { mimeType, data: imageBase64 } }],
+    contents: [
+      { text: `${EXTRACTION_PROMPT}${userNoteBlock(userNote)}` },
+      { inlineData: { mimeType, data: imageBase64 } },
+    ],
     config: { responseMimeType: 'application/json', responseSchema: extractionSchema, temperature: 0 },
   })
 
@@ -200,7 +222,7 @@ export async function extractReceipt(
       // scarcest quota (20/day) on work the 500/day tier does just as well — moving it
       // doubles how many receipts a day the bot can read.
       const mappingResponse = await generateWithRouter('text', {
-        contents: buildMappingPrompt(extraction.items, categories, extraction.merchantType, hints),
+        contents: buildMappingPrompt(extraction.items, categories, extraction.merchantType, hints, userNote),
         config: { responseMimeType: 'application/json', responseSchema: mappingSchema, temperature: 0 },
       })
       const parsed = JSON.parse(mappingResponse.text ?? '[]')
