@@ -16,6 +16,8 @@ const {
   getFinancialContextAdmin,
 } = await import('./admin-data')
 
+const adminData = await import('./admin-data')
+
 beforeEach(() => {
   vi.clearAllMocks()
 })
@@ -294,6 +296,140 @@ describe('getFinancialContextAdmin', () => {
 
     const context = await getFinancialContextAdmin('user-1', 2026, 9)
     expect(context.existingMonthlyDebt).toBe(0)
+  })
+})
+
+// ─── Task 6: batch writes, timezone lookup, undo memory ──────────
+// These flows all read/write plain docs or one Firestore batch. Rather than the
+// per-test inline mocks above, they share one small harness: `docData`/`docExists`
+// stand in for whatever doc the function reads, and the batch/doc spies are asserted
+// directly.
+
+describe('multi-transaction persistence', () => {
+  let docData: Record<string, unknown> | undefined
+  let docExists = true
+  const batchSet = vi.fn()
+  const batchDelete = vi.fn()
+  const batchCommit = vi.fn()
+  const docSet = vi.fn()
+  const docDelete = vi.fn()
+  const futureTimestamp = () => ({ toMillis: () => Date.now() + 600_000 })
+
+  beforeEach(() => {
+    docData = undefined
+    docExists = true
+    batchCommit.mockResolvedValue(undefined)
+    docSet.mockResolvedValue(undefined)
+    docDelete.mockResolvedValue(undefined)
+
+    const docRef = {
+      id: 'new-id',
+      get: vi.fn().mockImplementation(async () => ({ exists: docExists, data: () => docData })),
+      set: docSet,
+      delete: docDelete,
+    }
+    getAdminDb.mockReturnValue({
+      collection: vi.fn().mockReturnValue({ doc: vi.fn().mockReturnValue(docRef) }),
+      doc: vi.fn().mockReturnValue(docRef),
+      batch: vi.fn().mockReturnValue({ set: batchSet, delete: batchDelete, commit: batchCommit }),
+    })
+  })
+
+  describe('createTransactionsBatch', () => {
+    it('writes every DTO in one Firestore batch and returns their new ids', async () => {
+      const ids = await adminData.createTransactionsBatch('user-1', [
+        { date: new Date(), type: 'expense', pillar: 'needs', categoryId: 'c1', amount: 1000, tags: ['bot'] },
+        { date: new Date(), type: 'income', pillar: 'income', categoryId: 'c2', amount: 2000, tags: ['bot'] },
+      ])
+      expect(ids).toHaveLength(2)
+      expect(batchCommit).toHaveBeenCalledTimes(1)
+      expect(batchSet).toHaveBeenCalledTimes(2)
+    })
+
+    it('is a no-op that commits nothing for an empty list', async () => {
+      expect(await adminData.createTransactionsBatch('user-1', [])).toEqual([])
+      expect(batchCommit).not.toHaveBeenCalled()
+    })
+
+    it('drops undefined optional fields rather than sending them to Firestore', async () => {
+      await adminData.createTransactionsBatch('user-1', [
+        { date: new Date(), type: 'expense', pillar: 'needs', categoryId: 'c1', amount: 1000, description: undefined },
+      ])
+      const written = batchSet.mock.calls[0][1] as Record<string, unknown>
+      expect('description' in written).toBe(false)
+      expect('gDriveFileId' in written).toBe(false)
+    })
+
+    it('preserves transfer as the written type', async () => {
+      await adminData.createTransactionsBatch('user-1', [
+        { date: new Date(), type: 'transfer', pillar: 'savings', categoryId: 'c1', amount: 1000 },
+      ])
+      expect((batchSet.mock.calls[0][1] as { type: string }).type).toBe('transfer')
+    })
+  })
+
+  describe('getPending — legacy drafts', () => {
+    it('clears and ignores a pendingKind this build no longer understands', async () => {
+      docData = { pendingKind: 'bogus_v0', draft: {}, options: [], expiresAt: futureTimestamp() }
+      expect(await adminData.getPending('user-1')).toBeNull()
+      expect(docDelete).toHaveBeenCalled()
+    })
+
+    it('returns a transaction_batch draft unchanged', async () => {
+      docData = {
+        pendingKind: 'transaction_batch',
+        source: 'text',
+        lines: [],
+        mode: 'itemized',
+        merchant: null,
+        receiptTotal: null,
+        warnings: [],
+        expiresAt: futureTimestamp(),
+      }
+      const pending = await adminData.getPending('user-1')
+      expect(pending?.pendingKind).toBe('transaction_batch')
+    })
+  })
+
+  describe('getUserTimezone', () => {
+    it('reads the profile timezone', async () => {
+      docData = { timezone: 'Asia/Makassar' }
+      expect(await adminData.getUserTimezone('user-1')).toBe('Asia/Makassar')
+    })
+
+    it('defaults to Asia/Jakarta when the profile is missing or blank', async () => {
+      docExists = false
+      expect(await adminData.getUserTimezone('user-1')).toBe('Asia/Jakarta')
+
+      docExists = true
+      docData = { timezone: '  ' }
+      expect(await adminData.getUserTimezone('user-1')).toBe('Asia/Jakarta')
+    })
+  })
+
+  describe('last batch (for /undo)', () => {
+    it('remembers ids, reads them back, and clears them', async () => {
+      await adminData.rememberLastBatch('user-1', ['t1', 't2'])
+      expect(docSet).toHaveBeenCalled()
+
+      docData = { transactionIds: ['t1', 't2'], createdAt: futureTimestamp() }
+      expect((await adminData.getLastBatch('user-1'))?.transactionIds).toEqual(['t1', 't2'])
+
+      await adminData.clearLastBatch('user-1')
+      expect(docDelete).toHaveBeenCalled()
+    })
+  })
+
+  describe('deleteTransactions', () => {
+    it('deletes every id in one batch and reports the count', async () => {
+      expect(await adminData.deleteTransactions('user-1', ['t1', 't2', 't3'])).toBe(3)
+      expect(batchCommit).toHaveBeenCalledTimes(1)
+    })
+
+    it('commits nothing for an empty id list', async () => {
+      expect(await adminData.deleteTransactions('user-1', [])).toBe(0)
+      expect(batchCommit).not.toHaveBeenCalled()
+    })
   })
 })
 

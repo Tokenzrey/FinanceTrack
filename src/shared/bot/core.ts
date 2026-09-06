@@ -104,6 +104,13 @@ async function handlePendingReply(
     return handleGoalContributionReply(userId, pending, msg.text)
   }
 
+  if (pending.pendingKind === 'transaction_batch') {
+    // The editable review loop is wired up in Task 8; until then a batch draft can't
+    // be answered here — drop it and process the message as a fresh one.
+    await adminData.clearPending(userId)
+    return handleText(userId, msg.text)
+  }
+
   const trimmed = msg.text.trim()
   if (/^batal$/i.test(trimmed)) {
     await adminData.clearPending(userId)

@@ -16,7 +16,7 @@ import type { Wishlist } from '@/shared/types/wishlist.types'
 import { buildMonthlySummary } from '@/shared/lib/budget-math'
 import { DEFAULT_PILLAR_CONFIG } from '@/shared/types/domain'
 import type { ModelHealth } from '@/shared/lib/gemini-router'
-import type { BotPlatform } from './types'
+import type { BotPlatform, DraftBatch } from './types'
 
 /**
  * The one module in the bot subsystem that talks to Firestore. Everything here reads
@@ -215,29 +215,43 @@ interface GoalContributionDraft {
   goalName?: string
 }
 
-export type BotPendingDraft = (CategoryConfirmDraft | GoalContributionDraft) & { expiresAt: Timestamp }
+export type BotPendingDraft = (CategoryConfirmDraft | GoalContributionDraft | DraftBatch) & {
+  expiresAt: Timestamp
+}
 
 function pendingRef(userId: string) {
   return getAdminDb().doc(`users/${userId}/meta/botPending`)
 }
 
+/** The pending-flow kinds this build knows how to answer. A doc holding anything else
+ *  was written by a build with a different flow set; it is dropped rather than
+ *  half-answered — TTL is 15 minutes, so at most one in-flight draft per user is
+ *  affected by a deploy. (`category_confirm` is still here because `core.ts` routes it;
+ *  Task 8 drops it once the review card fully replaces that flow.) */
+const KNOWN_PENDING_KINDS = new Set(['transaction_batch', 'goal_contribution', 'category_confirm'])
+
 export async function getPending(userId: string): Promise<BotPendingDraft | null> {
   const snap = await pendingRef(userId).get()
   if (!snap.exists) return null
   const raw = snap.data() as Record<string, unknown> & { expiresAt: Timestamp }
+
   if (raw.expiresAt.toMillis() < Date.now()) {
     await clearPending(userId)
     return null
   }
   // Docs written before `pendingKind` existed have no such field — they can only ever
-  // have been a category confirmation, since that was the only pending flow back then.
+  // have been a category confirmation, the only pending flow back then.
   const data = raw.pendingKind ? raw : { ...raw, pendingKind: 'category_confirm' as const }
+  if (typeof data.pendingKind !== 'string' || !KNOWN_PENDING_KINDS.has(data.pendingKind)) {
+    await clearPending(userId)
+    return null
+  }
   return data as unknown as BotPendingDraft
 }
 
 export async function setPending(
   userId: string,
-  payload: CategoryConfirmDraft | GoalContributionDraft,
+  payload: CategoryConfirmDraft | GoalContributionDraft | DraftBatch,
 ): Promise<void> {
   await pendingRef(userId).set(
     stripUndefined({
@@ -427,10 +441,11 @@ export async function getFinancialContextAdmin(
   }
 }
 
-export async function createTransaction(userId: string, dto: CreateTransactionDTO): Promise<void> {
-  const db = getAdminDb()
-  const ref = db.collection(`users/${userId}/transactions`).doc()
-  const payload = stripUndefined({
+/** The one place the Firestore write shape for a transaction is defined — shared by the
+ *  single-write and batch paths so a batch row is byte-for-byte what `createTransaction`
+ *  would have written. */
+function transactionPayload(dto: CreateTransactionDTO): Record<string, unknown> {
+  return stripUndefined({
     date: Timestamp.fromDate(dto.date),
     type: dto.type,
     pillar: dto.pillar,
@@ -448,11 +463,92 @@ export async function createTransaction(userId: string, dto: CreateTransactionDT
     location: dto.location,
     mood: dto.mood,
   })
+}
+
+export async function createTransaction(userId: string, dto: CreateTransactionDTO): Promise<void> {
+  const ref = getAdminDb().collection(`users/${userId}/transactions`).doc()
   await ref.set({
-    ...payload,
+    ...transactionPayload(dto),
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   })
+}
+
+// ─── Batch writes, timezone, undo memory ───────────────────────
+
+/** Firestore caps a batch at 500 writes; `MAX_DRAFT_LINES` (20) keeps us far below,
+ *  and this guard makes that dependency explicit rather than implicit. */
+const MAX_BATCH_WRITES = 400
+
+/**
+ * Writes a whole reviewed batch atomically. All-or-nothing matters here: a partial
+ * write would leave the user's ledger holding half of what the confirmation card
+ * promised, with no way to tell which half.
+ */
+export async function createTransactionsBatch(
+  userId: string,
+  dtos: CreateTransactionDTO[],
+): Promise<string[]> {
+  if (dtos.length === 0) return []
+  const db = getAdminDb()
+  const batch = db.batch()
+  const ids: string[] = []
+
+  for (const dto of dtos.slice(0, MAX_BATCH_WRITES)) {
+    const ref = db.collection(`users/${userId}/transactions`).doc()
+    ids.push(ref.id)
+    batch.set(ref, {
+      ...transactionPayload(dto),
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    })
+  }
+
+  await batch.commit()
+  return ids
+}
+
+export async function deleteTransactions(userId: string, ids: string[]): Promise<number> {
+  if (ids.length === 0) return 0
+  const db = getAdminDb()
+  const batch = db.batch()
+  for (const id of ids.slice(0, MAX_BATCH_WRITES)) {
+    batch.delete(db.doc(`users/${userId}/transactions/${id}`))
+  }
+  await batch.commit()
+  return Math.min(ids.length, MAX_BATCH_WRITES)
+}
+
+function lastBatchRef(userId: string) {
+  return getAdminDb().doc(`users/${userId}/meta/botLastBatch`)
+}
+
+/** What `/undo` reverses. Only ever the most recent commit — deeper history is the
+ *  web app's job, where a list with checkboxes beats a chat command. */
+export async function rememberLastBatch(userId: string, transactionIds: string[]): Promise<void> {
+  await lastBatchRef(userId).set({ transactionIds, createdAt: FieldValue.serverTimestamp() })
+}
+
+export async function getLastBatch(
+  userId: string,
+): Promise<{ transactionIds: string[]; createdAt: Timestamp } | null> {
+  const snap = await lastBatchRef(userId).get()
+  if (!snap.exists) return null
+  const data = snap.data() as { transactionIds?: string[]; createdAt?: Timestamp }
+  if (!Array.isArray(data.transactionIds) || data.transactionIds.length === 0) return null
+  return { transactionIds: data.transactionIds, createdAt: data.createdAt ?? Timestamp.now() }
+}
+
+export async function clearLastBatch(userId: string): Promise<void> {
+  await lastBatchRef(userId).delete()
+}
+
+/** The Vercel runtime is UTC. Every user-facing timestamp must be rendered in the
+ *  user's own zone or it reads seven hours wrong for an Indonesian user. */
+export async function getUserTimezone(userId: string): Promise<string> {
+  const snap = await getAdminDb().doc(`users/${userId}/meta/profile`).get()
+  const tz = snap.exists ? (snap.data()?.timezone as string | undefined) : undefined
+  return tz && tz.trim() ? tz.trim() : 'Asia/Jakarta'
 }
 
 // ─── Gemini quota ledger ───────────────────────────────────────
