@@ -16,6 +16,7 @@ function line(over: Partial<DraftLine> = {}): DraftLine {
     categoryId: 'c-food',
     categoryName: 'Makan & Minum',
     dateIso: NOW_ISO,
+    confidence: 90,
     options: [{ categoryId: 'c-food', name: 'Makan & Minum' }],
     ...over,
   }

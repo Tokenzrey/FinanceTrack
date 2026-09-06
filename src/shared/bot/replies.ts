@@ -815,4 +815,18 @@ export const replies = {
         'Selesaikan dulu: <code>ok</code> untuk menyimpan, <code>batal</code> untuk membuang — ' +
         'baru kirim yang berikutnya.',
     ),
+
+  reviewMixedTypesMerge: (): BotReply =>
+    reply('🧩 Gabung hanya untuk transaksi sejenis (semua pengeluaran atau semua pemasukan).'),
+
+  reviewMergeReceiptOnly: (): BotReply =>
+    reply('🧩 Gabung hanya untuk transaksi dari struk. Baris yang kamu ketik disimpan satu per satu.'),
+
+  reviewCategoryGone: (): BotReply =>
+    reply('🤔 Kategori itu sudah tidak ada. Pilih lagi dari daftar di kartu, atau ketik <code>bantuedit</code>.'),
+
+  batchAlreadyHandled: (): BotReply => reply('✅ Sudah diproses.'),
+
+  reviewExpired: (): BotReply =>
+    reply('⌛ Tinjauan itu sudah tidak aktif. Kirim transaksi atau struk baru.'),
 }

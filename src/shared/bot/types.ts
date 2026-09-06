@@ -57,6 +57,9 @@ export interface DraftLine {
   categoryName: string | null
   /** ISO 8601 UTC. Ditampilkan dalam zona waktu user. */
   dateIso: string
+  /** 0-100, skala yang sama dengan confidence model & `LocalMatch`. Menggerbang jalur
+   *  cepat auto-simpan — dibaca dari baris ini, bukan dari `parsed[0]`. */
+  confidence: number
   /** Kandidat kategori bernomor untuk perintah `kat <n> <k>`. Maks 4. */
   options: { categoryId: string; name: string }[]
   /** Hanya untuk baris asal struk. */

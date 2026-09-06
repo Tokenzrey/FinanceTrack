@@ -214,6 +214,30 @@ describe('handleTextTransaction', () => {
     await handleTextTransaction('u1', 'entah 35rb')
     expect(saveCachedParse).not.toHaveBeenCalled()
   })
+
+  it('gates the L1 fast path on the SURVIVING line\'s confidence, not a dropped parsed[0] (W4)', async () => {
+    // Line 0 ("bayar 5 orang") has no parseable amount and is dropped; its high
+    // confidence must not license auto-commit of the low-confidence line that remains.
+    getScanHints.mockResolvedValue([])
+    parseTransactionBatch.mockResolvedValue([
+      parsed({ description: 'bayar 5 orang', amountText: '5 orang', confidence: 95 }),
+      parsed({ description: 'makan', amountText: '50rb', confidence: 35 }),
+    ])
+    const reply = await handleTextTransaction('u1', 'bayar 5 orang, makan 50rb')
+    expect(createTransactionsBatch).not.toHaveBeenCalled()
+    expect(setPending).toHaveBeenCalledTimes(1)
+    expect(reply.text).toContain('Tinjau')
+  })
+
+  it('honours a raised /atur autoaccept on the L0 known-phrase path too (W4)', async () => {
+    getBotPrefs.mockResolvedValue({ ...DEFAULT_BOT_PREFS, autoAcceptConfidence: 95 })
+    // freq 4 → hint confidence 80, clears LOCAL_ACCEPT_CONFIDENCE but not the user's 95.
+    getScanHints.mockResolvedValue([{ keyword: 'kopi', categoryId: 'c-food', frequency: 4, updatedAt: 0 }])
+    await handleTextTransaction('u1', 'kopi 20rb')
+    expect(parseTransactionBatch).not.toHaveBeenCalled()
+    expect(createTransactionsBatch).not.toHaveBeenCalled()
+    expect(setPending).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('handlePhoto', () => {

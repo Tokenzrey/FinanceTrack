@@ -1,7 +1,7 @@
 import { applyCorrections } from '@/shared/lib/scan-hints'
 import type { Category } from '@/shared/types/domain'
 import * as adminData from './admin-data'
-import { batchToDTOs, renumber } from './draft'
+import { batchToDTOs, collapseToSingle, renumber } from './draft'
 import { replies } from './replies'
 import { parseReviewCommand } from './review-commands'
 import type { BotIncoming, BotReply, BotTxType, DraftBatch, DraftLine, ReviewCommand } from './types'
@@ -57,6 +57,8 @@ export async function startReview(userId: string, batch: DraftBatch): Promise<Bo
 }
 
 async function commit(userId: string, batch: DraftBatch, categories: Category[]): Promise<BotReply> {
+  // ── Checks that must leave the draft intact when they reject — run on the passed-in
+  //    batch, BEFORE the atomic claim. Only claim once we know we are going to write.
   const blocking = batch.lines.filter((l) => l.categoryId === null).map((l) => l.n)
   if (blocking.length > 0) return replies.reviewNeedsCategory(blocking)
 
@@ -79,14 +81,21 @@ async function commit(userId: string, batch: DraftBatch, categories: Category[])
     }
   }
 
-  const ids = await adminData.createTransactionsBatch(userId, dtos)
+  // ── Atomic claim: whoever deletes the pending doc first owns the write. A second
+  //    concurrent `ok`/Simpan-tap, or a retry after `rememberLastBatch`/hint-learning
+  //    threw, finds nothing here and is told it was already handled — the batch is
+  //    never written twice. This replaces the old trailing `clearPending`.
+  const claimed = await adminData.claimPendingForCommit(userId)
+  if (!claimed || claimed.pendingKind !== 'transaction_batch') return replies.batchAlreadyHandled()
+
+  const ids = await adminData.createTransactionsBatch(userId, batchToDTOs(claimed, categories))
   await adminData.rememberLastBatch(userId, ids)
 
   // Learning loop: every confirmed line teaches the local resolver, so the next
   // "kopi 20rb" needs no model at all. A failure here must never cost the user their
   // transactions — those are already written.
   try {
-    const corrections = batch.lines
+    const corrections = claimed.lines
       .filter((l) => l.categoryId && l.description)
       .map((l) => ({ itemName: l.description as string, categoryId: l.categoryId as string }))
     if (corrections.length > 0) {
@@ -97,12 +106,12 @@ async function commit(userId: string, batch: DraftBatch, categories: Category[])
     console.error('bot hint learning error (transactions already saved):', error)
   }
 
-  await adminData.clearPending(userId)
-
   const tz = await adminData.getUserTimezone(userId)
-  const savedLines = batch.mode === 'single' ? [{ ...batch.lines[0], n: 1, amount: dtos[0].amount, description: dtos[0].description ?? null }] : batch.lines
-  const receiptStatus = batch.receipt ? 'saved' : batch.source === 'receipt' ? 'drive_not_linked' : 'none'
-  return replies.batchSaved(savedLines, batch.mode, tz, receiptStatus)
+  // Confirmation names what was actually written: for `single` that is the collapsed
+  // line (heaviest line's category), the same source `batchToDTOs` used — not `lines[0]`.
+  const savedLines = claimed.mode === 'single' ? [collapseToSingle(claimed)] : claimed.lines
+  const receiptStatus = claimed.receipt ? 'saved' : claimed.source === 'receipt' ? 'drive_not_linked' : 'none'
+  return replies.batchSaved(savedLines, claimed.mode, tz, receiptStatus)
 }
 
 async function applyCommand(
@@ -124,8 +133,18 @@ async function applyCommand(
     case 'help':
       return replies.reviewHelp()
 
-    case 'set_mode':
+    case 'set_mode': {
+      if (cmd.mode === 'single') {
+        // The Telegram merge button is gated to `source === 'receipt'` in
+        // `replies.batchReview`; the typed `gabung` command must match it, or a text
+        // batch silently loses its per-line itemisation.
+        if (batch.source !== 'receipt') return replies.reviewMergeReceiptOnly()
+        // `collapseToSingle` sums `amount` across every line regardless of `type`, so a
+        // mixed income+expense batch would collapse into one wrong-signed transaction.
+        if (new Set(batch.lines.map((l) => l.type)).size > 1) return replies.reviewMixedTypesMerge()
+      }
       return persistAndRender(userId, { ...batch, mode: cmd.mode })
+    }
 
     case 'focus': {
       const line = findLine(batch, cmd.n)
@@ -149,6 +168,11 @@ async function applyCommand(
       if (!line) return replies.reviewInvalidLine(cmd.n, max)
       const option = line.options[cmd.option - 1]
       if (!option) return replies.reviewInvalidLine(cmd.option, line.options.length)
+      // `line.options` was persisted when the card was rendered; a category deleted
+      // since then would otherwise be written as a dangling `categoryId`.
+      if (!categories.some((c) => c.id === option.categoryId && c.isActive)) {
+        return replies.reviewCategoryGone()
+      }
       return persistAndRender(
         userId,
         replaceLine(batch, { ...line, categoryId: option.categoryId, categoryName: option.name }),

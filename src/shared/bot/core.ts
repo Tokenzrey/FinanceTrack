@@ -79,6 +79,9 @@ export async function handleIncoming(msg: BotIncoming): Promise<BotReply> {
       // the user their draft (see flow-review's no-silent-drop rule).
       if (msg.kind === 'text') {
         const readCommand = matchReadCommand(msg.text.trim())
+        // `/undo` here would delete the PREVIOUS committed batch, not the pending draft
+        // — a user who means `batal` must not silently reverse an unrelated commit.
+        if (readCommand === 'undo') return replies.busyReviewing(pending.lines.length)
         if (readCommand && readCommand !== 'cancel_pending') {
           const answer = await handleReadCommand(userId, readCommand)
           return {
@@ -106,6 +109,11 @@ async function dispatchText(userId: string, text: string): Promise<BotReply> {
   const trimmed = text.trim()
   if (!trimmed) return replies.unknownMessage()
 
+  // A review-card button (`rv:*`) that lands here has no live draft behind it — the
+  // 15-min TTL lapsed, or the batch was already handled. Answer it plainly instead of
+  // letting `parseAmount("20")` from `rv:del:20` open a bogus draft + model call.
+  if (trimmed.startsWith('rv:')) return replies.reviewExpired()
+
   const prefsCommand = parsePrefsCommand(trimmed)
   if (prefsCommand.kind !== 'none') {
     if (prefsCommand.kind === 'invalid') return replies.prefsInvalid(prefsCommand.field)
@@ -117,7 +125,9 @@ async function dispatchText(userId: string, text: string): Promise<BotReply> {
   // `/riwayat 10 kopi`, `/cari kopi`, `/export 8`) are routed before the bare read-command
   // match, which only recognises a keyword with nothing after it.
   const parsed = parseCommandArgs(trimmed)
-  if (parsed && parsed.args.length > 0) {
+  // `export`/`ekspor` also runs bare (current month) — every other args command has a
+  // bare read-command fallback, this one has none, so admit it with no args too.
+  if (parsed && (parsed.args.length > 0 || parsed.command === 'export' || parsed.command === 'ekspor')) {
     const answer = await handleCommandWithArgs(userId, parsed)
     if (answer) return answer
   }

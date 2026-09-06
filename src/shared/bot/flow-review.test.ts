@@ -4,6 +4,7 @@ import type { BotIncoming, DraftBatch, DraftLine } from './types'
 
 const setPending = vi.fn()
 const clearPending = vi.fn()
+const claimPendingForCommit = vi.fn()
 const findCategories = vi.fn()
 const getMonthlyBudget = vi.fn()
 const isBudgetClosedAdmin = vi.fn()
@@ -16,6 +17,7 @@ const saveScanHints = vi.fn()
 vi.mock('./admin-data', () => ({
   setPending: (...a: unknown[]) => setPending(...a),
   clearPending: (...a: unknown[]) => clearPending(...a),
+  claimPendingForCommit: (...a: unknown[]) => claimPendingForCommit(...a),
   findCategories: (...a: unknown[]) => findCategories(...a),
   getMonthlyBudget: (...a: unknown[]) => getMonthlyBudget(...a),
   isBudgetClosedAdmin: (...a: unknown[]) => isBudgetClosedAdmin(...a),
@@ -44,6 +46,7 @@ function line(over: Partial<DraftLine> = {}): DraftLine {
     n: 1, type: 'expense', amount: 35000, description: 'kopi',
     categoryId: 'c-food', categoryName: 'Makan',
     dateIso: new Date(Date.UTC(2026, 8, 6, 7, 32)).toISOString(),
+    confidence: 90,
     options: [
       { categoryId: 'c-food', name: 'Makan' },
       { categoryId: 'c-transport', name: 'Transportasi' },
@@ -75,22 +78,66 @@ beforeEach(() => {
   getUserTimezone.mockResolvedValue('Asia/Jakarta')
   getScanHints.mockResolvedValue([])
   saveScanHints.mockResolvedValue(undefined)
+  // Default: the claim succeeds and hands back a batch identical to the one under
+  // review (what core.ts's getPending returned). Tests needing a specific shape or a
+  // lost race override this.
+  claimPendingForCommit.mockImplementation(async () => batch())
 })
 
 describe('handleReviewMessage — commit', () => {
-  it('writes every line, remembers the batch for /undo, and clears the draft', async () => {
+  it('writes every line, remembers the batch for /undo, and claims the draft atomically', async () => {
     const reply = await handleReviewMessage('u1', batch(), text('ok'))
     expect(createTransactionsBatch).toHaveBeenCalledTimes(1)
     expect(createTransactionsBatch.mock.calls[0][1]).toHaveLength(2)
     expect(rememberLastBatch).toHaveBeenCalledWith('u1', ['t1', 't2'])
-    expect(clearPending).toHaveBeenCalledWith('u1')
+    expect(claimPendingForCommit).toHaveBeenCalledWith('u1')
     expect(reply.text).toContain('2 transaksi tercatat')
   })
 
   it('writes exactly one transaction when the batch is in single mode', async () => {
     createTransactionsBatch.mockResolvedValue(['t1'])
+    claimPendingForCommit.mockResolvedValue(batch({ mode: 'single' }))
     await handleReviewMessage('u1', batch({ mode: 'single' }), text('ok'))
     expect(createTransactionsBatch.mock.calls[0][1]).toHaveLength(1)
+  })
+
+  it('writes the batch exactly once when two concurrent commits race the same draft', async () => {
+    // The claim is the single atomic step: the winner gets the batch, the loser null.
+    claimPendingForCommit.mockResolvedValueOnce(batch()).mockResolvedValue(null)
+    const [first, second] = await Promise.all([
+      handleReviewMessage('u1', batch(), text('ok')),
+      handleReviewMessage('u1', batch(), text('ok')),
+    ])
+    expect(createTransactionsBatch).toHaveBeenCalledTimes(1)
+    const texts = [first.text, second.text]
+    expect(texts.some((t) => t.includes('tercatat'))).toBe(true)
+    expect(texts.some((t) => t.includes('Sudah diproses'))).toBe(true)
+  })
+
+  it('reports "already handled" and writes nothing when the claim comes back empty', async () => {
+    claimPendingForCommit.mockResolvedValue(null)
+    const reply = await handleReviewMessage('u1', batch(), text('ok'))
+    expect(createTransactionsBatch).not.toHaveBeenCalled()
+    expect(rememberLastBatch).not.toHaveBeenCalled()
+    expect(reply.text).toContain('Sudah diproses')
+  })
+
+  it('names the collapsed line\'s category in the confirmation for a single-mode save', async () => {
+    // Heaviest line (laptop) is NOT line 1 — the confirmation must follow the write
+    // (Elektronik), not lines[0] (Kafe).
+    const single = batch({
+      mode: 'single',
+      merchant: null,
+      lines: [
+        line({ n: 1, amount: 20000, description: 'kopi', categoryId: 'c-food', categoryName: 'Makan' }),
+        line({ n: 2, amount: 15_000_000, description: 'laptop', categoryId: 'c-transport', categoryName: 'Transportasi' }),
+      ],
+    })
+    claimPendingForCommit.mockResolvedValue(single)
+    createTransactionsBatch.mockResolvedValue(['t1'])
+    const reply = await handleReviewMessage('u1', single, text('ok'))
+    expect(reply.text).toContain('Transportasi')
+    expect(reply.text).not.toContain('Makan')
   })
 
   it('refuses to save while a line has no category, and keeps the draft alive', async () => {
@@ -171,11 +218,35 @@ describe('handleReviewMessage — edits', () => {
     expect(reply.text).toContain('Tidak ada baris tersisa')
   })
 
-  it('toggles between merged and itemized without losing lines', async () => {
+  it('toggles between merged and itemized without losing lines (receipt, all one type)', async () => {
     await handleReviewMessage('u1', batch(), text('gabung'))
     const merged = setPending.mock.calls[0][1] as DraftBatch
     expect(merged.mode).toBe('single')
     expect(merged.lines).toHaveLength(2)
+  })
+
+  it('rejects "gabung" on a mixed income+expense batch, leaving the draft itemized', async () => {
+    const mixed = batch({
+      lines: [line({ n: 1, type: 'expense' }), line({ n: 2, type: 'income', amount: 5_000_000 })],
+    })
+    const reply = await handleReviewMessage('u1', mixed, text('gabung'))
+    expect(setPending).not.toHaveBeenCalled()
+    expect(reply.text).toContain('sejenis')
+  })
+
+  it('rejects "gabung" on a typed (non-receipt) batch — merge is receipt-only', async () => {
+    const reply = await handleReviewMessage('u1', batch({ source: 'text' }), text('gabung'))
+    expect(setPending).not.toHaveBeenCalled()
+    expect(reply.text).toContain('struk')
+  })
+
+  it('re-validates a picked category against the live list and refuses one deleted since render', async () => {
+    // The card still offers c-transport, but it is no longer in findCategories.
+    findCategories.mockResolvedValue([cat('c-food', 'Makan', 'needs')])
+    const b = batch({ lines: [line({ n: 1, categoryId: null, categoryName: null })] })
+    const reply = await handleReviewMessage('u1', b, text('kat 1 2'))
+    expect(setPending).not.toHaveBeenCalled()
+    expect(reply.text).toContain('tidak ada')
   })
 
   it('rejects an out-of-range line number and leaves the batch untouched', async () => {

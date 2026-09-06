@@ -66,6 +66,7 @@ export function buildLinesFromParsed(parsed: ParsedLine[], categories: Category[
       categoryId: chosen?.id ?? null,
       categoryName: chosen?.name ?? null,
       dateIso: shiftDays(now, item.dateOffset || 0).toISOString(),
+      confidence: item.confidence,
       options,
     })
   }
@@ -106,6 +107,9 @@ export function buildLinesFromReceipt(
         categoryId: chosen?.id ?? null,
         categoryName: chosen?.name ?? null,
         dateIso: date,
+        // A mapped line carries its own category-mapping confidence (0 when the model
+        // left it unmapped); the whole-receipt read confidence is the fallback shape.
+        confidence: item.mappingConfidence || result.totalConfidence,
         options: buildOptions(item.suggestedCategoryId ? [item.suggestedCategoryId] : [], eligible),
         quantity: item.quantity ?? null,
       }
@@ -131,6 +135,9 @@ export function batchTotals(batch: DraftBatch): {
 /** The one line a `mode: 'single'` batch commits as. Category follows the highest-value
  *  line, since that is what the combined transaction mostly *is*. */
 export function collapseToSingle(batch: DraftBatch): DraftLine {
+  // Every current caller pre-checks `lines.length > 0`; make a future one that forgets
+  // fail loudly rather than spread `undefined` into a malformed line.
+  if (batch.lines.length === 0) throw new Error('collapseToSingle: empty batch')
   const amount = batch.lines.reduce((total, l) => total + l.amount, 0)
   const heaviest = [...batch.lines].sort((a, b) => b.amount - a.amount)[0]
   const description =
@@ -146,6 +153,7 @@ export function collapseToSingle(batch: DraftBatch): DraftLine {
     n: 1,
     amount,
     description,
+    confidence: heaviest.confidence,
     quantity: null,
   }
 }

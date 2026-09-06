@@ -154,6 +154,7 @@ export function tryLocalBatch(
       categoryId: match.categoryId,
       categoryName: match.categoryName,
       dateIso: date.toISOString(),
+      confidence: match.confidence,
       options: eligible(categories, type).slice(0, 4).map((c) => ({ categoryId: c.id, name: c.name })),
     })
   }

@@ -154,6 +154,12 @@ describe('tryLocalBatch', () => {
     expect(lines![0].amount).toBe(1_500_000)
   })
 
+  it('carries the LocalMatch confidence onto each built line', () => {
+    const lines = tryLocalBatch('kopi 20rb, bensin 50rb', CATEGORIES, hints, NOW)
+    // freq 9 → 60 + 9*5 capped at 95
+    expect(lines!.every((l) => l.confidence === 95)).toBe(true)
+  })
+
   it('builds every line from a plain-number comma list instead of dropping all but the first (C1)', () => {
     const lines = tryLocalBatch('kopi 20000, bensin 50000', CATEGORIES, hints, NOW)
     expect(lines).toHaveLength(2)

@@ -86,7 +86,13 @@ export async function handleTextTransaction(userId: string, text: string): Promi
   const localLines = tryLocalBatch(text, active, hints, now)
   if (localLines) {
     const batch = newBatch({ source: 'text', lines: localLines })
-    if (localLines.length === 1 && !prefs.alwaysReview) {
+    // Same gate as the L1 fast path below: the user's `/atur autoaccept` threshold
+    // must apply to known phrases too, not just to model parses.
+    if (
+      localLines.length === 1 &&
+      localLines[0].confidence >= prefs.autoAcceptConfidence &&
+      !prefs.alwaysReview
+    ) {
       return commitDirect(userId, batch, categories)
     }
     return startReview(userId, batch)
@@ -115,8 +121,9 @@ export async function handleTextTransaction(userId: string, text: string): Promi
   // Every segment failed to yield an amount — the message simply has no number in it.
   if (lines.length === 0) return replies.amountNotFound()
 
-  const topConfidence = parsed[0]?.confidence ?? 0
-  if (isFastPath(lines) && topConfidence >= prefs.autoAcceptConfidence && !prefs.alwaysReview) {
+  // Read confidence off the built line, never `parsed[0]`: `buildLinesFromParsed`
+  // drops unparseable segments, so `parsed[0]` can be a line that no longer exists.
+  if (isFastPath(lines) && lines[0].confidence >= prefs.autoAcceptConfidence && !prefs.alwaysReview) {
     return commitDirect(userId, newBatch({ source: 'text', lines }), categories)
   }
 
@@ -229,6 +236,7 @@ export async function handlePhoto(
         categoryId: null,
         categoryName: null,
         dateIso: now.toISOString(),
+        confidence: result.totalConfidence,
         options: spendCategories.slice(0, 4).map((c) => ({ categoryId: c.id, name: c.name })),
       },
     ])

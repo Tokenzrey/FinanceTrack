@@ -705,3 +705,55 @@ describe('handleIncoming — /hariini', () => {
     expect(reply.text).toContain('Rp 35.000')
   })
 })
+
+// ─── Adversarial wave A cheap notes ─────────────────────────────
+
+describe('handleIncoming — stale review tokens (N4)', () => {
+  beforeEach(() => {
+    findLinkByExternalId.mockResolvedValue(LINK)
+    getPending.mockResolvedValue(null) // TTL lapsed — nothing pending
+  })
+
+  it('answers a stale rv:* token instead of parsing it as a transaction', async () => {
+    const reply = await handleIncoming(textMsg('rv:del:20'))
+    expect(reply.text).toContain('tidak aktif')
+    expect(handleTextTransaction).not.toHaveBeenCalled()
+  })
+})
+
+describe('handleIncoming — bare /export (N5)', () => {
+  beforeEach(() => {
+    findLinkByExternalId.mockResolvedValue(LINK)
+  })
+
+  it('exports the current month when /export is sent with no argument', async () => {
+    getMonthTransactions.mockResolvedValue([mockTransaction()])
+    const now = new Date()
+    const reply = await handleIncoming(textMsg('/export'))
+    expect(getMonthTransactions).toHaveBeenCalledWith('user-1', now.getFullYear(), now.getMonth() + 1)
+    expect(reply.document?.mimeType).toBe('text/csv')
+    expect(handleTextTransaction).not.toHaveBeenCalled()
+  })
+
+  it('bare /ekspor works the same way', async () => {
+    getMonthTransactions.mockResolvedValue([])
+    await handleIncoming(textMsg('/ekspor'))
+    expect(getMonthTransactions).toHaveBeenCalledTimes(1)
+    expect(handleTextTransaction).not.toHaveBeenCalled()
+  })
+})
+
+describe('handleIncoming — /undo mid-review (N10)', () => {
+  beforeEach(() => {
+    findLinkByExternalId.mockResolvedValue(LINK)
+    getPending.mockResolvedValue({ pendingKind: 'transaction_batch', lines: [{ n: 1 }, { n: 2 }], expiresAt: {} as never })
+    matchReadCommand.mockReturnValue('undo')
+  })
+
+  it('tells the user to finish the review and does NOT touch the previous committed batch', async () => {
+    const reply = await handleIncoming(textMsg('/undo'))
+    expect(getLastBatch).not.toHaveBeenCalled()
+    expect(deleteTransactions).not.toHaveBeenCalled()
+    expect(reply.text).toContain('Selesaikan dulu')
+  })
+})

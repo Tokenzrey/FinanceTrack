@@ -215,6 +215,61 @@ describe('getPending — unknown kinds', () => {
   })
 })
 
+describe('claimPendingForCommit', () => {
+  function mockTxDb(initial: { exists: boolean; data?: () => unknown }) {
+    const state = { ...initial }
+    const txGet = vi.fn().mockImplementation(async () => ({ exists: state.exists, data: state.data }))
+    const txDelete = vi.fn().mockImplementation(() => {
+      state.exists = false
+    })
+    const db = {
+      doc: vi.fn().mockReturnValue({ id: 'pending-ref' }),
+      runTransaction: (fn: (tx: { get: typeof txGet; delete: typeof txDelete }) => unknown) =>
+        fn({ get: txGet, delete: txDelete }),
+    }
+    return { db, txGet, txDelete }
+  }
+
+  const liveBatch = () => ({
+    pendingKind: 'transaction_batch',
+    lines: [{ n: 1 }],
+    mode: 'itemized',
+    expiresAt: { toMillis: () => Date.now() + 10_000 },
+  })
+
+  it('deletes the pending doc and returns the batch, in one transaction', async () => {
+    const { db, txDelete } = mockTxDb({ exists: true, data: liveBatch })
+    getAdminDb.mockReturnValue(db)
+
+    const claimed = await adminData.claimPendingForCommit('user-1')
+
+    expect(txDelete).toHaveBeenCalledTimes(1)
+    expect(claimed).toMatchObject({ pendingKind: 'transaction_batch' })
+  })
+
+  it('returns null on the second call once the draft is gone', async () => {
+    const { db } = mockTxDb({ exists: true, data: liveBatch })
+    getAdminDb.mockReturnValue(db)
+
+    const first = await adminData.claimPendingForCommit('user-1')
+    const second = await adminData.claimPendingForCommit('user-1')
+
+    expect(first).not.toBeNull()
+    expect(second).toBeNull()
+  })
+
+  it('returns null (and does not claim) for a non-batch pending draft', async () => {
+    const { db, txDelete } = mockTxDb({
+      exists: true,
+      data: () => ({ pendingKind: 'goal_contribution', expiresAt: { toMillis: () => Date.now() + 10_000 } }),
+    })
+    getAdminDb.mockReturnValue(db)
+
+    expect(await adminData.claimPendingForCommit('user-1')).toBeNull()
+    expect(txDelete).not.toHaveBeenCalled()
+  })
+})
+
 describe('addGoalContribution', () => {
   it('writes one contribution record and atomically increments the goal total, in a single batch', async () => {
     const contributionDoc = { id: 'contrib-1' }

@@ -45,6 +45,7 @@ function line(over: Partial<DraftLine> = {}): DraftLine {
     categoryId: 'c-food',
     categoryName: 'Makan & Minum',
     dateIso: NOW.toISOString(),
+    confidence: 90,
     options: [],
     ...over,
   }
@@ -114,6 +115,15 @@ describe('buildLinesFromParsed', () => {
   it('numbers the lines 1..n in order', () => {
     const out = buildLinesFromParsed([parsed(), parsed({ amountText: '12rb' })], CATEGORIES, NOW)
     expect(out.map((l) => l.n)).toEqual([1, 2])
+  })
+
+  it('carries each parsed line\'s own confidence onto the built line', () => {
+    const out = buildLinesFromParsed(
+      [parsed({ confidence: 95 }), parsed({ amountText: '12rb', confidence: 30 })],
+      CATEGORIES,
+      NOW,
+    )
+    expect(out.map((l) => l.confidence)).toEqual([95, 30])
   })
 
   it('caps the batch at MAX_DRAFT_LINES', () => {
@@ -197,6 +207,12 @@ describe('buildLinesFromReceipt', () => {
     expect(lines[1].categoryId).toBeNull()
     expect(lines[1].options.length).toBeGreaterThan(0)
   })
+
+  it('sets confidence from the item mapping confidence, falling back to the read confidence', () => {
+    const lines = buildLinesFromReceipt(result, CATEGORIES, NOW)
+    expect(lines[0].confidence).toBe(90) // mappingConfidence
+    expect(lines[1].confidence).toBe(88) // mappingConfidence 0 → totalConfidence
+  })
 })
 
 describe('batchTotals', () => {
@@ -241,6 +257,18 @@ describe('collapseToSingle', () => {
       lines: renumber([line({ description: 'Nasi goreng' }), line({ description: 'Teh botol' })]),
     })
     expect(collapseToSingle(b).description).toBe('Nasi goreng, Teh botol')
+  })
+
+  it('carries the heaviest line\'s confidence onto the collapsed line', () => {
+    const b = batch({
+      source: 'receipt',
+      lines: renumber([line({ amount: 24000, confidence: 40 }), line({ amount: 35000, confidence: 88 })]),
+    })
+    expect(collapseToSingle(b).confidence).toBe(88)
+  })
+
+  it('throws on an empty batch rather than spreading undefined into a line', () => {
+    expect(() => collapseToSingle(batch({ lines: [] }))).toThrow('empty batch')
   })
 })
 

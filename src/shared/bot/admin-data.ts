@@ -248,6 +248,33 @@ export async function clearPending(userId: string): Promise<void> {
   await pendingRef(userId).delete()
 }
 
+/**
+ * Atomically claims the pending transaction batch for a commit: in one Firestore
+ * transaction, reads the draft and — if it is a live `transaction_batch` — deletes it
+ * and returns it. A second concurrent `commit()` (double `ok`, double Simpan-tap, or a
+ * retry after a post-write bookkeeping failure) then finds nothing and gets `null`, so
+ * the batch is written exactly once. Returns `null` for a missing, expired, or
+ * non-batch draft (the expired one is also cleared).
+ */
+export async function claimPendingForCommit(userId: string): Promise<BotPendingDraft | null> {
+  const ref = pendingRef(userId)
+  return getAdminDb().runTransaction(async (tx) => {
+    const snap = await tx.get(ref)
+    if (!snap.exists) return null
+    const raw = snap.data() as Record<string, unknown> & { expiresAt?: Timestamp }
+
+    const ms = raw.expiresAt?.toMillis?.()
+    if (ms == null || ms < Date.now()) {
+      tx.delete(ref)
+      return null
+    }
+    if (raw.pendingKind !== 'transaction_batch') return null
+
+    tx.delete(ref)
+    return raw as unknown as BotPendingDraft
+  })
+}
+
 // ─── Financial data ──────────────────────────────────────────────
 // Same read/write shapes `repositories` exposes to the client, reimplemented against
 // the Admin SDK. Not reused directly: those repositories go through `getDb()` (the
