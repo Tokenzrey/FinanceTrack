@@ -452,6 +452,21 @@ async function handleExport(userId: string, year: number, month: number): Promis
 async function handleUndo(userId: string): Promise<BotReply> {
   const last = await adminData.getLastBatch(userId)
   if (!last) return replies.nothingToUndo()
+
+  // Deleting from a closed month is the same mutation class as writing into one, which
+  // `commit`/`commitDirect` both refuse. Load the batch's transactions to learn which
+  // months they fall in and block the undo if any of those is locked.
+  const txns = await adminData.getTransactionsByIds(userId, last.transactionIds)
+  const months = new Map<string, { year: number; month: number }>()
+  for (const tx of txns) {
+    const d = tx.date.toDate()
+    months.set(`${d.getFullYear()}-${d.getMonth() + 1}`, { year: d.getFullYear(), month: d.getMonth() + 1 })
+  }
+  for (const { year, month } of months.values()) {
+    const budget = await adminData.getMonthlyBudget(userId, year, month)
+    if (adminData.isBudgetClosedAdmin(budget)) return replies.monthClosed(year, month)
+  }
+
   const count = await adminData.deleteTransactions(userId, last.transactionIds)
   await adminData.clearLastBatch(userId)
   return replies.undone(count)

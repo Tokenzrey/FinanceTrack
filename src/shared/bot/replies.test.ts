@@ -223,6 +223,22 @@ describe('replies.batchReview', () => {
     expect(replies.batchReview(batch(), TZ).text).toContain('belum ada kategori')
   })
 
+  it('shows ×n on a receipt line for any quantity including 1, and nothing on a line with no quantity', () => {
+    const out = replies.batchReview(
+      batch({
+        lines: [
+          line({ n: 1, description: 'Nasi goreng', quantity: 1 }),
+          line({ n: 2, description: 'Teh botol', quantity: 3 }),
+          line({ n: 3, description: 'Rokok', quantity: undefined }),
+        ],
+      }),
+      TZ,
+    ).text
+    expect(out).toContain('Nasi goreng</i> ×1')
+    expect(out).toContain('Teh botol</i> ×3')
+    expect(out).not.toContain('Rokok</i> ×')
+  })
+
   it('carries a full date and time stamp', () => {
     expect(replies.batchReview(batch(), TZ).text).toContain('6 Sep 2026 · 14.32 WIB')
   })

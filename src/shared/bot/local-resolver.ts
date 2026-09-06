@@ -44,11 +44,13 @@ export function detectDateOffset(text: string): number {
 /**
  * Splits "makan 35rb, bensin 50rb dan kopi 20rb" into its parts.
  *
- * The lookarounds are the whole point: a comma or semicolon flanked by digits is a
- * decimal point or a thousands separator, and splitting "1,5jt" would silently record
- * fifteen thousand rupiah instead of one and a half million.
+ * A "," or ";" is a real separator UNLESS it is a thousands/decimal mark — i.e. unless
+ * it has a digit immediately on BOTH sides ("1,5jt", "1,250,000"). Only then is the
+ * split suppressed; a digit merely abutting one side ("20000, teh 5000") is still a
+ * boundary, so a plain-rupiah list no longer collapses into one segment. Dots are never
+ * separators, so "1.500.000" is untouched regardless.
  */
-const SEGMENT_SPLIT = /(?<!\d)\s*[,;]\s*(?!\d)|\n+|\s+dan\s+/gi
+const SEGMENT_SPLIT = /(?<!\d)\s*[,;]\s*|\s*[,;]\s*(?!\d)|\n+|\s+dan\s+/gi
 
 export function splitSegments(text: string): string[] {
   return text

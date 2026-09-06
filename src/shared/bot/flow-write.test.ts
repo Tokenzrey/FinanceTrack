@@ -150,6 +150,14 @@ describe('handleTextTransaction', () => {
     expect(setPending).not.toHaveBeenCalled()
   })
 
+  it('never spends an L1 model call on a message with no parseable amount (I1)', async () => {
+    getScanHints.mockResolvedValue([])
+    const reply = await handleTextTransaction('u1', 'halo apa kabar')
+    expect(reply.text).toContain('Nominalnya tidak ketemu')
+    expect(parseTransactionBatch).not.toHaveBeenCalled()
+    expect(getCachedParse).not.toHaveBeenCalled()
+  })
+
   it('refuses the fast path into a closed month', async () => {
     isBudgetClosedAdmin.mockReturnValue(true)
     parseTransactionBatch.mockResolvedValue([parsed()])
@@ -286,10 +294,33 @@ describe('handlePhoto', () => {
   })
 
   it('re-uses a cached receipt read instead of spending vision quota again', async () => {
-    getCachedReceipt.mockResolvedValue(receiptResult())
+    getCachedReceipt.mockResolvedValue({ result: receiptResult() })
     const reply = await handlePhoto('u1', photo())
     expect(extractReceipt).not.toHaveBeenCalled()
     expect(reply.text).toContain('Tinjau')
+  })
+
+  it('re-uses the cached Drive upload on a re-send instead of uploading again (T15)', async () => {
+    getCachedReceipt.mockResolvedValue({
+      result: receiptResult(),
+      receipt: { gDriveFileId: 'f1', gDriveWebViewLink: 'https://drive/f1' },
+    })
+    await handlePhoto('u1', photo())
+    expect(uploadReceiptForUser).not.toHaveBeenCalled()
+    const draft = setPending.mock.calls[0][1] as DraftBatch
+    expect(draft.receipt).toEqual({ gDriveFileId: 'f1', gDriveWebViewLink: 'https://drive/f1' })
+  })
+
+  it('uploads once when the cached read predates upload-caching, and back-fills the cache', async () => {
+    getCachedReceipt.mockResolvedValue({ result: receiptResult() }) // no `receipt`
+    await handlePhoto('u1', photo())
+    expect(uploadReceiptForUser).toHaveBeenCalledTimes(1)
+    expect(saveCachedReceipt).toHaveBeenCalledWith(
+      'u1',
+      expect.any(String),
+      expect.anything(),
+      { gDriveFileId: 'f1', gDriveWebViewLink: 'https://drive/f1' },
+    )
   })
 
   it('caches a usable read, but not a rejected one', async () => {

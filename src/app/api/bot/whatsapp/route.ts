@@ -201,7 +201,11 @@ async function processMessage(payload: GowaMessage): Promise<void> {
     }
   } catch (error) {
     console.error('whatsapp (gowa) webhook message error:', error)
-    await sendMessage(payload.chat_id, { text: 'Ada masalah di sisi kami — coba lagi sebentar lagi.' })
+    const errorReply: BotReply = { text: 'Ada masalah di sisi kami — coba lagi sebentar lagi.' }
+    // Edit the "📸 Struk diterima…" placeholder into the error rather than leaving it
+    // stranded above a fresh error bubble.
+    if (placeholderId) await editMessage(payload.chat_id, placeholderId, errorReply)
+    else await sendMessage(payload.chat_id, errorReply)
   } finally {
     await setTyping(payload.chat_id, 'stop')
   }

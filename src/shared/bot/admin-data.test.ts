@@ -255,6 +255,85 @@ describe('getYearBudgets', () => {
   })
 })
 
+describe('getTransactionsByIds', () => {
+  it('fetches by documentId `in` chunks of 10 and maps {id, ...data}', async () => {
+    const get = vi.fn().mockResolvedValue({ docs: [{ id: 'tx1', data: () => ({ amount: 1000 }) }] })
+    const where = vi.fn().mockReturnValue({ get })
+    const collection = vi.fn().mockReturnValue({ where })
+    getAdminDb.mockReturnValue({ collection })
+
+    const out = await adminData.getTransactionsByIds(
+      'user-1',
+      Array.from({ length: 12 }, (_, i) => `t${i}`),
+    )
+
+    expect(collection).toHaveBeenCalledWith('users/user-1/transactions')
+    expect(where).toHaveBeenCalledTimes(2) // 12 ids → chunk of 10 + chunk of 2
+    expect(where.mock.calls[0][1]).toBe('in')
+    expect(where.mock.calls[0][2]).toHaveLength(10)
+    expect(where.mock.calls[1][2]).toHaveLength(2)
+    expect(out).toEqual([{ id: 'tx1', amount: 1000 }, { id: 'tx1', amount: 1000 }])
+  })
+
+  it('is a no-op for an empty id list', async () => {
+    getAdminDb.mockReturnValue({ collection: vi.fn() })
+    expect(await adminData.getTransactionsByIds('user-1', [])).toEqual([])
+  })
+})
+
+describe('getTransactionsBetween', () => {
+  it('queries a half-open [from, to) date range, newest first, mapping {id, ...data}', async () => {
+    const get = vi.fn().mockResolvedValue({ docs: [{ id: 'tx1', data: () => ({ amount: 1000 }) }] })
+    const orderBy = vi.fn().mockReturnValue({ get })
+    const where2 = vi.fn().mockReturnValue({ orderBy })
+    const where1 = vi.fn().mockReturnValue({ where: where2 })
+    const collection = vi.fn().mockReturnValue({ where: where1 })
+    getAdminDb.mockReturnValue({ collection })
+
+    const out = await adminData.getTransactionsBetween(
+      'user-1',
+      new Date('2026-09-01T00:00:00Z'),
+      new Date('2026-09-08T00:00:00Z'),
+    )
+
+    expect(collection).toHaveBeenCalledWith('users/user-1/transactions')
+    expect(where1).toHaveBeenCalledWith('date', '>=', expect.anything())
+    expect(where2).toHaveBeenCalledWith('date', '<', expect.anything())
+    expect(orderBy).toHaveBeenCalledWith('date', 'desc')
+    expect(out).toEqual([{ id: 'tx1', amount: 1000 }])
+  })
+})
+
+describe('searchTransactions', () => {
+  it('scans `scanLimit` recent rows, filters description by the needle (case-insensitive), slices to `limit`', async () => {
+    const docs = [
+      { id: 't1', data: () => ({ description: 'Kopi susu' }) },
+      { id: 't2', data: () => ({ description: 'BENSIN pertamax' }) },
+      { id: 't3', data: () => ({ description: 'kopi hitam' }) },
+      { id: 't4', data: () => ({ description: 'Kopi latte' }) },
+    ]
+    const get = vi.fn().mockResolvedValue({ docs })
+    const limit = vi.fn().mockReturnValue({ get })
+    const orderBy = vi.fn().mockReturnValue({ limit })
+    const collection = vi.fn().mockReturnValue({ orderBy })
+    getAdminDb.mockReturnValue({ collection })
+
+    const out = await adminData.searchTransactions('user-1', 'KOPI', 2, 500)
+
+    expect(collection).toHaveBeenCalledWith('users/user-1/transactions')
+    expect(orderBy).toHaveBeenCalledWith('date', 'desc')
+    expect(limit).toHaveBeenCalledWith(500)
+    expect(out.map((t) => t.id)).toEqual(['t1', 't3']) // 'BENSIN pertamax' filtered out, then sliced to 2
+  })
+
+  it('returns [] for a blank needle without touching Firestore', async () => {
+    const collection = vi.fn()
+    getAdminDb.mockReturnValue({ collection })
+    expect(await adminData.searchTransactions('user-1', '   ', 10)).toEqual([])
+    expect(collection).not.toHaveBeenCalled()
+  })
+})
+
 describe('getFinancialContextAdmin', () => {
   it('computes liquid assets and existing monthly debt from live reads, not a stored snapshot', async () => {
     const emptyCollection = { get: vi.fn().mockResolvedValue({ docs: [] }) }

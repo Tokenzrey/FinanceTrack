@@ -72,7 +72,8 @@ function renderLine(line: DraftLine, tz: string, showDate: boolean): string {
 
   const details: string[] = []
   if (line.description) {
-    const qty = line.quantity && line.quantity > 1 ? ` ×${line.quantity}` : ''
+    // A receipt line carries a `quantity` (even 1); a text line has none. §5 shows ×1.
+    const qty = line.quantity != null ? ` ×${line.quantity}` : ''
     details.push(`<i>${escapeHtml(line.description)}</i>${qty}`)
   }
   if (showDate) details.push(formatDateTime(new Date(line.dateIso), tz))

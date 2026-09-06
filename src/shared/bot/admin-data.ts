@@ -339,6 +339,20 @@ export async function searchTransactions(
     .slice(0, limit)
 }
 
+/**
+ * Reads specific transactions by id. Used by `/undo` to learn which months a batch
+ * touched before deleting from them. `documentId() in` caps at 10 values per query, so
+ * ids are chunked — a bot batch is <=20, so this is one or two queries.
+ */
+export async function getTransactionsByIds(userId: string, ids: string[]): Promise<Transaction[]> {
+  if (ids.length === 0) return []
+  const col = getAdminDb().collection(`users/${userId}/transactions`)
+  const chunks: string[][] = []
+  for (let i = 0; i < ids.length; i += 10) chunks.push(ids.slice(i, i + 10))
+  const snaps = await Promise.all(chunks.map((chunk) => col.where(FieldPath.documentId(), 'in', chunk).get()))
+  return snaps.flatMap((snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Transaction))
+}
+
 export async function getYearTransactions(userId: string, year: number): Promise<Transaction[]> {
   const from = Timestamp.fromDate(new Date(year, 0, 1))
   const to = Timestamp.fromDate(new Date(year + 1, 0, 1))
@@ -638,20 +652,39 @@ export async function saveModelHealth(
  *  Firestore native TTL policy on `expiresAt` keeps the collection from growing. */
 const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
-export async function getCachedReceipt(userId: string, hash: string): Promise<ReceiptScanResult | null> {
+/** A Drive upload that already happened for this exact image — cached next to the
+ *  read so a re-send reuses the file instead of creating a duplicate. */
+type CachedReceiptUpload = { gDriveFileId: string; gDriveWebViewLink: string }
+
+export interface CachedReceipt {
+  result: ReceiptScanResult
+  /** Absent on entries written before upload-caching, or when the upload had failed. */
+  receipt?: CachedReceiptUpload
+}
+
+export async function getCachedReceipt(userId: string, hash: string): Promise<CachedReceipt | null> {
   const snap = await getAdminDb().doc(`users/${userId}/bot_receipt_cache/${hash}`).get()
   if (!snap.exists) return null
-  return (snap.data()?.result ?? null) as ReceiptScanResult | null
+  const data = snap.data()
+  if (!data?.result) return null
+  return { result: data.result as ReceiptScanResult, receipt: (data.receipt as CachedReceiptUpload) ?? undefined }
 }
 
 export async function saveCachedReceipt(
   userId: string,
   hash: string,
   result: ReceiptScanResult,
+  receipt?: CachedReceiptUpload,
 ): Promise<void> {
   await getAdminDb()
     .doc(`users/${userId}/bot_receipt_cache/${hash}`)
-    .set({ result, expiresAt: Timestamp.fromMillis(Date.now() + CACHE_TTL_MS) })
+    .set(
+      stripUndefined({
+        result,
+        receipt,
+        expiresAt: Timestamp.fromMillis(Date.now() + CACHE_TTL_MS),
+      }),
+    )
 }
 
 export async function getCachedParse(userId: string, hash: string): Promise<ParsedLine[] | null> {

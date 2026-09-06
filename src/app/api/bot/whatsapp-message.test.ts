@@ -217,12 +217,19 @@ describe('WhatsApp (GOWA) — message normalization', () => {
 
     expect(res.status).toBe(200)
     expect(handleIncoming).not.toHaveBeenCalled()
-    // A photo placeholder went out first; the error then reaches the user as its own
-    // fresh send (never the placeholder left stale).
-    const sendBodies = (global.fetch as ReturnType<typeof vi.fn>).mock.calls
+    // A photo placeholder went out first; the error then edits that placeholder in
+    // place (via /update) rather than being sent as a fresh bubble above a stale one.
+    const updateCall = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.find((c) =>
+      (c[0] as string).includes('/message/ph1/update'),
+    )
+    expect(updateCall).toBeDefined()
+    expect(JSON.parse((updateCall![1] as { body: string }).body).message).toContain('masalah')
+    // ...and not also re-sent as a new /send/message carrying the error.
+    const errorSends = (global.fetch as ReturnType<typeof vi.fn>).mock.calls
       .filter((c) => (c[0] as string).endsWith('/send/message'))
       .map((c) => JSON.parse((c[1] as { body: string }).body).message as string)
-    expect(sendBodies.some((m) => m.includes('masalah'))).toBe(true)
+      .filter((m) => m.includes('masalah'))
+    expect(errorSends).toHaveLength(0)
   })
 
   it('sends a placeholder for a photo and edits it into the final reply', async () => {

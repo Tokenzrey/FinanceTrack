@@ -39,6 +39,7 @@ const getUserTimezone = vi.fn()
 const getTransactionsBetween = vi.fn()
 const searchTransactions = vi.fn()
 const getLastBatch = vi.fn()
+const getTransactionsByIds = vi.fn()
 const deleteTransactions = vi.fn()
 const clearLastBatch = vi.fn()
 
@@ -69,6 +70,7 @@ vi.mock('./admin-data', () => ({
   getTransactionsBetween: (...args: unknown[]) => getTransactionsBetween(...args),
   searchTransactions: (...args: unknown[]) => searchTransactions(...args),
   getLastBatch: (...args: unknown[]) => getLastBatch(...args),
+  getTransactionsByIds: (...args: unknown[]) => getTransactionsByIds(...args),
   deleteTransactions: (...args: unknown[]) => deleteTransactions(...args),
   clearLastBatch: (...args: unknown[]) => clearLastBatch(...args),
   // Gemini quota ledger — core.ts wires these into the router on every call. No test
@@ -225,6 +227,7 @@ beforeEach(() => {
   getUserTimezone.mockResolvedValue('Asia/Jakarta')
   handleTextTransaction.mockResolvedValue({ text: 'stub: text transaction' })
   handlePhoto.mockResolvedValue({ text: 'stub: photo' })
+  getTransactionsByIds.mockResolvedValue([])
 })
 
 // ─── Linking ─────────────────────────────────────────────────────
@@ -566,6 +569,39 @@ describe('handleIncoming — /undo', () => {
     const reply = await handleIncoming(textMsg('/undo'))
     expect(deleteTransactions).not.toHaveBeenCalled()
     expect(reply.text).toContain('Tidak ada')
+  })
+
+  it('refuses to delete when the last batch touches a closed month', async () => {
+    getLastBatch.mockResolvedValue({ transactionIds: ['t1', 't2'], createdAt: {} })
+    getTransactionsByIds.mockResolvedValue([
+      mockTransaction({ id: 't1', date: ts(new Date(2026, 6, 15)) }),
+      mockTransaction({ id: 't2', date: ts(new Date(2026, 6, 20)) }),
+    ])
+    getMonthlyBudget.mockResolvedValue({ closedAt: ts(new Date()) })
+    isBudgetClosedAdmin.mockReturnValue(true)
+
+    const reply = await handleIncoming(textMsg('/undo'))
+
+    expect(getMonthlyBudget).toHaveBeenCalledWith('user-1', 2026, 7)
+    expect(deleteTransactions).not.toHaveBeenCalled()
+    expect(clearLastBatch).not.toHaveBeenCalled()
+    expect(reply.text).toContain('sudah ditutup')
+  })
+
+  it('proceeds when the last batch is entirely within an open month', async () => {
+    getLastBatch.mockResolvedValue({ transactionIds: ['t1', 't2'], createdAt: {} })
+    getTransactionsByIds.mockResolvedValue([
+      mockTransaction({ id: 't1', date: ts(new Date(2026, 8, 1)) }),
+      mockTransaction({ id: 't2', date: ts(new Date(2026, 8, 2)) }),
+    ])
+    isBudgetClosedAdmin.mockReturnValue(false)
+    deleteTransactions.mockResolvedValue(2)
+
+    const reply = await handleIncoming(textMsg('/undo'))
+
+    expect(deleteTransactions).toHaveBeenCalledWith('user-1', ['t1', 't2'])
+    expect(clearLastBatch).toHaveBeenCalledWith('user-1')
+    expect(reply.text).toContain('2 transaksi dibatalkan')
   })
 })
 

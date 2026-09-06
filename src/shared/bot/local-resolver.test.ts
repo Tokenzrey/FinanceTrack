@@ -99,6 +99,18 @@ describe('splitSegments', () => {
     expect(splitSegments('transfer 1,250,000')).toEqual(['transfer 1,250,000'])
   })
 
+  it('splits a plain-number comma list — the comma abuts a digit on one side only (C1)', () => {
+    expect(splitSegments('kopi 20000, teh 5000')).toEqual(['kopi 20000', 'teh 5000'])
+    expect(splitSegments('jajan 100.000, bensin 50.000')).toEqual(['jajan 100.000', 'bensin 50.000'])
+    expect(splitSegments('a 1rb; b 2rb')).toEqual(['a 1rb', 'b 2rb'])
+    expect(splitSegments('a 1rb dan b 2rb')).toEqual(['a 1rb', 'b 2rb'])
+    expect(splitSegments('a 1rb\nb 2rb')).toEqual(['a 1rb', 'b 2rb'])
+  })
+
+  it('keeps a dotted thousands amount ("1.500.000") whole even next to a real separator', () => {
+    expect(splitSegments('kos 1.500.000, listrik 200.000')).toEqual(['kos 1.500.000', 'listrik 200.000'])
+  })
+
   it('returns the whole message when there is nothing to split', () => {
     expect(splitSegments('makan siang 35rb')).toEqual(['makan siang 35rb'])
   })
@@ -140,5 +152,12 @@ describe('tryLocalBatch', () => {
   it('keeps a decimal amount intact through the split', () => {
     const lines = tryLocalBatch('kopi 1,5jt', CATEGORIES, hints, NOW)
     expect(lines![0].amount).toBe(1_500_000)
+  })
+
+  it('builds every line from a plain-number comma list instead of dropping all but the first (C1)', () => {
+    const lines = tryLocalBatch('kopi 20000, bensin 50000', CATEGORIES, hints, NOW)
+    expect(lines).toHaveLength(2)
+    expect(lines![0].amount).toBe(20_000)
+    expect(lines![1].amount).toBe(50_000)
   })
 })

@@ -12,6 +12,7 @@ import { batchToDTOs, buildLinesFromParsed, buildLinesFromReceipt, renumber } fr
 import { uploadReceiptForUser } from './drive-upload'
 import { startReview } from './flow-review'
 import { tryLocalBatch } from './local-resolver'
+import { parseAmount } from './parse-amount'
 import { parseTransactionBatch } from './parse-batch'
 import { replies } from './replies'
 import type { BotIncoming, BotReply, DraftBatch, DraftLine } from './types'
@@ -91,6 +92,12 @@ export async function handleTextTransaction(userId: string, text: string): Promi
     return startReview(userId, batch)
   }
 
+  // A message with no parseable amount is never a transaction — refuse it here rather
+  // than spend an L1 model call to be told the same thing. `parseAmount` returns
+  // non-null for any batch with at least one amount, so real multi-transaction
+  // messages are unaffected.
+  if (parseAmount(text) === null) return replies.amountNotFound()
+
   // L0.5 — the same sentence, with the same categories, has the same answer.
   const parseKey = hashParse(text, active.map((c) => c.id))
   let parsed = await adminData.getCachedParse(userId, parseKey)
@@ -121,26 +128,20 @@ type ReadOutcome =
   | { ok: false; reply: BotReply }
 
 /**
- * Cache lookup + `extractReceipt` + cache store, wrapped in a discriminated result so
- * it can sit inside a `Promise.all` next to the Drive upload — a model failure comes
- * back as `{ ok: false }` with the reply to send, never a throw that would tear the
- * other branch down.
+ * Just the vision extraction, wrapped in a discriminated result so it can sit inside a
+ * `Promise.all` next to the Drive upload — a model failure comes back as `{ ok: false }`
+ * with the reply to send, never a throw that would tear the other branch down. Cache
+ * lookup and store are the caller's job (`handlePhoto`), since the cache row now also
+ * carries the Drive upload and both are decided together.
  *
  * The caption is extra extraction context: on a blurry or long itemised receipt
  * "yang buram itu teh botol 2x12rb" recovers lines OCR drops.
  */
-async function readReceipt(
-  userId: string,
+async function extractFresh(
   msg: Extract<BotIncoming, { kind: 'image' }>,
   spendCategories: Category[],
   hints: CategoryHint[],
 ): Promise<ReadOutcome> {
-  // The same photo arriving twice is routine — GOWA retries, or the user re-sends after
-  // seeing no reply. A cached read costs nothing from the vision budget.
-  const imageKey = hashImage(msg.imageBase64)
-  const cached = await adminData.getCachedReceipt(userId, imageKey)
-  if (cached) return { ok: true, result: cached }
-
   try {
     const result = await extractReceipt(
       msg.imageBase64,
@@ -149,11 +150,6 @@ async function readReceipt(
       hints,
       msg.caption,
     )
-    // Cache only a usable read. A "not a receipt" verdict on a bad angle must not
-    // survive the user re-taking the photo, and a quota error must not be pinned.
-    if (result.totalConfidence >= 20 && result.extraction.total > 0) {
-      await adminData.saveCachedReceipt(userId, imageKey, stripForCache(result))
-    }
     return { ok: true, result }
   } catch (error) {
     console.error('bot readReceipt error:', error)
@@ -177,17 +173,43 @@ export async function handlePhoto(
   ])
   const spendCategories = categories.filter((c) => c.isActive && c.pillar !== 'income')
 
-  // The Drive upload never depended on the extraction — it only needs the bytes, which
-  // are already in hand. Running them in series wasted 2-5s on every receipt.
-  // Deliberate: if the read then fails, the photo is already on Drive — acceptable (the
-  // user keeps it under FinTrack/Receipts; the alternative pays that 2-5s on every
-  // single receipt to tidy a rare case).
-  const [outcome, uploaded] = await Promise.all([
-    readReceipt(userId, msg, spendCategories, hints),
-    uploadReceiptForUser(userId, base64ToBlob(msg.imageBase64, msg.mimeType), `struk-${Date.now()}.jpg`),
-  ])
-  if (!outcome.ok) return outcome.reply
-  const result = outcome.result
+  // The same photo arriving twice is routine — GOWA retries, or the user re-sends after
+  // seeing no reply. A cached read costs nothing from the vision budget.
+  const imageKey = hashImage(msg.imageBase64)
+  const cached = await adminData.getCachedReceipt(userId, imageKey)
+  const uploadFresh = () =>
+    uploadReceiptForUser(userId, base64ToBlob(msg.imageBase64, msg.mimeType), `struk-${Date.now()}.jpg`)
+
+  let result: ReceiptScanResult
+  let uploaded: { gDriveFileId: string; gDriveWebViewLink: string } | null
+
+  if (cached) {
+    // A cached read means this exact image was already processed — the Drive upload
+    // ran then too. Reuse it instead of creating a duplicate file; only re-upload when
+    // the cached entry predates upload-caching, or its upload had failed.
+    result = cached.result
+    uploaded = cached.receipt ?? (await uploadFresh())
+    if (!cached.receipt && uploaded) {
+      await adminData.saveCachedReceipt(userId, imageKey, cached.result, uploaded)
+    }
+  } else {
+    // The Drive upload never depended on the extraction — it only needs the bytes,
+    // already in hand. Running them in series wasted 2-5s on every receipt. Deliberate:
+    // if the read then fails, the photo is already on Drive — acceptable.
+    const [outcome, freshUpload] = await Promise.all([
+      extractFresh(msg, spendCategories, hints),
+      uploadFresh(),
+    ])
+    if (!outcome.ok) return outcome.reply
+    result = outcome.result
+    uploaded = freshUpload
+    // Cache only a usable read — a "not a receipt" verdict on a bad angle must not
+    // survive a re-take, and a quota error must not be pinned — together with the
+    // upload so a re-send reuses the file.
+    if (result.totalConfidence >= 20 && result.extraction.total > 0) {
+      await adminData.saveCachedReceipt(userId, imageKey, stripForCache(result), uploaded ?? undefined)
+    }
+  }
 
   if (result.totalConfidence < 20 || result.extraction.total <= 0) return replies.notAReceipt()
 
