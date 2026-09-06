@@ -5,6 +5,7 @@ import {
   isAiQuotaOrOverloadError,
 } from '@/shared/lib/receipt-extraction'
 import type { Category } from '@/shared/types/domain'
+import type { CategoryHint, ReceiptScanResult } from '@/shared/types/receipt-scanner.types'
 import * as adminData from './admin-data'
 import { hashImage, hashParse, stripForCache } from './cache'
 import { batchToDTOs, buildLinesFromParsed, buildLinesFromReceipt, renumber } from './draft'
@@ -115,6 +116,54 @@ export async function handleTextTransaction(userId: string, text: string): Promi
   return startReview(userId, newBatch({ source: 'text', lines }))
 }
 
+type ReadOutcome =
+  | { ok: true; result: ReceiptScanResult }
+  | { ok: false; reply: BotReply }
+
+/**
+ * Cache lookup + `extractReceipt` + cache store, wrapped in a discriminated result so
+ * it can sit inside a `Promise.all` next to the Drive upload — a model failure comes
+ * back as `{ ok: false }` with the reply to send, never a throw that would tear the
+ * other branch down.
+ *
+ * The caption is extra extraction context: on a blurry or long itemised receipt
+ * "yang buram itu teh botol 2x12rb" recovers lines OCR drops.
+ */
+async function readReceipt(
+  userId: string,
+  msg: Extract<BotIncoming, { kind: 'image' }>,
+  spendCategories: Category[],
+  hints: CategoryHint[],
+): Promise<ReadOutcome> {
+  // The same photo arriving twice is routine — GOWA retries, or the user re-sends after
+  // seeing no reply. A cached read costs nothing from the vision budget.
+  const imageKey = hashImage(msg.imageBase64)
+  const cached = await adminData.getCachedReceipt(userId, imageKey)
+  if (cached) return { ok: true, result: cached }
+
+  try {
+    const result = await extractReceipt(
+      msg.imageBase64,
+      msg.mimeType,
+      spendCategories.map((c) => ({ id: c.id, name: c.name, pillar: c.pillar })),
+      hints,
+      msg.caption,
+    )
+    // Cache only a usable read. A "not a receipt" verdict on a bad angle must not
+    // survive the user re-taking the photo, and a quota error must not be pinned.
+    if (result.totalConfidence >= 20 && result.extraction.total > 0) {
+      await adminData.saveCachedReceipt(userId, imageKey, stripForCache(result))
+    }
+    return { ok: true, result }
+  } catch (error) {
+    console.error('bot readReceipt error:', error)
+    return {
+      ok: false,
+      reply: isAiQuotaOrOverloadError(error) ? replies.aiUnavailable() : replies.genericError(),
+    }
+  }
+}
+
 export async function handlePhoto(
   userId: string,
   msg: Extract<BotIncoming, { kind: 'image' }>,
@@ -128,36 +177,17 @@ export async function handlePhoto(
   ])
   const spendCategories = categories.filter((c) => c.isActive && c.pillar !== 'income')
 
-  // The same photo arriving twice is routine — GOWA retries, or the user re-sends after
-  // seeing no reply. A cached read costs nothing from the vision budget.
-  const imageKey = hashImage(msg.imageBase64)
-  let result = await adminData.getCachedReceipt(userId, imageKey)
-
-  if (!result) {
-    try {
-      // The caption is extra extraction context: on a blurry or long itemised receipt
-      // "yang buram itu teh botol 2x12rb" recovers lines OCR drops. Also still feeds the
-      // fallback line's description below.
-      result = await extractReceipt(
-        msg.imageBase64,
-        msg.mimeType,
-        spendCategories.map((c) => ({ id: c.id, name: c.name, pillar: c.pillar })),
-        // Was `[]` — the bot never used the memory the web scanner had been building.
-        hints,
-        msg.caption,
-      )
-    } catch (error) {
-      console.error('bot handlePhoto extractReceipt error:', error)
-      if (isAiQuotaOrOverloadError(error)) return replies.aiUnavailable()
-      return replies.genericError()
-    }
-
-    // Cache only a usable read. A "not a receipt" verdict on a bad angle must not
-    // survive the user re-taking the photo, and a quota error must not be pinned.
-    if (result.totalConfidence >= 20 && result.extraction.total > 0) {
-      await adminData.saveCachedReceipt(userId, imageKey, stripForCache(result))
-    }
-  }
+  // The Drive upload never depended on the extraction — it only needs the bytes, which
+  // are already in hand. Running them in series wasted 2-5s on every receipt.
+  // Deliberate: if the read then fails, the photo is already on Drive — acceptable (the
+  // user keeps it under FinTrack/Receipts; the alternative pays that 2-5s on every
+  // single receipt to tidy a rare case).
+  const [outcome, uploaded] = await Promise.all([
+    readReceipt(userId, msg, spendCategories, hints),
+    uploadReceiptForUser(userId, base64ToBlob(msg.imageBase64, msg.mimeType), `struk-${Date.now()}.jpg`),
+  ])
+  if (!outcome.ok) return outcome.reply
+  const result = outcome.result
 
   if (result.totalConfidence < 20 || result.extraction.total <= 0) return replies.notAReceipt()
 
@@ -181,12 +211,6 @@ export async function handlePhoto(
       },
     ])
   }
-
-  const uploaded = await uploadReceiptForUser(
-    userId,
-    base64ToBlob(msg.imageBase64, msg.mimeType),
-    `struk-${Date.now()}.jpg`,
-  )
 
   return startReview(
     userId,

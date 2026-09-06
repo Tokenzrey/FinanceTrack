@@ -3,6 +3,7 @@ import { waitUntil } from '@vercel/functions'
 import { claimInboundMessage } from '@/shared/bot/admin-data'
 import { handleIncoming } from '@/shared/bot/core'
 import { downloadTelegramPhoto } from '@/shared/bot/media-telegram'
+import { replies } from '@/shared/bot/replies'
 import type { BotIncoming, BotReply } from '@/shared/bot/types'
 
 export const runtime = 'nodejs'
@@ -40,17 +41,19 @@ function toReplyMarkup(reply: BotReply): Record<string, unknown> | undefined {
   return { inline_keyboard: reply.keyboard.map((row) => row.map((b) => ({ text: b.label, callback_data: b.value }))) }
 }
 
-async function callTelegram(method: string, payload: Record<string, unknown>): Promise<void> {
+async function callTelegram(method: string, payload: Record<string, unknown>): Promise<unknown> {
   const token = botToken()
-  if (!token) return
+  if (!token) return null
   try {
-    await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+    const res = await fetch(`https://api.telegram.org/bot${token}/${method}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })
+    return await res.json()
   } catch (error) {
     console.error(`telegram ${method} error:`, error)
+    return null
   }
 }
 
@@ -61,6 +64,17 @@ async function sendMessage(chatId: number, reply: BotReply): Promise<void> {
     parse_mode: reply.html === false ? undefined : 'HTML',
     reply_markup: toReplyMarkup(reply),
   })
+}
+
+/** Sends a message and returns its id so a placeholder can be edited in place. */
+async function sendMessageReturningId(chatId: number, reply: BotReply): Promise<number | null> {
+  const body = (await callTelegram('sendMessage', {
+    chat_id: chatId,
+    text: reply.text,
+    parse_mode: reply.html === false ? undefined : 'HTML',
+    reply_markup: toReplyMarkup(reply),
+  })) as { ok?: boolean; result?: { message_id?: number } } | null
+  return body?.ok ? (body.result?.message_id ?? null) : null
 }
 
 /** Replaces a tapped-button message with the result and removes its keyboard, so a
@@ -112,8 +126,12 @@ async function handleTextOrPhotoMessage(message: NonNullable<TelegramUpdate['mes
 
   try {
     let incoming: BotIncoming | null = null
+    let placeholderId: number | null = null
 
     if (message.photo && message.photo.length > 0) {
+      // Only photos are slow enough to need a placeholder; a text message is usually
+      // answered from the local layer before one would even render.
+      placeholderId = await sendMessageReturningId(chatId, replies.receiptReceived())
       // Telegram sends the same photo at multiple resolutions; the last entry is the
       // largest.
       const largest = message.photo[message.photo.length - 1]
@@ -132,7 +150,8 @@ async function handleTextOrPhotoMessage(message: NonNullable<TelegramUpdate['mes
 
     if (incoming) {
       const reply = await handleIncoming(incoming)
-      await sendMessage(chatId, reply)
+      if (placeholderId) await editMessage(chatId, placeholderId, reply)
+      else await sendMessage(chatId, reply)
       if (message.message_id) await reactTo(chatId, message.message_id, '✅')
     }
   } catch (error) {

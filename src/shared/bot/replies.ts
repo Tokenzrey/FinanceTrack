@@ -161,6 +161,10 @@ export const replies = {
 
   imageTooLarge: (): BotReply => reply('⚠️ Foto itu terlalu besar. Coba kirim ulang dengan ukuran yang lebih kecil.'),
 
+  /** Sent the instant a photo arrives, then edited in place into the review card once
+   *  the read finishes — a photo is never met with silence while Gemini works. */
+  receiptReceived: (): BotReply => reply('📸 <b>Struk diterima.</b>\n<i>Sedang dibaca…</i>'),
+
   /** Gemini returned 429 (kuota/rate limit) or 503 (overload) — distinct from
    *  `genericError` so the user knows to wait rather than that something is broken.
    *  Nothing was recorded (see `handlePhoto`); the user can resend later. */

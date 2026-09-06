@@ -5,6 +5,7 @@ import { claimInboundMessage } from '@/shared/bot/admin-data'
 import { handleIncoming } from '@/shared/bot/core'
 import { renderForWhatsApp } from '@/shared/bot/format-wa'
 import { downloadWhatsAppMedia } from '@/shared/bot/media-whatsapp'
+import { replies } from '@/shared/bot/replies'
 import type { BotIncoming, BotReply } from '@/shared/bot/types'
 
 export const runtime = 'nodejs'
@@ -91,17 +92,40 @@ function react(messageId: string, chatId: string, emoji: string): Promise<void> 
   return gowaPost(`/message/${encodeURIComponent(messageId)}/reaction`, { phone: chatId, emoji })
 }
 
-async function sendMessage(chatId: string, reply: BotReply): Promise<void> {
+/** Returns the sent message's id so a placeholder can later be edited in place. */
+async function sendMessage(chatId: string, reply: BotReply): Promise<string | null> {
   const auth = gowaAuth()
-  if (!auth) return
+  if (!auth) return null
   try {
-    await fetch(`${auth.baseUrl}/send/message`, {
+    const res = await fetch(`${auth.baseUrl}/send/message`, {
       method: 'POST',
       headers: { Authorization: auth.authHeader, 'Content-Type': 'application/json' },
       body: JSON.stringify({ phone: chatId, message: renderForWhatsApp(reply) }),
     })
+    const body = (await res.json()) as { results?: { message_id?: string } }
+    return body.results?.message_id ?? null
   } catch (error) {
     console.error('whatsapp (gowa) sendMessage error:', error)
+    return null
+  }
+}
+
+/** WhatsApp allows editing your own message for about 15 minutes — far longer than any
+ *  receipt read takes. Falls back to a fresh message if the edit is refused, so a stale
+ *  placeholder can never be the last thing the user sees. */
+async function editMessage(chatId: string, messageId: string, reply: BotReply): Promise<void> {
+  const auth = gowaAuth()
+  if (!auth) return
+  try {
+    const res = await fetch(`${auth.baseUrl}/message/${encodeURIComponent(messageId)}/update`, {
+      method: 'POST',
+      headers: { Authorization: auth.authHeader, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: chatId, message: renderForWhatsApp(reply) }),
+    })
+    if (!res.ok) await sendMessage(chatId, reply)
+  } catch (error) {
+    console.error('whatsapp (gowa) editMessage error:', error)
+    await sendMessage(chatId, reply)
   }
 }
 
@@ -123,10 +147,15 @@ async function processMessage(payload: GowaMessage): Promise<void> {
   await react(payload.id, payload.chat_id, '👀')
   await setTyping(payload.chat_id, 'start')
 
+  let placeholderId: string | null = null
+
   try {
     let incoming: BotIncoming | null = null
 
     if (payload.image) {
+      // Only photos are slow enough to need a placeholder; a text message is usually
+      // answered from the local layer before one would even render.
+      placeholderId = await sendMessage(payload.chat_id, replies.receiptReceived())
       // `chat_id` (full JID) is required by GOWA's download endpoint as `phone` — it
       // rejects a blank one with HTTP 400 and cross-checks it against the message's
       // own chat.
@@ -145,7 +174,8 @@ async function processMessage(payload: GowaMessage): Promise<void> {
 
     if (incoming) {
       const reply = await handleIncoming(incoming)
-      await sendMessage(payload.chat_id, reply)
+      if (placeholderId) await editMessage(payload.chat_id, placeholderId, reply)
+      else await sendMessage(payload.chat_id, reply)
       await react(payload.id, payload.chat_id, '✅')
     }
   } catch (error) {

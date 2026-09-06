@@ -55,7 +55,9 @@ beforeEach(() => {
   waitUntilPromises.length = 0
   handleIncoming.mockResolvedValue({ text: 'ok' })
   claimInboundMessage.mockResolvedValue(true)
-  global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as unknown as typeof fetch
+  global.fetch = vi
+    .fn()
+    .mockResolvedValue({ ok: true, json: async () => ({ results: { message_id: 'ph1' } }) }) as unknown as typeof fetch
 
   process.env.WHATSAPP_WEBHOOK_SECRET = 'gowa-secret'
   process.env.GOWA_BASE_URL = 'https://gowatokenzrey.my.id'
@@ -215,10 +217,55 @@ describe('WhatsApp (GOWA) — message normalization', () => {
 
     expect(res.status).toBe(200)
     expect(handleIncoming).not.toHaveBeenCalled()
-    const sendCall = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.find((c) =>
-      (c[0] as string).endsWith('/send/message'),
-    )
-    expect(JSON.parse(sendCall?.[1].body).message).toContain('masalah')
+    // A photo placeholder went out first; the error then reaches the user as its own
+    // fresh send (never the placeholder left stale).
+    const sendBodies = (global.fetch as ReturnType<typeof vi.fn>).mock.calls
+      .filter((c) => (c[0] as string).endsWith('/send/message'))
+      .map((c) => JSON.parse((c[1] as { body: string }).body).message as string)
+    expect(sendBodies.some((m) => m.includes('masalah'))).toBe(true)
+  })
+
+  it('sends a placeholder for a photo and edits it into the final reply', async () => {
+    downloadWhatsAppMedia.mockResolvedValue({ base64: 'ZmFrZQ==', mimeType: 'image/jpeg' })
+    handleIncoming.mockResolvedValue({ text: 'Tinjau 2 Transaksi', html: true })
+
+    await POST(req({
+      event: 'message', device_id: 'd@s.whatsapp.net',
+      payload: { id: 'm1', chat_id: '628@s.whatsapp.net', from: '628@s.whatsapp.net', timestamp: 't', is_from_me: false, body: '', image: 'statics/media/x.jpg' },
+    }))
+    await flush()
+
+    const urls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0] as string)
+    expect(urls.filter((u) => u.endsWith('/send/message'))).toHaveLength(1) // the placeholder only
+    expect(urls.some((u) => u.includes('/update'))).toBe(true)
+  })
+
+  it('sends no placeholder for a plain text message', async () => {
+    await POST(req({
+      event: 'message', device_id: 'd@s.whatsapp.net',
+      payload: { id: 'm2', chat_id: '628@s.whatsapp.net', from: '628@s.whatsapp.net', timestamp: 't', is_from_me: false, body: 'ringkasan' },
+    }))
+    await flush()
+    const urls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0] as string)
+    expect(urls.some((u) => u.includes('/update'))).toBe(false)
+  })
+
+  it('falls back to a fresh message when the edit is refused', async () => {
+    global.fetch = vi.fn().mockImplementation((url: string) =>
+      url.includes('/update')
+        ? Promise.resolve({ ok: false, status: 400, json: async () => ({}) })
+        : Promise.resolve({ ok: true, json: async () => ({ results: { message_id: 'ph1' } }) }),
+    ) as unknown as typeof fetch
+    downloadWhatsAppMedia.mockResolvedValue({ base64: 'ZmFrZQ==', mimeType: 'image/jpeg' })
+
+    await POST(req({
+      event: 'message', device_id: 'd@s.whatsapp.net',
+      payload: { id: 'm3', chat_id: '628@s.whatsapp.net', from: '628@s.whatsapp.net', timestamp: 't', is_from_me: false, body: '', image: 'statics/media/x.jpg' },
+    }))
+    await flush()
+
+    const sends = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.filter((c) => (c[0] as string).endsWith('/send/message'))
+    expect(sends.length).toBeGreaterThanOrEqual(2) // placeholder + fallback
   })
 })
 

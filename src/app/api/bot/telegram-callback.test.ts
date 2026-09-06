@@ -16,6 +16,11 @@ vi.mock('@/shared/bot/admin-data', () => ({
   claimInboundMessage: (...args: unknown[]) => claimInboundMessage(...args),
 }))
 
+const downloadTelegramPhoto = vi.fn()
+vi.mock('@/shared/bot/media-telegram', () => ({
+  downloadTelegramPhoto: (...args: unknown[]) => downloadTelegramPhoto(...args),
+}))
+
 // The route hands processing to `waitUntil` and returns 200 before it finishes.
 const { waitUntilPromises } = vi.hoisted(() => ({ waitUntilPromises: [] as Promise<unknown>[] }))
 vi.mock('@vercel/functions', () => ({
@@ -43,6 +48,7 @@ beforeEach(() => {
   waitUntilPromises.length = 0
   handleIncoming.mockResolvedValue({ text: 'ok' })
   claimInboundMessage.mockResolvedValue(true)
+  downloadTelegramPhoto.mockResolvedValue({ base64: 'ZmFrZQ==', mimeType: 'image/jpeg' })
   global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as unknown as typeof fetch
   process.env.TELEGRAM_WEBHOOK_SECRET = 'tg-secret'
   process.env.TELEGRAM_BOT_TOKEN = 'tg-token'
@@ -134,6 +140,25 @@ describe('Telegram webhook — message de-dup', () => {
     await flush()
 
     expect(handleIncoming).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('Telegram webhook — photo placeholder', () => {
+  it('sends a placeholder for a photo and edits it in place', async () => {
+    global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, result: { message_id: 900 } }) }) as unknown as typeof fetch
+
+    await POST(req({ update_id: 30, message: { chat: { id: 7 }, message_id: 60, photo: [{ file_id: 'f1' }] } }))
+    await flush()
+
+    const methods = calledMethods()
+    expect(methods).toContain('sendMessage')
+    expect(methods).toContain('editMessageText')
+  })
+
+  it('sends no placeholder edit for a plain text message', async () => {
+    await POST(req({ update_id: 31, message: { chat: { id: 7 }, message_id: 61, text: 'ringkasan' } }))
+    await flush()
+    expect(calledMethods()).not.toContain('editMessageText')
   })
 })
 
