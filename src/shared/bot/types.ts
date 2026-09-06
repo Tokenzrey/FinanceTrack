@@ -121,6 +121,9 @@ export interface BotReply {
    *  it replaces the generic keyboard fallback entirely: a review card needs
    *  `kat 2 1`-style instructions, which no automatic numbering could produce. */
   whatsappHints?: string[]
+  /** A file to send after the text. Both adapters upload it as a document (Telegram
+   *  `sendDocument`, WhatsApp GOWA `/send/file`). */
+  document?: { filename: string; mimeType: string; base64: string }
 }
 
 /** What a platform media downloader hands back — already normalized, so `core.ts`

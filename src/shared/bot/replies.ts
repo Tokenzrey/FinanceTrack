@@ -1,8 +1,10 @@
 import { formatDateTime, formatDay, formatIDR, formatMonthLong } from '@/shared/lib/format'
-import { PILLAR_LABELS, type Category, type MonthlySummary, type RecurringRule, type Transaction } from '@/shared/types/domain'
+import { PILLAR_LABELS, type Category, type CategorySummary, type MonthlySummary, type Pillar, type RecurringRule, type Transaction } from '@/shared/types/domain'
+import type { Insight } from '@/shared/lib/insights'
 import type { YearSummary } from '@/shared/lib/year-summary'
 import type { AffordabilityDecision, SmartAffordabilityResult, Wishlist } from '@/shared/types/wishlist.types'
 import { batchTotals, collapseToSingle } from './draft'
+import { bar, moneyColumn, statusEmoji, trendArrow } from './render'
 import { reviewToken } from './review-commands'
 import type { BotKeyboardButton, BotPrefs, BotReply, DraftBatch, DraftLine } from './types'
 
@@ -123,13 +125,15 @@ export const replies = {
         '<b>📊 Ringkasan</b>',
         '/hariini — pengeluaran hari ini',
         '/minggu — 7 hari terakhir',
-        '/ringkasan — anggaran bulan ini',
-        '/saldo — sisa anggaran per pilar',
+        '/ringkasan [bulan] — mis. <code>/ringkasan 8</code> atau <code>/ringkasan agustus</code>',
+        '/saldo [pilar] — mis. <code>/saldo kebutuhan</code>',
+        '/kategori &lt;nama&gt; — rincian satu kategori: laju, proyeksi, transaksi terakhir',
         '/tahunan — ringkasan tahun berjalan',
-        '/statistik — rata-rata harian &amp; kategori teratas',
+        '/export [bulan] — kirim CSV bulan itu',
+        '/statistik — merchant teratas, metode bayar, konsistensi',
         '',
         '<b>🔎 Riwayat</b>',
-        '/riwayat — 5 transaksi terakhir',
+        '/riwayat [jumlah] [kata] — mis. <code>/riwayat 10 kopi</code>',
         '/cari &lt;kata&gt; — cari transaksi, mis. <code>/cari kopi</code>',
         '/undo — batalkan pencatatan terakhir',
         '',
@@ -137,6 +141,11 @@ export const replies = {
         '/target — target tabungan &amp; progres',
         '/setor — setor dana ke target tabungan',
         '/kekayaan — kekayaan bersih terkini',
+        '',
+        '<b>⚙️ Kustomisasi</b>',
+        '/mode ringkas — balasan pendek',
+        '/mode detail — balasan lengkap',
+        '/atur — semua pengaturan bot',
         '',
         '<b>⚙️ Lainnya</b>',
         '/kategori — daftar kategori aktif',
@@ -209,28 +218,137 @@ export const replies = {
     )
   },
 
-  summary: (summary: MonthlySummary): BotReply =>
+  summary: (
+    summary: MonthlySummary,
+    insights: Insight[],
+    health: { total: number },
+    prefs: BotPrefs,
+  ): BotReply => {
+    const spend = summary.categories.filter((c) => c.category.pillar !== 'income')
+    const top = [...spend].sort((a, b) => b.used - a.used).slice(0, 3)
+    const absorption = summary.totalBudget > 0 ? (summary.totalUsed / summary.totalBudget) * 100 : 0
+
+    const head = [
+      `📊 <b>Ringkasan ${formatMonthLong(summary.year, summary.month)}</b>`,
+      '',
+      ...moneyColumn([
+        { label: 'Pemasukan', amount: summary.totalIncome },
+        { label: 'Anggaran', amount: summary.totalBudget },
+        { label: 'Terpakai', amount: summary.totalUsed },
+        { label: 'Ditabung', amount: summary.totalSaved },
+        { label: 'Arus kas', amount: summary.netCashFlow },
+      ]),
+      '',
+      `<code>${bar(absorption)}</code> <b>${absorption.toFixed(0)}%</b> anggaran terpakai`,
+      `💰 Rasio tabungan <b>${summary.savingsRate.toFixed(1)}%</b> · 🩺 Skor keuangan <b>${health.total.toFixed(0)}/100</b>`,
+    ]
+
+    if (prefs.verbosity === 'ringkas') return reply(head.join('\n'))
+
+    const detail = [
+      '',
+      '<b>Terbesar bulan ini</b>',
+      ...top.map(
+        (c) =>
+          `${statusEmoji(c.status)} ${escapeHtml(c.category.name)} — ${formatIDR(c.used)} / ${formatIDR(c.budget)}\n` +
+          `    <code>${bar(c.absorptionRate)}</code> sisa ${formatIDR(c.remaining)} · ${c.daysLeft} hari lagi`,
+      ),
+    ]
+
+    if (prefs.showInsights && insights.length > 0) {
+      const tone = { good: '✅', warn: '⚠️', info: 'ℹ️' } as const
+      detail.push(
+        '',
+        `${tone[insights[0].tone]} <b>${escapeHtml(insights[0].title)}</b>`,
+        `<i>${escapeHtml(insights[0].body)}</i>`,
+      )
+    }
+
+    detail.push('', '<i>Rincian per kategori: /saldo · satu kategori: /kategori &lt;nama&gt;</i>')
+    return reply([...head, ...detail].join('\n'))
+  },
+
+  balance: (summary: MonthlySummary, pillarFilter: Pillar | null, prefs: BotPrefs): BotReply => {
+    const pillars = pillarFilter ? [pillarFilter] : (['needs', 'wants', 'savings'] as const)
+    const blocks: string[] = []
+
+    for (const pillar of pillars) {
+      const { budget, used } = summary.pillarSummary[pillar]
+      const percent = budget > 0 ? (used / budget) * 100 : 0
+      blocks.push(
+        `<b>${PILLAR_LABELS[pillar]}</b> — sisa <b>${formatIDR(budget - used)}</b> dari ${formatIDR(budget)}\n` +
+          `<code>${bar(percent)}</code> ${percent.toFixed(0)}%`,
+      )
+
+      if (prefs.verbosity === 'detail') {
+        const rows = summary.categories
+          .filter((c) => c.category.pillar === pillar)
+          .sort((a, b) => b.absorptionRate - a.absorptionRate)
+        for (const c of rows) {
+          blocks.push(
+            `  ${statusEmoji(c.status)} ${escapeHtml(c.category.name)} · ${formatIDR(c.remaining)} sisa · ` +
+              `${formatIDR(c.dailyAllowanceLeft)}/hari`,
+          )
+        }
+      }
+    }
+
+    return reply(
+      [
+        `📊 <b>Sisa Anggaran ${formatMonthLong(summary.year, summary.month)}</b>`,
+        `<blockquote>${summary.categories[0]?.daysLeft ?? 0} hari tersisa di bulan ini</blockquote>`,
+        '',
+        blocks.join('\n\n'),
+      ].join('\n'),
+    )
+  },
+
+  categoryDetail: (
+    c: CategorySummary,
+    recent: { amount: number; description: string; date: Date }[],
+    tz: string,
+  ): BotReply =>
     reply(
       [
-        `📊 <b>Ringkasan ${formatMonthLong(summary.year, summary.month)}</b>`,
+        `${statusEmoji(c.status)} <b>${escapeHtml(c.category.name)}</b> · ${PILLAR_LABELS[c.category.pillar]}`,
         '',
-        `Pemasukan   <code>${formatIDR(summary.totalIncome)}</code>`,
-        `Terpakai    <code>${formatIDR(summary.totalUsed)}</code>`,
-        `Ditabung    <code>${formatIDR(summary.totalSaved)}</code>`,
-        `Arus kas    <code>${formatIDR(summary.netCashFlow)}</code>`,
+        ...moneyColumn([
+          { label: 'Anggaran', amount: c.budget },
+          { label: 'Terpakai', amount: c.used },
+          { label: 'Sisa', amount: c.remaining },
+        ]),
+        `<code>${bar(c.absorptionRate)}</code> <b>${c.absorptionRate.toFixed(0)}%</b>`,
         '',
-        `💰 Rasio tabungan: <b>${summary.savingsRate.toFixed(1)}%</b>`,
+        `Laju harian   <code>${formatIDR(c.dailyBurnRate)}</code>`,
+        `Jatah/hari    <code>${formatIDR(c.dailyAllowanceLeft)}</code> (${c.daysLeft} hari lagi)`,
+        `Proyeksi      <code>${formatIDR(c.projectedMonthEnd)}</code> ${trendArrow(c.vsLastMonth)} ${c.vsLastMonth.toFixed(0)}% vs bulan lalu`,
+        '',
+        '<b>Transaksi terakhir</b>',
+        recent.length === 0
+          ? '<i>Belum ada.</i>'
+          : recent
+              .map(
+                (t) =>
+                  `• <b>${formatIDR(t.amount)}</b> ${escapeHtml(t.description)}\n    <i>${formatDateTime(t.date, tz)}</i>`,
+              )
+              .join('\n'),
       ].join('\n'),
     ),
 
-  balance: (summary: MonthlySummary): BotReply => {
-    const lines = (['needs', 'wants', 'savings'] as const).map((pillar) => {
-      const { budget, used } = summary.pillarSummary[pillar]
-      const remaining = budget - used
-      return `${PILLAR_LABELS[pillar]}: <b>${formatIDR(remaining)}</b> tersisa dari ${formatIDR(budget)}`
-    })
-    return reply([`📊 <b>Sisa Anggaran ${formatMonthLong(summary.year, summary.month)}</b>`, '', ...lines].join('\n'))
-  },
+  categoryNotFound: (name: string, categories: { name: string }[]): BotReply =>
+    reply(
+      `🤔 Tidak ada kategori aktif yang cocok dengan "<b>${escapeHtml(name)}</b>".\n\n` +
+        `<b>Yang ada:</b>\n${categories
+          .slice(0, 12)
+          .map((c) => `• ${escapeHtml(c.name)}`)
+          .join('\n')}`,
+    ),
+
+  exportReady: (monthLabel: string, count: number): BotReply =>
+    reply(`📄 <b>Ekspor ${monthLabel}</b> — ${count} transaksi. File CSV-nya menyusul di pesan berikutnya.`),
+
+  exportEmpty: (monthLabel: string): BotReply =>
+    reply(`Tidak ada transaksi di ${monthLabel} untuk diekspor.`),
 
   categoryList: (categories: { name: string }[]): BotReply =>
     categories.length === 0
@@ -454,21 +572,32 @@ export const replies = {
       'Tidak ada pencatatan terakhir yang bisa dibatalkan. <code>/undo</code> hanya membatalkan satu pencatatan terakhir dari bot.',
     ),
 
-  stats: (
+  statsRich: (
     monthLabel: string,
-    dailyAverage: number,
-    projectedMonthEnd: number,
-    topCategories: { name: string; amount: number }[],
+    summary: MonthlySummary,
+    merchants: { name: string; total: number; count: number }[],
+    methods: { method: string; total: number }[],
+    consistency: number,
+    regret: number,
   ): BotReply =>
     reply(
       [
         `📈 <b>Statistik ${monthLabel}</b>`,
         '',
-        `Rata-rata harian    <code>${idr(dailyAverage)}</code>`,
-        `Proyeksi akhir bulan <code>${idr(projectedMonthEnd)}</code>`,
+        ...moneyColumn([
+          { label: 'Rata-rata/hari', amount: summary.dailyAvgSpend },
+          { label: 'Total terpakai', amount: summary.totalUsed },
+          { label: 'Belanja disesali', amount: regret },
+        ]),
+        `Konsistensi catat <code>${bar(consistency)}</code> ${consistency.toFixed(0)}%`,
         '',
-        '<b>Kategori teratas</b>',
-        ...topCategories.map((c, i) => `${i + 1}. ${escapeHtml(c.name)} — ${idr(c.amount)}`),
+        '<b>Merchant teratas</b>',
+        ...merchants
+          .slice(0, 5)
+          .map((m, i) => `${i + 1}. ${escapeHtml(m.name)} — ${formatIDR(m.total)} <i>(${m.count}×)</i>`),
+        '',
+        '<b>Metode bayar</b>',
+        ...methods.slice(0, 4).map((m) => `• ${escapeHtml(m.method)} — ${formatIDR(m.total)}`),
       ].join('\n'),
     ),
 

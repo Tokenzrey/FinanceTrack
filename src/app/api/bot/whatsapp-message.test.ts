@@ -269,6 +269,49 @@ describe('WhatsApp (GOWA) — message normalization', () => {
   })
 })
 
+describe('WhatsApp (GOWA) — document attachment', () => {
+  it('uploads the reply document via /send/file, after the text reply, for /export', async () => {
+    handleIncoming.mockResolvedValue({
+      text: 'export ready',
+      html: true,
+      document: { filename: 'fintrack-2026-08.csv', mimeType: 'text/csv', base64: Buffer.from('Tanggal\r\n').toString('base64') },
+    })
+
+    await POST(
+      req({
+        event: 'message',
+        device_id: 'd@s.whatsapp.net',
+        payload: {
+          id: 'mx', chat_id: '628@s.whatsapp.net', from: '628@s.whatsapp.net',
+          timestamp: 't', is_from_me: false, body: '/export 8',
+        },
+      }),
+    )
+    await flush()
+
+    const urls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0] as string)
+    expect(urls.some((u) => u.endsWith('/send/message'))).toBe(true)
+    expect(urls.some((u) => u.endsWith('/send/file'))).toBe(true)
+  })
+
+  it('sends no file when the reply carries no document', async () => {
+    await POST(
+      req({
+        event: 'message',
+        device_id: 'd@s.whatsapp.net',
+        payload: {
+          id: 'my', chat_id: '628@s.whatsapp.net', from: '628@s.whatsapp.net',
+          timestamp: 't', is_from_me: false, body: 'ringkasan',
+        },
+      }),
+    )
+    await flush()
+
+    const urls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0] as string)
+    expect(urls.some((u) => u.endsWith('/send/file'))).toBe(false)
+  })
+})
+
 describe('WhatsApp (GOWA) — live acknowledgements', () => {
   it('acknowledges the message with a reaction and a typing indicator before working', async () => {
     await POST(

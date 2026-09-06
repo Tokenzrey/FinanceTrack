@@ -1,13 +1,22 @@
-import { projectSavings } from '@/shared/lib/analytics'
-import { buildMonthlySummary } from '@/shared/lib/budget-math'
+import {
+  loggingConsistency,
+  paymentMethodBreakdown,
+  projectSavings,
+  regretTotal,
+  topMerchants,
+} from '@/shared/lib/analytics'
+import { buildMonthlySummary, daysElapsedInMonth, financialHealthScore } from '@/shared/lib/budget-math'
+import { transactionsToCsv } from '@/shared/lib/csv-export'
 import { dayKeyInTz, formatDayLong, formatIDR, formatMonthLong } from '@/shared/lib/format'
 import { configureRouterIO } from '@/shared/lib/gemini-router'
+import { buildInsights } from '@/shared/lib/insights'
 import { dayKey, pendingOccurrences } from '@/shared/lib/recurring'
 import { buildYearSummary } from '@/shared/lib/year-summary'
-import { DEFAULT_PILLAR_CONFIG } from '@/shared/types/domain'
+import { DEFAULT_PILLAR_CONFIG, type MonthlySummary, type Pillar, type Transaction } from '@/shared/types/domain'
 import { analyseWishlistItem } from '@/shared/use-cases/wishlist/CalculateAffordability.usecase'
 import * as adminData from './admin-data'
 import type { BotPendingDraft } from './admin-data'
+import { parseCommandArgs, type CommandArgs } from './command-args'
 import { handlePhoto, handleTextTransaction } from './flow-write'
 import { handleReviewMessage } from './flow-review'
 import { parseAmount } from './parse-amount'
@@ -104,9 +113,14 @@ async function dispatchText(userId: string, text: string): Promise<BotReply> {
     return replies.prefsUpdated(await adminData.saveBotPrefs(userId, prefsCommand.patch))
   }
 
-  // `/cari kopi` carries an argument, so it cannot be a bare read-command match.
-  const search = trimmed.match(/^\/?(?:cari|search)\s+(.+)$/i)
-  if (search) return handleSearch(userId, search[1].trim())
+  // Argument-taking commands (`/ringkasan agustus`, `/saldo kebutuhan`, `/kategori makan`,
+  // `/riwayat 10 kopi`, `/cari kopi`, `/export 8`) are routed before the bare read-command
+  // match, which only recognises a keyword with nothing after it.
+  const parsed = parseCommandArgs(trimmed)
+  if (parsed && parsed.args.length > 0) {
+    const answer = await handleCommandWithArgs(userId, parsed)
+    if (answer) return answer
+  }
 
   const readCommand = matchReadCommand(trimmed)
   if (readCommand) return handleReadCommand(userId, readCommand)
@@ -192,13 +206,7 @@ async function handleReadCommand(userId: string, intent: BotIntent): Promise<Bot
     return replies.categoryList(categories.filter((c) => c.isActive && c.pillar !== 'income'))
   }
 
-  if (intent === 'get_recent') {
-    const [transactions, categories] = await Promise.all([
-      adminData.getRecentTransactions(userId, 5),
-      adminData.findCategories(userId),
-    ])
-    return replies.recentTransactions(transactions, categories)
-  }
+  if (intent === 'get_recent') return handleRecent(userId, 5, '')
 
   if (intent === 'get_year_summary') {
     const year = new Date().getFullYear()
@@ -222,15 +230,91 @@ async function handleReadCommand(userId: string, intent: BotIntent): Promise<Bot
   if (intent === 'week_summary') return handlePeriodSummary(userId, 'week')
   if (intent === 'stats') return handleStats(userId)
 
-  // get_summary / get_balance both need the full monthly summary.
+  // get_summary / get_balance both need the full monthly summary, for the month we're in.
   const now = new Date()
-  const year = now.getFullYear()
-  const month = now.getMonth() + 1
+  return intent === 'get_summary'
+    ? handleSummary(userId, now.getFullYear(), now.getMonth() + 1)
+    : handleBalance(userId, null)
+}
 
-  const [categories, budget, transactions] = await Promise.all([
+// ─── Argument-taking commands ───────────────────────────────────
+
+const MONTH_NAMES = [
+  'januari', 'februari', 'maret', 'april', 'mei', 'juni',
+  'juli', 'agustus', 'september', 'oktober', 'november', 'desember',
+]
+
+/** "/ringkasan 8", "/ringkasan agustus", "/ringkasan" → the month to report on. */
+function monthFromArgs(args: string[], now: Date): { year: number; month: number } {
+  const token = (args[0] ?? '').toLowerCase()
+  if (/^\d{1,2}$/.test(token)) {
+    const month = Number(token)
+    if (month >= 1 && month <= 12) return { year: now.getFullYear(), month }
+  }
+  const named = MONTH_NAMES.indexOf(token)
+  if (named >= 0) return { year: now.getFullYear(), month: named + 1 }
+  return { year: now.getFullYear(), month: now.getMonth() + 1 }
+}
+
+const PILLAR_WORDS: Record<string, Pillar> = {
+  kebutuhan: 'needs', needs: 'needs',
+  keinginan: 'wants', wants: 'wants',
+  tabungan: 'savings', savings: 'savings',
+}
+
+/** Commands that take arguments. Returns null when the command is not one of them, so
+ *  the caller falls through to the existing bare-command path. */
+async function handleCommandWithArgs(userId: string, cmd: CommandArgs): Promise<BotReply | null> {
+  const now = new Date()
+
+  switch (cmd.command) {
+    case 'cari':
+    case 'search':
+      return cmd.raw ? handleSearch(userId, cmd.raw) : null
+
+    case 'ringkasan':
+    case 'summary': {
+      const { year, month } = monthFromArgs(cmd.args, now)
+      return handleSummary(userId, year, month)
+    }
+
+    case 'saldo':
+    case 'sisa': {
+      const pillar = PILLAR_WORDS[cmd.args[0]?.toLowerCase() ?? ''] ?? null
+      return handleBalance(userId, pillar)
+    }
+
+    case 'kategori':
+    case 'categories':
+      return handleCategoryDetail(userId, cmd.raw)
+
+    case 'riwayat':
+    case 'history': {
+      const hasCount = /^\d{1,2}$/.test(cmd.args[0] ?? '')
+      const limit = hasCount ? Math.min(20, Number(cmd.args[0])) : 5
+      const keyword = hasCount ? cmd.args.slice(1).join(' ') : cmd.raw
+      return handleRecent(userId, limit, keyword)
+    }
+
+    case 'export':
+    case 'ekspor': {
+      const { year, month } = monthFromArgs(cmd.args, now)
+      return handleExport(userId, year, month)
+    }
+
+    default:
+      return null
+  }
+}
+
+/** The month's summary, ready for the `/ringkasan` reply — reuses `budget-math.ts`,
+ *  `insights.ts` and the health score the web dashboard already runs. */
+async function handleSummary(userId: string, year: number, month: number): Promise<BotReply> {
+  const [categories, budget, transactions, prefs] = await Promise.all([
     adminData.findCategories(userId),
     adminData.getMonthlyBudget(userId, year, month),
     adminData.getMonthTransactions(userId, year, month),
+    adminData.getBotPrefs(userId),
   ])
 
   const summary = buildMonthlySummary(categories, transactions, {
@@ -241,7 +325,126 @@ async function handleReadCommand(userId: string, intent: BotIntent): Promise<Bot
     overrides: budget?.categoryOverrides,
   })
 
-  return intent === 'get_summary' ? replies.summary(summary) : replies.balance(summary)
+  return replies.summary(summary, buildInsights(summary, transactions), quickHealth(summary, transactions), prefs)
+}
+
+/**
+ * The financial-health score, from the inputs the bot has cheaply in hand this month.
+ * ponytail: emergency-fund progress and debt-to-income aren't loaded on the bot path
+ * (they need assets + liabilities reads); pass them as 0 rather than add two round
+ * trips for one summary line. The web dashboard computes the full score.
+ */
+function quickHealth(summary: MonthlySummary, transactions: Transaction[]): { total: number } {
+  const spend = summary.categories.filter((c) => c.category.pillar !== 'income')
+  const scored = spend.filter((c) => c.budget > 0)
+  const withinBudget = scored.filter((c) => c.absorptionRate <= 100).length
+  const expenses = transactions.filter((t) => t.type !== 'income')
+  const regretCount = expenses.filter((t) => t.mood === 'regret').length
+
+  return financialHealthScore({
+    savingsRate: summary.savingsRate,
+    budgetAdherence: scored.length > 0 ? (withinBudget / scored.length) * 100 : 100,
+    emergencyFundProgress: 0,
+    debtToIncomeRatio: 0,
+    consistency: loggingConsistency(transactions, daysElapsedInMonth(summary.year, summary.month)),
+    moodPositiveRate: expenses.length > 0 ? 100 - (regretCount / expenses.length) * 100 : 100,
+  })
+}
+
+async function handleBalance(userId: string, pillar: Pillar | null): Promise<BotReply> {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = now.getMonth() + 1
+
+  const [categories, budget, transactions, prefs] = await Promise.all([
+    adminData.findCategories(userId),
+    adminData.getMonthlyBudget(userId, year, month),
+    adminData.getMonthTransactions(userId, year, month),
+    adminData.getBotPrefs(userId),
+  ])
+
+  const summary = buildMonthlySummary(categories, transactions, {
+    year,
+    month,
+    totalIncome: budget?.totalIncome ?? 0,
+    pillarConfig: budget?.pillarConfig ?? DEFAULT_PILLAR_CONFIG,
+    overrides: budget?.categoryOverrides,
+  })
+
+  return replies.balance(summary, pillar, prefs)
+}
+
+/** `/riwayat`, `/riwayat 10`, `/riwayat 10 kopi` — a keyword narrows by description. */
+async function handleRecent(userId: string, limit: number, keyword: string): Promise<BotReply> {
+  const [transactions, categories] = await Promise.all([
+    keyword
+      ? adminData.searchTransactions(userId, keyword, limit)
+      : adminData.getRecentTransactions(userId, limit),
+    adminData.findCategories(userId),
+  ])
+  return replies.recentTransactions(transactions, categories)
+}
+
+/** `/kategori <nama>` — one category's burn rate, projection and last five transactions,
+ *  from the same `buildMonthlySummary` row the dashboard shows. */
+async function handleCategoryDetail(userId: string, name: string): Promise<BotReply> {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = now.getMonth() + 1
+
+  const [categories, budget, transactions, tz] = await Promise.all([
+    adminData.findCategories(userId),
+    adminData.getMonthlyBudget(userId, year, month),
+    adminData.getMonthTransactions(userId, year, month),
+    adminData.getUserTimezone(userId),
+  ])
+
+  const active = categories.filter((c) => c.isActive)
+  const needle = name.trim().toLowerCase()
+  const category = active.find((c) => c.name.toLowerCase().includes(needle))
+  if (!category) return replies.categoryNotFound(name, active)
+
+  const summary = buildMonthlySummary(categories, transactions, {
+    year,
+    month,
+    totalIncome: budget?.totalIncome ?? 0,
+    pillarConfig: budget?.pillarConfig ?? DEFAULT_PILLAR_CONFIG,
+    overrides: budget?.categoryOverrides,
+  })
+  const row = summary.categories.find((c) => c.category.id === category.id)
+  if (!row) return replies.genericError()
+
+  const recent = transactions
+    .filter((t) => t.categoryId === category.id)
+    .sort((a, b) => b.date.toMillis() - a.date.toMillis())
+    .slice(0, 5)
+    .map((t) => ({ amount: t.amount, description: t.description ?? '—', date: t.date.toDate() }))
+
+  return replies.categoryDetail(row, recent, tz)
+}
+
+/** `/export [bulan]` — a real CSV, sent as a document by both route adapters. */
+async function handleExport(userId: string, year: number, month: number): Promise<BotReply> {
+  const [transactions, categories] = await Promise.all([
+    adminData.getMonthTransactions(userId, year, month),
+    adminData.findCategories(userId),
+  ])
+  const label = formatMonthLong(year, month)
+  if (transactions.length === 0) return replies.exportEmpty(label)
+
+  const sorted = [...transactions].sort((a, b) => a.date.toMillis() - b.date.toMillis())
+  // The BOM (﻿) is what makes Excel read the file as UTF-8 instead of ANSI —
+  // without it "Keuangan Rumah" arrives mangled, same reason `downloadCsv` adds it.
+  const csv = `﻿${transactionsToCsv(sorted, categories)}`
+
+  return {
+    ...replies.exportReady(label, transactions.length),
+    document: {
+      filename: `fintrack-${year}-${String(month).padStart(2, '0')}.csv`,
+      mimeType: 'text/csv',
+      base64: Buffer.from(csv, 'utf8').toString('base64'),
+    },
+  }
 }
 
 // ─── /undo, /cari, /hariini, /minggu, /statistik ────────────────
@@ -337,13 +540,14 @@ async function handleStats(userId: string): Promise<BotReply> {
     overrides: budget?.categoryOverrides,
   })
 
-  const top = [...summary.categories]
-    .sort((a, b) => b.used - a.used)
-    .slice(0, 5)
-    .map((c) => ({ name: c.category.name, amount: c.used }))
-
-  const projected = summary.categories.reduce((sum, c) => sum + c.projectedMonthEnd, 0)
-  return replies.stats(formatMonthLong(year, month), summary.dailyAvgSpend, projected, top)
+  return replies.statsRich(
+    formatMonthLong(year, month),
+    summary,
+    topMerchants(transactions),
+    paymentMethodBreakdown(transactions),
+    loggingConsistency(transactions, daysElapsedInMonth(year, month)),
+    regretTotal(transactions),
+  )
 }
 
 // ─── /target & /setor ────────────────────────────────────────────

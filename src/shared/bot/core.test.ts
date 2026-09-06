@@ -597,6 +597,63 @@ describe('handleIncoming — /cari', () => {
   })
 })
 
+describe('handleIncoming — argument-taking commands', () => {
+  beforeEach(() => {
+    findLinkByExternalId.mockResolvedValue(LINK)
+    getMonthTransactions.mockResolvedValue([])
+  })
+
+  it('/ringkasan <bulan> reports the named month, not the current one', async () => {
+    const reply = await handleIncoming(textMsg('/ringkasan agustus'))
+    expect(getMonthTransactions).toHaveBeenCalledWith('user-1', new Date().getFullYear(), 8)
+    expect(reply.text).toContain('Ringkasan')
+    expect(handleTextTransaction).not.toHaveBeenCalled()
+  })
+
+  it('/saldo <pilar> narrows the reply to one pillar', async () => {
+    const reply = await handleIncoming(textMsg('/saldo kebutuhan'))
+    expect(reply.text).toContain('Kebutuhan')
+    expect(reply.text).not.toContain('Keinginan')
+  })
+
+  it('/riwayat <n> <kata> searches by keyword with the count as a capped limit', async () => {
+    searchTransactions.mockResolvedValue([])
+    await handleIncoming(textMsg('/riwayat 10 kopi'))
+    expect(searchTransactions).toHaveBeenCalledWith('user-1', 'kopi', 10)
+  })
+
+  it('/kategori <nama> details the matched active category', async () => {
+    const reply = await handleIncoming(textMsg('/kategori makan'))
+    expect(reply.text).toContain('Makan &amp; Minum')
+    expect(handleTextTransaction).not.toHaveBeenCalled()
+  })
+
+  it('/kategori <nama> with no match lists the active categories instead', async () => {
+    const reply = await handleIncoming(textMsg('/kategori zzz'))
+    expect(reply.text).toContain('Tidak ada kategori aktif')
+  })
+
+  it('/export <bulan> attaches a CSV document to the reply', async () => {
+    getMonthTransactions.mockResolvedValue([mockTransaction()])
+    const reply = await handleIncoming(textMsg('/export 8'))
+    expect(reply.document?.filename).toMatch(/^fintrack-\d{4}-08\.csv$/)
+    expect(reply.document?.mimeType).toBe('text/csv')
+    expect(Buffer.from(reply.document!.base64, 'base64').toString('utf8')).toContain('Tanggal')
+  })
+
+  it('/export <bulan> with no transactions says so and sends no document', async () => {
+    const reply = await handleIncoming(textMsg('/export 8'))
+    expect(reply.document).toBeUndefined()
+    expect(reply.text).toContain('Tidak ada transaksi')
+  })
+
+  it('/cari <kata> still works through the argument router (Task 11 reconciliation)', async () => {
+    searchTransactions.mockResolvedValue([])
+    await handleIncoming(textMsg('/cari kopi'))
+    expect(searchTransactions).toHaveBeenCalledWith('user-1', 'kopi', expect.any(Number))
+  })
+})
+
 describe('handleIncoming — /hariini', () => {
   beforeEach(() => {
     findLinkByExternalId.mockResolvedValue(LINK)

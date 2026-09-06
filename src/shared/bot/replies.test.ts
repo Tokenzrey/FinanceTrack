@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import type { MonthlySummary } from '@/shared/types/domain'
+import type { CategorySummary, MonthlySummary } from '@/shared/types/domain'
 import type { YearSummary } from '@/shared/lib/year-summary'
 import { replies } from './replies'
-import type { DraftBatch, DraftLine } from './types'
+import { DEFAULT_BOT_PREFS, type DraftBatch, type DraftLine } from './types'
 
 const TZ = 'Asia/Jakarta'
 const NOW_ISO = new Date(Date.UTC(2026, 8, 6, 7, 32, 0)).toISOString()
@@ -47,14 +47,48 @@ function mockSummary(overrides: Partial<MonthlySummary> = {}): MonthlySummary {
     totalSaved: 1_700_000,
     netCashFlow: 2_300_000,
     savingsRate: 20,
+    dailyAvgSpend: 200_000,
+    topSpendingCategory: '',
     pillarSummary: {
+      income: { budget: 8_500_000, used: 8_500_000 },
       needs: { budget: 4_250_000, used: 3_000_000 },
       wants: { budget: 2_550_000, used: 2_000_000 },
       savings: { budget: 1_700_000, used: 1_200_000 },
     },
-    categorySummaries: [],
+    categories: [],
     ...overrides,
   } as MonthlySummary
+}
+
+function mockCategorySummary(overrides: Partial<CategorySummary> = {}): CategorySummary {
+  return {
+    category: {
+      id: 'c-food',
+      name: 'Makan & Minum',
+      pillar: 'needs',
+      percentOfIncome: 20,
+      color: '#f97316',
+      icon: 'coffee',
+      isSinkingFund: false,
+      isRecurring: false,
+      isActive: true,
+      order: 0,
+      createdAt: {} as never,
+      updatedAt: {} as never,
+    },
+    budget: 2_000_000,
+    used: 1_200_000,
+    remaining: 800_000,
+    absorptionRate: 60,
+    dailyBurnRate: 40_000,
+    projectedMonthEnd: 1_800_000,
+    daysLeft: 10,
+    dailyAllowanceLeft: 80_000,
+    status: 'safe',
+    trend: 'stable',
+    vsLastMonth: 8,
+    ...overrides,
+  }
 }
 
 // Count-based balance check: not a real HTML parser, but catches the actual failure
@@ -107,8 +141,15 @@ describe('every templated reply produces balanced HTML tags', () => {
     ['categoryConfirmPrompt', replies.categoryConfirmPrompt(50000, 'beli & sesuatu', [{ name: 'Makan & Minum' }])],
     ['transactionRecorded(saved)', replies.transactionRecorded(35000, 'Makan & Minum', 'saved', new Date('2026-09-06T07:32:00Z'), 'Asia/Jakarta')],
     ['transactionRecorded(drive_not_linked)', replies.transactionRecorded(35000, 'Makan & Minum', 'drive_not_linked', new Date('2026-09-06T07:32:00Z'), 'Asia/Jakarta')],
-    ['summary', replies.summary(summary)],
-    ['balance', replies.balance(summary)],
+    ['summary', replies.summary(summary, [], { total: 78 }, DEFAULT_BOT_PREFS)],
+    ['summary(ringkas)', replies.summary(summary, [], { total: 78 }, { ...DEFAULT_BOT_PREFS, verbosity: 'ringkas' })],
+    ['balance', replies.balance(summary, null, DEFAULT_BOT_PREFS)],
+    ['balance(pillar)', replies.balance(summary, 'needs', DEFAULT_BOT_PREFS)],
+    ['categoryDetail', replies.categoryDetail(mockCategorySummary(), [{ amount: 35_000, description: 'Nasi goreng', date: new Date('2026-09-06T07:32:00Z') }], 'Asia/Jakarta')],
+    ['categoryNotFound', replies.categoryNotFound('makan & minum', [{ name: 'Transportasi & <b>' }])],
+    ['statsRich', replies.statsRich('September 2026', summary, [{ name: 'Toko <A>', total: 90_000, count: 3 }], [{ method: 'cash', total: 90_000 }], 55, 12_000)],
+    ['exportReady', replies.exportReady('September 2026', 42)],
+    ['exportEmpty', replies.exportEmpty('September 2026')],
     ['categoryList', replies.categoryList([{ name: 'Makan & Minum' }])],
     ['recentTransactions', replies.recentTransactions([], [])],
     ['yearSummary', replies.yearSummary(yearSummary)],

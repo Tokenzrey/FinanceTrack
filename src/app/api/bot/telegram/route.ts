@@ -93,6 +93,22 @@ async function answerCallbackQuery(callbackQueryId: string): Promise<void> {
   await callTelegram('answerCallbackQuery', { callback_query_id: callbackQueryId })
 }
 
+/** Uploads `reply.document` as a Telegram document, after the text reply. Multipart —
+ *  `FormData`/`Blob` are available in the Node runtime — so it can't go through
+ *  `callTelegram`, which sends JSON. Best-effort: a failed upload never breaks the text. */
+async function sendDocument(chatId: number, doc: NonNullable<BotReply['document']>): Promise<void> {
+  const token = botToken()
+  if (!token) return
+  try {
+    const form = new FormData()
+    form.append('chat_id', String(chatId))
+    form.append('document', new Blob([Buffer.from(doc.base64, 'base64')], { type: doc.mimeType }), doc.filename)
+    await fetch(`https://api.telegram.org/bot${token}/sendDocument`, { method: 'POST', body: form })
+  } catch (error) {
+    console.error('telegram sendDocument error:', error)
+  }
+}
+
 /** Best-effort acknowledgements: a rejected reaction (Telegram limits which emoji are
  *  allowed, and group admins can disable them) must never cost the user their reply. */
 async function sendChatAction(chatId: number): Promise<void> {
@@ -152,6 +168,7 @@ async function handleTextOrPhotoMessage(message: NonNullable<TelegramUpdate['mes
       const reply = await handleIncoming(incoming)
       if (placeholderId) await editMessage(chatId, placeholderId, reply)
       else await sendMessage(chatId, reply)
+      if (reply.document) await sendDocument(chatId, reply.document)
       if (message.message_id) await reactTo(chatId, message.message_id, '✅')
     }
   } catch (error) {

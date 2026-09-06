@@ -129,6 +129,26 @@ async function editMessage(chatId: string, messageId: string, reply: BotReply): 
   }
 }
 
+/** Uploads `reply.document` via GOWA's `/send/file` (multipart `phone` + `file`), after
+ *  the text reply. No `Content-Type` header — `fetch` must set the multipart boundary
+ *  itself. Best-effort: a failed upload never breaks the text reply. */
+async function sendDocument(chatId: string, doc: NonNullable<BotReply['document']>): Promise<void> {
+  const auth = gowaAuth()
+  if (!auth) return
+  try {
+    const form = new FormData()
+    form.append('phone', chatId)
+    form.append('file', new Blob([Buffer.from(doc.base64, 'base64')], { type: doc.mimeType }), doc.filename)
+    await fetch(`${auth.baseUrl}/send/file`, {
+      method: 'POST',
+      headers: { Authorization: auth.authHeader },
+      body: form,
+    })
+  } catch (error) {
+    console.error('whatsapp (gowa) sendDocument error:', error)
+  }
+}
+
 /** `bot_links`/`externalId` stay plain digits (matching Telegram's convention) — the
  *  full JID (with `@s.whatsapp.net`/`@g.us`) is kept separately for replying, since
  *  that's the format GOWA's `phone` field expects. */
@@ -176,6 +196,7 @@ async function processMessage(payload: GowaMessage): Promise<void> {
       const reply = await handleIncoming(incoming)
       if (placeholderId) await editMessage(payload.chat_id, placeholderId, reply)
       else await sendMessage(payload.chat_id, reply)
+      if (reply.document) await sendDocument(payload.chat_id, reply.document)
       await react(payload.id, payload.chat_id, '✅')
     }
   } catch (error) {

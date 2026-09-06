@@ -162,6 +162,30 @@ describe('Telegram webhook — photo placeholder', () => {
   })
 })
 
+describe('Telegram webhook — document attachment', () => {
+  it('sends the reply document via sendDocument, after the text reply, for /export', async () => {
+    handleIncoming.mockResolvedValue({
+      text: 'export ready',
+      html: true,
+      document: { filename: 'fintrack-2026-08.csv', mimeType: 'text/csv', base64: Buffer.from('Tanggal\r\n').toString('base64') },
+    })
+
+    await POST(req({ update_id: 40, message: { chat: { id: 7 }, message_id: 70, text: '/export 8' } }))
+    await flush()
+
+    const methods = calledMethods()
+    expect(methods).toContain('sendMessage')
+    expect(methods).toContain('sendDocument')
+    expect(methods.indexOf('sendMessage')).toBeLessThan(methods.indexOf('sendDocument'))
+  })
+
+  it('sends no document when the reply carries none', async () => {
+    await POST(req({ update_id: 41, message: { chat: { id: 7 }, message_id: 71, text: 'ringkasan' } }))
+    await flush()
+    expect(calledMethods()).not.toContain('sendDocument')
+  })
+})
+
 describe('Telegram webhook — live acknowledgements', () => {
   it('sends a typing action and a reaction before the reply', async () => {
     await POST(req({ update_id: 20, message: { chat: { id: 7 }, message_id: 55, text: 'ringkasan' } }))
