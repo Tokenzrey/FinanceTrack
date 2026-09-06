@@ -16,6 +16,7 @@ import type { Wishlist } from '@/shared/types/wishlist.types'
 import { buildMonthlySummary } from '@/shared/lib/budget-math'
 import { DEFAULT_PILLAR_CONFIG } from '@/shared/types/domain'
 import type { ModelHealth } from '@/shared/lib/gemini-router'
+import type { CategoryHint } from '@/shared/types/receipt-scanner.types'
 import { DEFAULT_BOT_PREFS } from './types'
 import type { BotPlatform, BotPrefs, DraftBatch } from './types'
 
@@ -585,6 +586,21 @@ export async function getBotPrefs(userId: string): Promise<BotPrefs> {
 export async function saveBotPrefs(userId: string, patch: Partial<BotPrefs>): Promise<BotPrefs> {
   await getAdminDb().doc(`users/${userId}/meta/botPrefs`).set(stripUndefined(patch), { merge: true })
   return getBotPrefs(userId)
+}
+
+// ─── Scan hints (shared with the web receipt scanner) ──────────
+
+/** The SAME document the web scanner learns into — `FirestoreReceiptScanRepository`
+ *  writes `users/{uid}/meta/scan_hints`. Sharing it means a correction made on the web
+ *  immediately makes the bot smarter, and a correction in chat improves the scanner. */
+export async function getScanHints(userId: string): Promise<CategoryHint[]> {
+  const snap = await getAdminDb().doc(`users/${userId}/meta/scan_hints`).get()
+  if (!snap.exists) return []
+  return (snap.data()?.hints ?? []) as CategoryHint[]
+}
+
+export async function saveScanHints(userId: string, hints: CategoryHint[]): Promise<void> {
+  await getAdminDb().doc(`users/${userId}/meta/scan_hints`).set({ hints }, { merge: true })
 }
 
 // ─── Gemini quota ledger ───────────────────────────────────────

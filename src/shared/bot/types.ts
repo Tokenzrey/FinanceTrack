@@ -90,6 +90,16 @@ export interface ParsedLine {
   confidence: number
 }
 
+/** A category resolved with no model call — from a confirmed hint or the category's
+ *  own name appearing in the message (see `local-resolver.ts`). */
+export interface LocalMatch {
+  categoryId: string
+  categoryName: string
+  /** 0-100, comparable with the model's own confidence scale. */
+  confidence: number
+  reason: 'hint' | 'category-name' | 'merchant'
+}
+
 /** A single button in an inline keyboard row. `value` is what comes back as the
  *  incoming message when tapped — Telegram sends it as `callback_query.data`, treated
  *  identically to the user having typed it (see `core.ts`). */

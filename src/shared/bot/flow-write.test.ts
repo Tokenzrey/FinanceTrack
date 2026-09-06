@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Category } from '@/shared/types/domain'
+import { DEFAULT_BOT_PREFS } from './types'
 import type { BotIncoming, DraftBatch } from './types'
 
 const findCategories = vi.fn()
@@ -9,6 +10,9 @@ const createTransactionsBatch = vi.fn()
 const rememberLastBatch = vi.fn()
 const getUserTimezone = vi.fn()
 const setPending = vi.fn()
+const getScanHints = vi.fn()
+const saveScanHints = vi.fn()
+const getBotPrefs = vi.fn()
 
 vi.mock('./admin-data', () => ({
   findCategories: (...a: unknown[]) => findCategories(...a),
@@ -18,6 +22,9 @@ vi.mock('./admin-data', () => ({
   rememberLastBatch: (...a: unknown[]) => rememberLastBatch(...a),
   getUserTimezone: (...a: unknown[]) => getUserTimezone(...a),
   setPending: (...a: unknown[]) => setPending(...a),
+  getScanHints: (...a: unknown[]) => getScanHints(...a),
+  saveScanHints: (...a: unknown[]) => saveScanHints(...a),
+  getBotPrefs: (...a: unknown[]) => getBotPrefs(...a),
 }))
 
 const parseTransactionBatch = vi.fn()
@@ -81,6 +88,9 @@ beforeEach(() => {
   createTransactionsBatch.mockResolvedValue(['t1'])
   getUserTimezone.mockResolvedValue('Asia/Jakarta')
   uploadReceiptForUser.mockResolvedValue({ gDriveFileId: 'f1', gDriveWebViewLink: 'https://drive/f1' })
+  getScanHints.mockResolvedValue([])
+  saveScanHints.mockResolvedValue(undefined)
+  getBotPrefs.mockResolvedValue(DEFAULT_BOT_PREFS)
 })
 
 describe('handleTextTransaction', () => {
@@ -135,6 +145,39 @@ describe('handleTextTransaction', () => {
     expect(createTransactionsBatch).not.toHaveBeenCalled()
     expect(reply.text).toContain('sudah ditutup')
   })
+
+  it('records a known phrase with ZERO model calls', async () => {
+    getScanHints.mockResolvedValue([{ keyword: 'kopi', categoryId: 'c-food', frequency: 9, updatedAt: 0 }])
+    const reply = await handleTextTransaction('u1', 'kopi 20rb')
+    expect(parseTransactionBatch).not.toHaveBeenCalled()
+    expect(createTransactionsBatch).toHaveBeenCalledTimes(1)
+    expect(reply.text).toContain('Tercatat')
+  })
+
+  it('builds a multi-line batch locally, still with zero model calls', async () => {
+    getScanHints.mockResolvedValue([
+      { keyword: 'kopi', categoryId: 'c-food', frequency: 9, updatedAt: 0 },
+      { keyword: 'bensin', categoryId: 'c-food', frequency: 9, updatedAt: 0 },
+    ])
+    await handleTextTransaction('u1', 'kopi 20rb, bensin 50rb')
+    expect(parseTransactionBatch).not.toHaveBeenCalled()
+    expect(setPending).toHaveBeenCalledTimes(1)
+  })
+
+  it('falls through to the model when the local layer cannot resolve everything', async () => {
+    getScanHints.mockResolvedValue([])
+    parseTransactionBatch.mockResolvedValue([parsed()])
+    await handleTextTransaction('u1', 'sesuatu yang baru 35rb')
+    expect(parseTransactionBatch).toHaveBeenCalledTimes(1)
+  })
+
+  it('always opens the review card when the user set alwaysReview', async () => {
+    getBotPrefs.mockResolvedValue({ ...DEFAULT_BOT_PREFS, alwaysReview: true })
+    getScanHints.mockResolvedValue([{ keyword: 'kopi', categoryId: 'c-food', frequency: 9, updatedAt: 0 }])
+    await handleTextTransaction('u1', 'kopi 20rb')
+    expect(createTransactionsBatch).not.toHaveBeenCalled()
+    expect(setPending).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('handlePhoto', () => {
@@ -185,6 +228,14 @@ describe('handlePhoto', () => {
     extractReceipt.mockResolvedValue(receiptResult())
     await handlePhoto('u1', photo('struk indomaret, yang buram teh botol 2x12rb'))
     expect(extractReceipt.mock.calls[0][4]).toBe('struk indomaret, yang buram teh botol 2x12rb')
+  })
+
+  it('passes the learned hints to the receipt extractor instead of an empty list', async () => {
+    const hints = [{ keyword: 'indomie', categoryId: 'c-food', frequency: 4, updatedAt: 0 }]
+    getScanHints.mockResolvedValue(hints)
+    extractReceipt.mockResolvedValue(receiptResult())
+    await handlePhoto('u1', photo())
+    expect(extractReceipt.mock.calls[0][3]).toEqual(hints)
   })
 
   it('reports a quota failure distinctly and writes nothing', async () => {

@@ -10,6 +10,8 @@ const isBudgetClosedAdmin = vi.fn()
 const createTransactionsBatch = vi.fn()
 const rememberLastBatch = vi.fn()
 const getUserTimezone = vi.fn()
+const getScanHints = vi.fn()
+const saveScanHints = vi.fn()
 
 vi.mock('./admin-data', () => ({
   setPending: (...a: unknown[]) => setPending(...a),
@@ -20,6 +22,8 @@ vi.mock('./admin-data', () => ({
   createTransactionsBatch: (...a: unknown[]) => createTransactionsBatch(...a),
   rememberLastBatch: (...a: unknown[]) => rememberLastBatch(...a),
   getUserTimezone: (...a: unknown[]) => getUserTimezone(...a),
+  getScanHints: (...a: unknown[]) => getScanHints(...a),
+  saveScanHints: (...a: unknown[]) => saveScanHints(...a),
 }))
 
 const { handleReviewMessage } = await import('./flow-review')
@@ -69,6 +73,8 @@ beforeEach(() => {
   isBudgetClosedAdmin.mockReturnValue(false)
   createTransactionsBatch.mockResolvedValue(['t1', 't2'])
   getUserTimezone.mockResolvedValue('Asia/Jakarta')
+  getScanHints.mockResolvedValue([])
+  saveScanHints.mockResolvedValue(undefined)
 })
 
 describe('handleReviewMessage — commit', () => {
@@ -100,6 +106,21 @@ describe('handleReviewMessage — commit', () => {
     const reply = await handleReviewMessage('u1', batch(), text('ok'))
     expect(createTransactionsBatch).not.toHaveBeenCalled()
     expect(reply.text).toContain('sudah ditutup')
+  })
+
+  it('writes a category hint for every confirmed line', async () => {
+    getScanHints.mockResolvedValue([])
+    await handleReviewMessage('u1', batch(), text('ok'))
+    expect(saveScanHints).toHaveBeenCalledTimes(1)
+    const saved = saveScanHints.mock.calls[0][1] as { keyword: string; categoryId: string }[]
+    expect(saved.some((h) => h.categoryId === 'c-food')).toBe(true)
+  })
+
+  it('still reports success when hint learning fails — the money is already saved', async () => {
+    saveScanHints.mockRejectedValue(new Error('firestore down'))
+    const reply = await handleReviewMessage('u1', batch(), text('ok'))
+    expect(createTransactionsBatch).toHaveBeenCalledTimes(1)
+    expect(reply.text).toContain('tercatat')
   })
 })
 

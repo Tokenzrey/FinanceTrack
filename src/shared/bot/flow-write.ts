@@ -9,6 +9,7 @@ import * as adminData from './admin-data'
 import { batchToDTOs, buildLinesFromParsed, buildLinesFromReceipt, renumber } from './draft'
 import { uploadReceiptForUser } from './drive-upload'
 import { startReview } from './flow-review'
+import { tryLocalBatch } from './local-resolver'
 import { parseTransactionBatch } from './parse-batch'
 import { replies } from './replies'
 import type { BotIncoming, BotReply, DraftBatch, DraftLine } from './types'
@@ -21,11 +22,10 @@ import type { BotIncoming, BotReply, DraftBatch, DraftLine } from './types'
  * that matters. A text message keeps the old one-step path, but only when it is
  * unambiguous: exactly one transaction, a confident category match. Anything else
  * (two transactions in one sentence, a shaky category guess) is worth one tap.
+ *
+ * Before the model is consulted at all, `tryLocalBatch` (L0) gets first refusal: a
+ * phrase whose category the user has already confirmed resolves with no model call.
  */
-
-/** Above this the model's top category guess is taken without asking. Unchanged from
- *  the previous single-transaction flow. */
-const AUTO_ACCEPT_CONFIDENCE = 60
 
 function base64ToBlob(base64: string, mimeType: string): Blob {
   return new Blob([Buffer.from(base64, 'base64')], { type: mimeType })
@@ -69,17 +69,35 @@ async function commitDirect(
 }
 
 export async function handleTextTransaction(userId: string, text: string): Promise<BotReply> {
-  const categories = await adminData.findCategories(userId)
+  // One round trip for everything the decision needs.
+  const [categories, hints, prefs] = await Promise.all([
+    adminData.findCategories(userId),
+    adminData.getScanHints(userId),
+    adminData.getBotPrefs(userId),
+  ])
   const active = categories.filter((c) => c.isActive)
+  const now = new Date()
 
+  // L0 — no model call at all. Everything here came from the user's own confirmed
+  // history, so it is simultaneously the fastest path and the most accurate one.
+  const localLines = tryLocalBatch(text, active, hints, now)
+  if (localLines) {
+    const batch = newBatch({ source: 'text', lines: localLines })
+    if (localLines.length === 1 && !prefs.alwaysReview) {
+      return commitDirect(userId, batch, categories)
+    }
+    return startReview(userId, batch)
+  }
+
+  // L1 — text tier (flash-lite): 500/day per model, and lower latency than flash.
   const parsed = await parseTransactionBatch(text, active)
-  const lines = buildLinesFromParsed(parsed, active, new Date())
+  const lines = buildLinesFromParsed(parsed, active, now)
 
   // Every segment failed to yield an amount — the message simply has no number in it.
   if (lines.length === 0) return replies.amountNotFound()
 
   const topConfidence = parsed[0]?.confidence ?? 0
-  if (isFastPath(lines) && topConfidence >= AUTO_ACCEPT_CONFIDENCE) {
+  if (isFastPath(lines) && topConfidence >= prefs.autoAcceptConfidence && !prefs.alwaysReview) {
     return commitDirect(userId, newBatch({ source: 'text', lines }), categories)
   }
 
@@ -93,7 +111,10 @@ export async function handlePhoto(
   if (msg.imageBase64.length > MAX_BASE64_CHARS) return replies.imageTooLarge()
   if (!ALLOWED_MIME.includes(msg.mimeType)) return replies.notAReceipt()
 
-  const categories = await adminData.findCategories(userId)
+  const [categories, hints] = await Promise.all([
+    adminData.findCategories(userId),
+    adminData.getScanHints(userId),
+  ])
   const spendCategories = categories.filter((c) => c.isActive && c.pillar !== 'income')
 
   let result
@@ -105,7 +126,8 @@ export async function handlePhoto(
       msg.imageBase64,
       msg.mimeType,
       spendCategories.map((c) => ({ id: c.id, name: c.name, pillar: c.pillar })),
-      [],
+      // Was `[]` — the bot never used the memory the web scanner had been building.
+      hints,
       msg.caption,
     )
   } catch (error) {

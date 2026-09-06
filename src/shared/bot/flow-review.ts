@@ -1,3 +1,4 @@
+import { applyCorrections } from '@/shared/lib/scan-hints'
 import type { Category } from '@/shared/types/domain'
 import * as adminData from './admin-data'
 import { batchToDTOs, renumber } from './draft'
@@ -80,6 +81,22 @@ async function commit(userId: string, batch: DraftBatch, categories: Category[])
 
   const ids = await adminData.createTransactionsBatch(userId, dtos)
   await adminData.rememberLastBatch(userId, ids)
+
+  // Learning loop: every confirmed line teaches the local resolver, so the next
+  // "kopi 20rb" needs no model at all. A failure here must never cost the user their
+  // transactions — those are already written.
+  try {
+    const corrections = batch.lines
+      .filter((l) => l.categoryId && l.description)
+      .map((l) => ({ itemName: l.description as string, categoryId: l.categoryId as string }))
+    if (corrections.length > 0) {
+      const existing = await adminData.getScanHints(userId)
+      await adminData.saveScanHints(userId, applyCorrections(existing, corrections))
+    }
+  } catch (error) {
+    console.error('bot hint learning error (transactions already saved):', error)
+  }
+
   await adminData.clearPending(userId)
 
   const tz = await adminData.getUserTimezone(userId)
