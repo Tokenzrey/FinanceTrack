@@ -66,6 +66,15 @@ vi.mock('./admin-data', () => ({
   // here drives a real router call, so plain stubs suffice.
   getModelHealth: async () => ({ dayKey: '', models: {} }),
   saveModelHealth: async () => {},
+  // Bot prefs — dispatchText parses /mode & /atur before read commands. No test here
+  // exercises that path, so the default shape is enough to keep the module complete.
+  getBotPrefs: async () => ({
+    verbosity: 'detail',
+    autoAcceptConfidence: 60,
+    alwaysReview: false,
+    showInsights: true,
+    quickCategories: [],
+  }),
 }))
 
 const matchReadCommand = vi.fn()

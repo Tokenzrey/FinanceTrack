@@ -152,3 +152,25 @@ export type ReviewCommand =
   | { kind: 'focus'; n: number }
   | { kind: 'help' }
   | { kind: 'none' }
+
+/** Verbosity dan ambang yang bisa diatur user lewat /mode dan /atur. */
+export interface BotPrefs {
+  /** `ringkas` memangkas blok insight, rincian per kategori, dan footer. */
+  verbosity: 'ringkas' | 'detail'
+  /** Ambang auto-accept jalur cepat teks. 100 = selalu tinjau dulu. */
+  autoAcceptConfidence: number
+  /** Paksa kartu tinjauan bahkan untuk satu transaksi yang sangat yakin. */
+  alwaysReview: boolean
+  /** Tampilkan baris insight di /ringkasan dan /saldo. */
+  showInsights: boolean
+  /** Id kategori yang selalu muncul paling atas di daftar pilihan. */
+  quickCategories: string[]
+}
+
+export const DEFAULT_BOT_PREFS: BotPrefs = {
+  verbosity: 'detail',
+  autoAcceptConfidence: 60,
+  alwaysReview: false,
+  showInsights: true,
+  quickCategories: [],
+}

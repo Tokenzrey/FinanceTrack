@@ -4,7 +4,7 @@ import type { YearSummary } from '@/shared/lib/year-summary'
 import type { AffordabilityDecision, SmartAffordabilityResult, Wishlist } from '@/shared/types/wishlist.types'
 import { batchTotals, collapseToSingle } from './draft'
 import { reviewToken } from './review-commands'
-import type { BotKeyboardButton, BotReply, DraftBatch, DraftLine } from './types'
+import type { BotKeyboardButton, BotPrefs, BotReply, DraftBatch, DraftLine } from './types'
 
 /** Every text the bot ever sends, in one place — kept in Bahasa Indonesia to match the
  *  rest of the app's user-facing copy. All balasan are HTML (`parse_mode: 'HTML'` on
@@ -360,6 +360,38 @@ export const replies = {
     reply('✅ Tautan diputus. Kirim kode baru dari Pengaturan kalau mau menautkan lagi.'),
 
   unlinkCancelled: (): BotReply => reply('Dibatalkan. Tautan akun tidak berubah.'),
+
+  // ─── /mode & /atur ─────────────────────────────────────────────
+
+  prefsCard: (prefs: BotPrefs): BotReply =>
+    reply(
+      [
+        '⚙️ <b>Pengaturan Bot</b>',
+        '',
+        `Mode balasan       <b>${prefs.verbosity}</b>`,
+        `Ambang auto-simpan <b>${prefs.autoAcceptConfidence}</b>`,
+        `Selalu tinjau      <b>${prefs.alwaysReview ? 'nyala' : 'mati'}</b>`,
+        `Baris insight      <b>${prefs.showInsights ? 'nyala' : 'mati'}</b>`,
+        '',
+        '<b>Cara mengubah</b>',
+        '<code>/mode ringkas</code> — balasan pendek',
+        '<code>/mode detail</code> — balasan lengkap (bawaan)',
+        '<code>/atur autoaccept 80</code> — makin tinggi, makin sering ditanya dulu',
+        '<code>/atur selalutinjau on</code> — semua transaksi lewat kartu tinjauan',
+        '<code>/atur insight off</code> — sembunyikan baris analisis',
+      ].join('\n'),
+    ),
+
+  prefsUpdated: (prefs: BotPrefs): BotReply =>
+    reply(
+      `✅ <b>Tersimpan.</b> Mode <b>${prefs.verbosity}</b>, ambang <b>${prefs.autoAcceptConfidence}</b>, ` +
+        `selalu tinjau <b>${prefs.alwaysReview ? 'nyala' : 'mati'}</b>.`,
+    ),
+
+  prefsInvalid: (field: string): BotReply =>
+    reply(
+      `🤔 Tidak paham "<b>${escapeHtml(field)}</b>". Ketik <code>/atur</code> untuk melihat daftar pengaturan yang tersedia.`,
+    ),
 
   // ─── Kartu tinjauan ────────────────────────────────────────────
 

@@ -16,7 +16,8 @@ import type { Wishlist } from '@/shared/types/wishlist.types'
 import { buildMonthlySummary } from '@/shared/lib/budget-math'
 import { DEFAULT_PILLAR_CONFIG } from '@/shared/types/domain'
 import type { ModelHealth } from '@/shared/lib/gemini-router'
-import type { BotPlatform, DraftBatch } from './types'
+import { DEFAULT_BOT_PREFS } from './types'
+import type { BotPlatform, BotPrefs, DraftBatch } from './types'
 
 /**
  * The one module in the bot subsystem that talks to Firestore. Everything here reads
@@ -530,6 +531,21 @@ export async function getUserTimezone(userId: string): Promise<string> {
   const snap = await getAdminDb().doc(`users/${userId}/meta/profile`).get()
   const tz = snap.exists ? (snap.data()?.timezone as string | undefined) : undefined
   return tz && tz.trim() ? tz.trim() : 'Asia/Jakarta'
+}
+
+// ─── Per-user bot preferences (/mode, /atur) ────────────────────
+
+/** Merged over defaults so a doc written by an older build stays valid, exactly like
+ *  `FirestoreUserRepository.findSettings` does for the web app's settings. */
+export async function getBotPrefs(userId: string): Promise<BotPrefs> {
+  const snap = await getAdminDb().doc(`users/${userId}/meta/botPrefs`).get()
+  if (!snap.exists) return DEFAULT_BOT_PREFS
+  return { ...DEFAULT_BOT_PREFS, ...(snap.data() as Partial<BotPrefs>) }
+}
+
+export async function saveBotPrefs(userId: string, patch: Partial<BotPrefs>): Promise<BotPrefs> {
+  await getAdminDb().doc(`users/${userId}/meta/botPrefs`).set(stripUndefined(patch), { merge: true })
+  return getBotPrefs(userId)
 }
 
 // ─── Gemini quota ledger ───────────────────────────────────────

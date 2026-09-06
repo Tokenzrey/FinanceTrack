@@ -12,6 +12,7 @@ import { handlePhoto, handleTextTransaction } from './flow-write'
 import { handleReviewMessage } from './flow-review'
 import { parseAmount } from './parse-amount'
 import { matchReadCommand } from './parse-intent'
+import { parsePrefsCommand } from './prefs-commands'
 import { replies } from './replies'
 import type { BotIncoming, BotIntent, BotReply } from './types'
 
@@ -95,6 +96,13 @@ export async function handleIncoming(msg: BotIncoming): Promise<BotReply> {
 async function dispatchText(userId: string, text: string): Promise<BotReply> {
   const trimmed = text.trim()
   if (!trimmed) return replies.unknownMessage()
+
+  const prefsCommand = parsePrefsCommand(trimmed)
+  if (prefsCommand.kind !== 'none') {
+    if (prefsCommand.kind === 'invalid') return replies.prefsInvalid(prefsCommand.field)
+    if (prefsCommand.kind === 'show') return replies.prefsCard(await adminData.getBotPrefs(userId))
+    return replies.prefsUpdated(await adminData.saveBotPrefs(userId, prefsCommand.patch))
+  }
 
   const readCommand = matchReadCommand(trimmed)
   if (readCommand) return handleReadCommand(userId, readCommand)
