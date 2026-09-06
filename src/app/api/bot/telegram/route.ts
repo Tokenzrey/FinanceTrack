@@ -23,6 +23,7 @@ interface TelegramUpdate {
   update_id?: number
   message?: {
     chat: { id: number }
+    message_id?: number
     text?: string
     caption?: string
     photo?: { file_id: string }[]
@@ -78,6 +79,20 @@ async function answerCallbackQuery(callbackQueryId: string): Promise<void> {
   await callTelegram('answerCallbackQuery', { callback_query_id: callbackQueryId })
 }
 
+/** Best-effort acknowledgements: a rejected reaction (Telegram limits which emoji are
+ *  allowed, and group admins can disable them) must never cost the user their reply. */
+async function sendChatAction(chatId: number): Promise<void> {
+  await callTelegram('sendChatAction', { chat_id: chatId, action: 'typing' })
+}
+
+async function reactTo(chatId: number, messageId: number, emoji: string): Promise<void> {
+  await callTelegram('setMessageReaction', {
+    chat_id: chatId,
+    message_id: messageId,
+    reaction: [{ type: 'emoji', emoji }],
+  })
+}
+
 /** false => this update was already handled by an earlier delivery; skip. A thrown
  *  error (Firestore blip) is fail-open: a rare duplicate beats a dropped message. */
 async function claimUpdate(kind: 'msg' | 'cb', updateId: number | undefined): Promise<boolean> {
@@ -92,6 +107,8 @@ async function claimUpdate(kind: 'msg' | 'cb', updateId: number | undefined): Pr
 
 async function handleTextOrPhotoMessage(message: NonNullable<TelegramUpdate['message']>): Promise<void> {
   const chatId = message.chat.id
+  await sendChatAction(chatId)
+  if (message.message_id) await reactTo(chatId, message.message_id, '👀')
 
   try {
     let incoming: BotIncoming | null = null
@@ -116,6 +133,7 @@ async function handleTextOrPhotoMessage(message: NonNullable<TelegramUpdate['mes
     if (incoming) {
       const reply = await handleIncoming(incoming)
       await sendMessage(chatId, reply)
+      if (message.message_id) await reactTo(chatId, message.message_id, '✅')
     }
   } catch (error) {
     console.error('telegram webhook error:', error)

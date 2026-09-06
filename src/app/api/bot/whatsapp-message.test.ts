@@ -92,9 +92,11 @@ describe('WhatsApp (GOWA) — message normalization', () => {
       text: 'ringkasan',
     })
 
-    const [sendUrl, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
-    expect(sendUrl).toBe('https://gowatokenzrey.my.id/send/message')
-    expect(JSON.parse(init.body).phone).toBe('628123456789@s.whatsapp.net') // full JID, not the stripped id
+    const sendCall = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.find((c) =>
+      (c[0] as string).endsWith('/send/message'),
+    )
+    expect(sendCall?.[0]).toBe('https://gowatokenzrey.my.id/send/message')
+    expect(JSON.parse(sendCall?.[1].body).phone).toBe('628123456789@s.whatsapp.net') // full JID, not the stripped id
   })
 
   it('strips the group JID suffix (@g.us) the same way', async () => {
@@ -213,7 +215,71 @@ describe('WhatsApp (GOWA) — message normalization', () => {
 
     expect(res.status).toBe(200)
     expect(handleIncoming).not.toHaveBeenCalled()
-    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
-    expect(JSON.parse(init.body).message).toContain('masalah')
+    const sendCall = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.find((c) =>
+      (c[0] as string).endsWith('/send/message'),
+    )
+    expect(JSON.parse(sendCall?.[1].body).message).toContain('masalah')
+  })
+})
+
+describe('WhatsApp (GOWA) — live acknowledgements', () => {
+  it('acknowledges the message with a reaction and a typing indicator before working', async () => {
+    await POST(
+      req({
+        event: 'message',
+        device_id: '628987654321@s.whatsapp.net',
+        payload: {
+          id: 'msg-live', chat_id: '628123456789@s.whatsapp.net', from: '628123456789@s.whatsapp.net',
+          timestamp: '2026-09-01T10:00:00Z', is_from_me: false, body: 'ringkasan',
+        },
+      }),
+    )
+    await flush()
+
+    const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0] as string)
+    expect(calls.some((u) => u.endsWith('/message/msg-live/reaction'))).toBe(true)
+    expect(calls.some((u) => u.endsWith('/send/chat-presence'))).toBe(true)
+    // The reply must still go out.
+    expect(calls.some((u) => u.endsWith('/send/message'))).toBe(true)
+  })
+
+  it('stops the typing indicator after replying', async () => {
+    await POST(
+      req({
+        event: 'message', device_id: '628987654321@s.whatsapp.net',
+        payload: {
+          id: 'msg-live2', chat_id: '628123456789@s.whatsapp.net', from: '628123456789@s.whatsapp.net',
+          timestamp: '2026-09-01T10:00:00Z', is_from_me: false, body: 'ringkasan',
+        },
+      }),
+    )
+    await flush()
+
+    const presence = (global.fetch as ReturnType<typeof vi.fn>).mock.calls
+      .filter((c) => (c[0] as string).endsWith('/send/chat-presence'))
+      .map((c) => JSON.parse((c[1] as { body: string }).body).action)
+    expect(presence).toEqual(['start', 'stop'])
+  })
+
+  it('never fails the pipeline when a presence or reaction call errors', async () => {
+    global.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/reaction') || url.includes('/chat-presence')) {
+        return Promise.reject(new Error('gowa down'))
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) })
+    }) as unknown as typeof fetch
+
+    await POST(
+      req({
+        event: 'message', device_id: '628987654321@s.whatsapp.net',
+        payload: {
+          id: 'msg-live3', chat_id: '628123456789@s.whatsapp.net', from: '628123456789@s.whatsapp.net',
+          timestamp: '2026-09-01T10:00:00Z', is_from_me: false, body: 'ringkasan',
+        },
+      }),
+    )
+    await flush()
+
+    expect(handleIncoming).toHaveBeenCalledTimes(1)
   })
 })

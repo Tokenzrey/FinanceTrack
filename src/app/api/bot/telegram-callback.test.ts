@@ -136,3 +136,27 @@ describe('Telegram webhook — message de-dup', () => {
     expect(handleIncoming).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('Telegram webhook — live acknowledgements', () => {
+  it('sends a typing action and a reaction before the reply', async () => {
+    await POST(req({ update_id: 20, message: { chat: { id: 7 }, message_id: 55, text: 'ringkasan' } }))
+    await flush()
+    const methods = calledMethods()
+    expect(methods).toContain('sendChatAction')
+    expect(methods).toContain('setMessageReaction')
+    expect(methods).toContain('sendMessage')
+    expect(methods.indexOf('sendChatAction')).toBeLessThan(methods.indexOf('sendMessage'))
+  })
+
+  it('survives a failing reaction call and still replies', async () => {
+    global.fetch = vi.fn().mockImplementation((url: string) =>
+      url.includes('setMessageReaction')
+        ? Promise.reject(new Error('reaction not allowed'))
+        : Promise.resolve({ ok: true, json: async () => ({}) }),
+    ) as unknown as typeof fetch
+
+    await POST(req({ update_id: 21, message: { chat: { id: 7 }, message_id: 56, text: 'ringkasan' } }))
+    await flush()
+    expect(calledMethods()).toContain('sendMessage')
+  })
+})

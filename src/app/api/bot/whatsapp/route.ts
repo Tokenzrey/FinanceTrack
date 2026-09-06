@@ -51,16 +51,53 @@ function verifySignature(rawBody: string, signatureHeader: string | null): boole
   return timingSafeEqual(expectedBuf, providedBuf)
 }
 
-async function sendMessage(chatId: string, reply: BotReply): Promise<void> {
+function gowaAuth(): { baseUrl: string; authHeader: string } | null {
   const baseUrl = process.env.GOWA_BASE_URL
   const user = process.env.GOWA_BASIC_AUTH_USER
   const password = process.env.GOWA_BASIC_AUTH_PASSWORD
-  if (!baseUrl || !user || !password) return
+  if (!baseUrl || !user || !password) return null
+  return {
+    baseUrl: baseUrl.replace(/\/+$/, ''),
+    authHeader: `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`,
+  }
+}
+
+/**
+ * Fire-and-forget acknowledgements. None of these are worth failing a transaction
+ * over — a dropped typing indicator is invisible, a dropped reply is not — so every
+ * one of them swallows its own error.
+ */
+async function gowaPost(path: string, body: Record<string, unknown>): Promise<void> {
+  const auth = gowaAuth()
+  if (!auth) return
   try {
-    const authHeader = `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`
-    await fetch(`${baseUrl}/send/message`, {
+    await fetch(`${auth.baseUrl}${path}`, {
       method: 'POST',
-      headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
+      headers: { Authorization: auth.authHeader, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  } catch (error) {
+    console.error(`whatsapp (gowa) ${path} error:`, error)
+  }
+}
+
+/** WhatsApp shows this for a few seconds; GOWA needs an explicit stop. */
+function setTyping(chatId: string, action: 'start' | 'stop'): Promise<void> {
+  return gowaPost('/send/chat-presence', { phone: chatId, action })
+}
+
+/** 👀 on arrival, ✅ when the reply is out — the cheapest possible "I heard you". */
+function react(messageId: string, chatId: string, emoji: string): Promise<void> {
+  return gowaPost(`/message/${encodeURIComponent(messageId)}/reaction`, { phone: chatId, emoji })
+}
+
+async function sendMessage(chatId: string, reply: BotReply): Promise<void> {
+  const auth = gowaAuth()
+  if (!auth) return
+  try {
+    await fetch(`${auth.baseUrl}/send/message`, {
+      method: 'POST',
+      headers: { Authorization: auth.authHeader, 'Content-Type': 'application/json' },
       body: JSON.stringify({ phone: chatId, message: renderForWhatsApp(reply) }),
     })
   } catch (error) {
@@ -82,6 +119,9 @@ function imageCaption(image: GowaMessage['image']): string | undefined {
 async function processMessage(payload: GowaMessage): Promise<void> {
   if (!payload.chat_id) return
   const externalId = stripJidSuffix(payload.chat_id)
+
+  await react(payload.id, payload.chat_id, '👀')
+  await setTyping(payload.chat_id, 'start')
 
   try {
     let incoming: BotIncoming | null = null
@@ -106,10 +146,13 @@ async function processMessage(payload: GowaMessage): Promise<void> {
     if (incoming) {
       const reply = await handleIncoming(incoming)
       await sendMessage(payload.chat_id, reply)
+      await react(payload.id, payload.chat_id, '✅')
     }
   } catch (error) {
     console.error('whatsapp (gowa) webhook message error:', error)
     await sendMessage(payload.chat_id, { text: 'Ada masalah di sisi kami — coba lagi sebentar lagi.' })
+  } finally {
+    await setTyping(payload.chat_id, 'stop')
   }
 }
 
