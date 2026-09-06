@@ -2,9 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { formatIDR } from '@/shared/lib/format'
 import { dayKey } from '@/shared/lib/recurring'
 import type { Asset, Category, Liability, RecurringRule, SavingsGoal, Transaction } from '@/shared/types/domain'
-import type { ReceiptScanResult } from '@/shared/types/receipt-scanner.types'
 import type { Wishlist } from '@/shared/types/wishlist.types'
-import type { BotIncomingImage, BotIncomingText } from './types'
+import type { BotIncoming, BotIncomingText } from './types'
 
 // ─── Mocks ───────────────────────────────────────────────────────
 // core.ts is the orchestrator — every collaborator it calls is mocked here so each
@@ -24,7 +23,6 @@ const findCategories = vi.fn()
 const getMonthlyBudget = vi.fn()
 const isBudgetClosedAdmin = vi.fn()
 const getMonthTransactions = vi.fn()
-const createTransaction = vi.fn()
 const getRecentTransactions = vi.fn()
 const getYearTransactions = vi.fn()
 const getYearBudgets = vi.fn()
@@ -49,7 +47,6 @@ vi.mock('./admin-data', () => ({
   getMonthlyBudget: (...args: unknown[]) => getMonthlyBudget(...args),
   isBudgetClosedAdmin: (...args: unknown[]) => isBudgetClosedAdmin(...args),
   getMonthTransactions: (...args: unknown[]) => getMonthTransactions(...args),
-  createTransaction: (...args: unknown[]) => createTransaction(...args),
   getRecentTransactions: (...args: unknown[]) => getRecentTransactions(...args),
   getYearTransactions: (...args: unknown[]) => getYearTransactions(...args),
   getYearBudgets: (...args: unknown[]) => getYearBudgets(...args),
@@ -62,36 +59,26 @@ vi.mock('./admin-data', () => ({
   skipRecurringOccurrence: (...args: unknown[]) => skipRecurringOccurrence(...args),
   findWishlist: (...args: unknown[]) => findWishlist(...args),
   getFinancialContextAdmin: (...args: unknown[]) => getFinancialContextAdmin(...args),
-  // `transactionRecorded` now stamps the reply in the user's zone; the legacy
-  // single-transaction path reads it here. No test asserts on the stamp itself.
+  // `transactionRecorded` stamps the reply in the user's zone; read-command replies
+  // read the tz here. No test asserts on the stamp itself.
   getUserTimezone: async () => 'Asia/Jakarta',
   // Gemini quota ledger — core.ts wires these into the router on every call. No test
-  // here drives a real router call (extractReceipt is mocked), so plain stubs suffice.
+  // here drives a real router call, so plain stubs suffice.
   getModelHealth: async () => ({ dayKey: '', models: {} }),
   saveModelHealth: async () => {},
 }))
 
 const matchReadCommand = vi.fn()
-const parseIntent = vi.fn()
 vi.mock('./parse-intent', () => ({
   matchReadCommand: (...args: unknown[]) => matchReadCommand(...args),
-  parseIntent: (...args: unknown[]) => parseIntent(...args),
 }))
 
-const extractReceipt = vi.fn()
-vi.mock('@/shared/lib/receipt-extraction', () => ({
-  extractReceipt: (...args: unknown[]) => extractReceipt(...args),
-  ALLOWED_MIME: ['image/jpeg', 'image/png', 'image/webp', 'image/heic'],
-  MAX_BASE64_CHARS: 6 * 1024 * 1024,
-  isAiQuotaOrOverloadError: (err: unknown) => {
-    const status = (err as { status?: unknown } | null)?.status
-    return status === 429 || status === 503
-  },
-}))
-
-const uploadReceiptForUser = vi.fn()
-vi.mock('./drive-upload', () => ({
-  uploadReceiptForUser: (...args: unknown[]) => uploadReceiptForUser(...args),
+// The write paths live in flow-write.ts now (own test file); core.ts only dispatches.
+const handleTextTransaction = vi.fn()
+const handlePhoto = vi.fn()
+vi.mock('./flow-write', () => ({
+  handleTextTransaction: (...args: unknown[]) => handleTextTransaction(...args),
+  handlePhoto: (...args: unknown[]) => handlePhoto(...args),
 }))
 
 // parse-amount is pure & already unit-tested (parse-amount.test.ts) — used for real here.
@@ -117,41 +104,6 @@ function mockCategory(overrides: Partial<Category> = {}): Category {
     order: 0,
     createdAt: {} as never,
     updatedAt: {} as never,
-    ...overrides,
-  }
-}
-
-function receiptResult(overrides: Partial<ReceiptScanResult> = {}): ReceiptScanResult {
-  return {
-    extraction: {
-      merchant: 'Warung Bu Siti',
-      merchantType: 'restaurant',
-      date: '2026-09-01',
-      items: [{ name: 'Nasi Goreng', totalPrice: 25000 }],
-      subtotal: 25000,
-      tax: null,
-      serviceCharge: null,
-      discount: null,
-      total: 25000,
-      currency: 'IDR',
-      confidence: 90,
-      rawText: 'raw',
-      language: 'id',
-    },
-    mappedItems: [
-      {
-        name: 'Nasi Goreng',
-        totalPrice: 25000,
-        suggestedCategoryId: 'cat-food',
-        suggestedCategoryName: 'Makan & Minum',
-        suggestedPillar: 'needs',
-        mappingConfidence: 90,
-        mappingReason: '',
-        isManuallyMapped: false,
-      },
-    ],
-    totalConfidence: 90,
-    warnings: [],
     ...overrides,
   }
 }
@@ -239,15 +191,8 @@ function textMsg(text: string, platform: 'telegram' | 'whatsapp' = 'telegram'): 
   return { platform, externalId: 'chat-1', kind: 'text', text }
 }
 
-function imageMsg(overrides: Partial<BotIncomingImage> = {}): BotIncomingImage {
-  return {
-    platform: 'telegram',
-    externalId: 'chat-1',
-    kind: 'image',
-    imageBase64: 'ZmFrZQ==',
-    mimeType: 'image/jpeg',
-    ...overrides,
-  }
+function imageMsg(): Extract<BotIncoming, { kind: 'image' }> {
+  return { platform: 'telegram', externalId: 'chat-1', kind: 'image', imageBase64: 'ZmFrZQ==', mimeType: 'image/jpeg' }
 }
 
 const LINK = { userId: 'user-1', platform: 'telegram' as const, externalId: 'chat-1', displayName: null, linkedAt: {} as never }
@@ -259,6 +204,8 @@ beforeEach(() => {
   getMonthlyBudget.mockResolvedValue(null)
   isBudgetClosedAdmin.mockReturnValue(false)
   findCategories.mockResolvedValue([mockCategory()])
+  handleTextTransaction.mockResolvedValue({ text: 'stub: text transaction' })
+  handlePhoto.mockResolvedValue({ text: 'stub: photo' })
 })
 
 // ─── Linking ─────────────────────────────────────────────────────
@@ -294,248 +241,42 @@ describe('handleIncoming — linking', () => {
   })
 })
 
-// ─── Text: recording a transaction ──────────────────────────────
+// ─── Dispatch: text & photos hand off to flow-write ─────────────
+// The write paths themselves (fast-path record vs. review card, receipt OCR) are
+// covered in flow-write.test.ts / flow-review.test.ts. Here we only check that
+// `handleIncoming` routes to them.
 
-describe('handleIncoming — text transactions', () => {
+describe('handleIncoming — dispatch', () => {
   beforeEach(() => {
     findLinkByExternalId.mockResolvedValue(LINK)
   })
 
-  it('auto-records a high-confidence expense without asking', async () => {
-    parseIntent.mockResolvedValue({
-      intent: 'add_expense',
-      description: 'makan siang',
-      categoryCandidates: ['cat-food'],
-      dateOffset: 0,
-      confidence: 90,
-    })
-
-    const reply = await handleIncoming(textMsg('makan siang 35rb'))
-
-    expect(createTransaction).toHaveBeenCalledTimes(1)
-    const [userId, dto] = createTransaction.mock.calls[0]
-    expect(userId).toBe('user-1')
-    expect(dto).toMatchObject({ type: 'expense', pillar: 'needs', categoryId: 'cat-food', amount: 35000 })
-    expect(reply.text).toContain('Tercatat')
-    expect(setPending).not.toHaveBeenCalled()
+  it('hands a plain transaction message to handleTextTransaction, trimmed', async () => {
+    const reply = await handleIncoming(textMsg('  makan siang 35rb  '))
+    expect(handleTextTransaction).toHaveBeenCalledWith('user-1', 'makan siang 35rb')
+    expect(handlePhoto).not.toHaveBeenCalled()
+    expect(reply.text).toBe('stub: text transaction')
   })
 
-  it('rejects a message with no parsable amount before ever calling Gemini', async () => {
-    const reply = await handleIncoming(textMsg('makan siang enak banget'))
-    expect(parseIntent).not.toHaveBeenCalled()
-    expect(reply.text).toContain('Nominal')
+  it('hands a photo to handlePhoto', async () => {
+    const msg = imageMsg()
+    const reply = await handleIncoming(msg)
+    expect(handlePhoto).toHaveBeenCalledWith('user-1', msg)
+    expect(handleTextTransaction).not.toHaveBeenCalled()
+    expect(reply.text).toBe('stub: photo')
   })
 
-  it('treats an empty message as unrecognized', async () => {
+  it('treats an empty message as unrecognized, without dispatching', async () => {
     const reply = await handleIncoming(textMsg('   '))
     expect(reply.text).toContain('paham')
-    expect(parseIntent).not.toHaveBeenCalled()
+    expect(handleTextTransaction).not.toHaveBeenCalled()
   })
 
-  it('asks the user to pick a category on low confidence (as an inline keyboard), then records on a valid numeric reply', async () => {
-    findCategories.mockResolvedValue([mockCategory({ id: 'cat-food', name: 'Makan & Minum' }), mockCategory({ id: 'cat-transport', name: 'Transportasi' })])
-    parseIntent.mockResolvedValue({
-      intent: 'add_expense',
-      description: 'beli sesuatu',
-      categoryCandidates: ['cat-food', 'cat-transport'],
-      dateOffset: 0,
-      confidence: 30,
-    })
-
-    const askReply = await handleIncoming(textMsg('beli sesuatu 50rb'))
-    expect(setPending).toHaveBeenCalledTimes(1)
-    expect(setPending.mock.calls[0][1].pendingKind).toBe('category_confirm')
-    expect(askReply.text).toContain(formatIDR(50000))
-    expect(askReply.keyboard?.[0]?.[0]).toMatchObject({ label: 'Makan & Minum', value: '1' })
-    expect(createTransaction).not.toHaveBeenCalled()
-
-    const pendingDraft = setPending.mock.calls[0][1]
-    getPending.mockResolvedValue(pendingDraft)
-
-    const confirmReply = await handleIncoming(textMsg('1'))
-    expect(clearPending).toHaveBeenCalledWith('user-1')
-    expect(createTransaction).toHaveBeenCalledTimes(1)
-    expect(createTransaction.mock.calls[0][1]).toMatchObject({ categoryId: 'cat-food', amount: 50000 })
-    expect(confirmReply.text).toContain('Tercatat')
-  })
-
-  it('keeps the pending draft alive on an out-of-range numeric reply', async () => {
-    getPending.mockResolvedValue({
-      pendingKind: 'category_confirm',
-      draft: { amount: 50000, description: 'beli sesuatu', dateIso: new Date().toISOString() },
-      options: [{ categoryId: 'cat-food', name: 'Makan & Minum' }],
-      expiresAt: {} as never,
-    })
-
-    const reply = await handleIncoming(textMsg('9'))
-    expect(clearPending).not.toHaveBeenCalled()
-    expect(createTransaction).not.toHaveBeenCalled()
-    expect(reply.text).toContain('1-1')
-  })
-
-  it('cancels a pending draft on "batal"', async () => {
-    getPending.mockResolvedValue({
-      pendingKind: 'category_confirm',
-      draft: { amount: 50000, description: null, dateIso: new Date().toISOString() },
-      options: [{ categoryId: 'cat-food', name: 'Makan & Minum' }],
-      expiresAt: {} as never,
-    })
-
-    const reply = await handleIncoming(textMsg('batal'))
-    expect(clearPending).toHaveBeenCalledWith('user-1')
-    expect(createTransaction).not.toHaveBeenCalled()
-    expect(reply.text).toContain('Dibatalkan')
-  })
-
-  it('abandons a stale pending draft when a fresh message arrives instead of a reply', async () => {
-    getPending.mockResolvedValue({
-      pendingKind: 'category_confirm',
-      draft: { amount: 50000, description: null, dateIso: new Date().toISOString() },
-      options: [{ categoryId: 'cat-food', name: 'Makan & Minum' }],
-      expiresAt: {} as never,
-    })
-    parseIntent.mockResolvedValue({
-      intent: 'add_expense',
-      description: 'ngopi',
-      categoryCandidates: ['cat-food'],
-      dateOffset: 0,
-      confidence: 95,
-    })
-
-    const reply = await handleIncoming(textMsg('ngopi 20rb'))
-    expect(clearPending).toHaveBeenCalledWith('user-1')
-    expect(createTransaction).toHaveBeenCalledTimes(1)
-    expect(createTransaction.mock.calls[0][1]).toMatchObject({ amount: 20000 })
-    expect(reply.text).toContain('Tercatat')
-  })
-
-  it('rejects a closed month with a clear message and records nothing', async () => {
-    isBudgetClosedAdmin.mockReturnValue(true)
-    parseIntent.mockResolvedValue({
-      intent: 'add_expense',
-      description: 'makan siang',
-      categoryCandidates: ['cat-food'],
-      dateOffset: 0,
-      confidence: 90,
-    })
-
-    const reply = await handleIncoming(textMsg('makan siang 35rb'))
-    expect(createTransaction).not.toHaveBeenCalled()
-    expect(reply.text).toContain('ditutup')
-  })
-
-  it('never lets an income intent settle on an income-pillar-excluded category, even if the model ignores the prompt rule', async () => {
-    findCategories.mockResolvedValue([
-      mockCategory({ id: 'cat-food', name: 'Makan & Minum', pillar: 'needs' }),
-      mockCategory({ id: 'cat-salary', name: 'Gaji', pillar: 'income' }),
-    ])
-    parseIntent.mockResolvedValue({
-      intent: 'add_income',
-      description: 'gaji',
-      categoryCandidates: ['cat-food'],
-      dateOffset: 0,
-      confidence: 95,
-    })
-
-    const reply = await handleIncoming(textMsg('gaji masuk 5jt'))
-    expect(createTransaction).not.toHaveBeenCalled()
-    expect(setPending).toHaveBeenCalledTimes(1)
-    const options = setPending.mock.calls[0][1].options
-    expect(options.every((o: { categoryId: string }) => o.categoryId !== 'cat-food')).toBe(true)
-    void reply
-  })
-})
-
-// ─── Photos ──────────────────────────────────────────────────────
-
-describe('handleIncoming — photos', () => {
-  beforeEach(() => {
-    findLinkByExternalId.mockResolvedValue(LINK)
-  })
-
-  it('extracts a receipt, uploads it, and records the transaction with the receipt attached', async () => {
-    extractReceipt.mockResolvedValue(receiptResult())
-    uploadReceiptForUser.mockResolvedValue({
-      gDriveFileId: 'file-1',
-      gDriveWebViewLink: 'https://drive.google.com/file-1',
-    })
-
-    const reply = await handleIncoming(imageMsg())
-
-    expect(extractReceipt).toHaveBeenCalledTimes(1)
-    expect(uploadReceiptForUser).toHaveBeenCalledTimes(1)
-    expect(createTransaction).toHaveBeenCalledTimes(1)
-    expect(createTransaction.mock.calls[0][1]).toMatchObject({
-      amount: 25000,
-      categoryId: 'cat-food',
-      gDriveFileId: 'file-1',
-    })
-    expect(reply.text.toLowerCase()).toContain('struk tersimpan ke google drive')
-  })
-
-  it('rejects a photo that is not a receipt, without uploading or recording anything', async () => {
-    extractReceipt.mockResolvedValue(receiptResult({ totalConfidence: 5, extraction: { ...receiptResult().extraction, total: 0 } }))
-
-    const reply = await handleIncoming(imageMsg())
-
-    expect(uploadReceiptForUser).not.toHaveBeenCalled()
-    expect(createTransaction).not.toHaveBeenCalled()
-    expect(reply.text).toContain('bukan foto struk')
-  })
-
-  it('still records the transaction, without an attachment, when Drive is not linked', async () => {
-    extractReceipt.mockResolvedValue(receiptResult())
-    uploadReceiptForUser.mockResolvedValue(null)
-
-    const reply = await handleIncoming(imageMsg())
-
-    expect(createTransaction).toHaveBeenCalledTimes(1)
-    const dto = createTransaction.mock.calls[0][1]
-    expect(dto.gDriveFileId).toBeUndefined()
-    expect(reply.text).toContain('Tercatat')
-    expect(reply.text).toContain('tautkan Google Drive')
-  })
-
-  it('rejects an oversized image before ever calling extractReceipt', async () => {
-    const reply = await handleIncoming(imageMsg({ imageBase64: 'x'.repeat(7 * 1024 * 1024) }))
-    expect(extractReceipt).not.toHaveBeenCalled()
-    expect(reply.text).toContain('terlalu besar')
-  })
-
-  it('replies with the AI-unavailable line (not the generic error) when Gemini returns 429/503', async () => {
-    extractReceipt.mockRejectedValue(Object.assign(new Error('RESOURCE_EXHAUSTED'), { status: 429 }))
-
-    const reply = await handleIncoming(imageMsg())
-
-    expect(uploadReceiptForUser).not.toHaveBeenCalled()
-    expect(createTransaction).not.toHaveBeenCalled()
-    expect(reply.text).toContain('kuota')
-    expect(reply.text).not.toContain('Ada masalah di sisi kami')
-  })
-
-  it('falls back to the generic error line for a non-quota extraction failure', async () => {
-    extractReceipt.mockRejectedValue(new Error('boom'))
-
-    const reply = await handleIncoming(imageMsg())
-
-    expect(reply.text).toContain('Ada masalah di sisi kami')
-  })
-
-  it('drops a stale pending text draft when a photo arrives instead, and processes the photo', async () => {
-    getPending.mockResolvedValue({
-      pendingKind: 'category_confirm',
-      draft: { amount: 50000, description: null, dateIso: new Date().toISOString() },
-      options: [{ categoryId: 'cat-food', name: 'Makan & Minum' }],
-      expiresAt: {} as never,
-    })
-    extractReceipt.mockResolvedValue(receiptResult())
-    uploadReceiptForUser.mockResolvedValue(null)
-
-    const reply = await handleIncoming(imageMsg())
-
-    expect(clearPending).toHaveBeenCalledWith('user-1')
-    expect(extractReceipt).toHaveBeenCalledTimes(1)
-    expect(reply.text).toContain('Tercatat')
+  it('routes a read command to the read handler, not to handleTextTransaction', async () => {
+    matchReadCommand.mockReturnValue('get_summary')
+    getMonthTransactions.mockResolvedValue([])
+    await handleIncoming(textMsg('/ringkasan'))
+    expect(handleTextTransaction).not.toHaveBeenCalled()
   })
 })
 

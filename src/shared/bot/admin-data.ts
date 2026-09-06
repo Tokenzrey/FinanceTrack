@@ -184,38 +184,23 @@ export async function deleteLink(userId: string, platform: BotPlatform): Promise
   await batch.commit()
 }
 
-// ─── Pending draft (category confirmation, goal contribution) ───
+// ─── Pending draft (transaction-batch review, goal contribution) ───
 //
 // Two unrelated multi-step flows share one `meta/botPending` doc, so at most one can
 // be in flight per user at a time — starting a new one abandons whichever was already
-// there, same as a fresh message abandoning a stale category confirmation always has.
-// `pendingKind` tells `handlePendingReply` which flow a stored draft belongs to.
-
-interface CategoryConfirmDraft {
-  pendingKind: 'category_confirm'
-  draft: {
-    amount: number
-    description: string | null
-    /** ISO string, not a Timestamp — sidesteps any Admin/client Timestamp
-     *  nominal-typing friction when this later becomes a `CreateTransactionDTO.date`. */
-    dateIso: string
-  }
-  options: { categoryId: string; name: string }[]
-  receipt?: { gDriveFileId: string; gDriveWebViewLink: string }
-}
+// there. `pendingKind` tells the caller which flow a stored draft belongs to.
 
 interface GoalContributionDraft {
   pendingKind: 'goal_contribution'
   /** Candidate goals offered in step 1, in display order — `step: 'pick_goal'`
-   *  interprets a numeric reply as a 1-based index into this list, same convention as
-   *  `category_confirm.options`. */
+   *  interprets a numeric reply as a 1-based index into this list. */
   options: { goalId: string; name: string }[]
   step: 'pick_goal' | 'enter_amount'
   goalId?: string
   goalName?: string
 }
 
-export type BotPendingDraft = (CategoryConfirmDraft | GoalContributionDraft | DraftBatch) & {
+export type BotPendingDraft = (GoalContributionDraft | DraftBatch) & {
   expiresAt: Timestamp
 }
 
@@ -224,11 +209,10 @@ function pendingRef(userId: string) {
 }
 
 /** The pending-flow kinds this build knows how to answer. A doc holding anything else
- *  was written by a build with a different flow set; it is dropped rather than
- *  half-answered — TTL is 15 minutes, so at most one in-flight draft per user is
- *  affected by a deploy. (`category_confirm` is still here because `core.ts` routes it;
- *  Task 8 drops it once the review card fully replaces that flow.) */
-const KNOWN_PENDING_KINDS = new Set(['transaction_batch', 'goal_contribution', 'category_confirm'])
+ *  (no `pendingKind`, or one from a build with a different flow set — e.g. the retired
+ *  `category_confirm`) is dropped rather than half-answered; TTL is 15 minutes, so at
+ *  most one in-flight draft per user is affected by a deploy. */
+const KNOWN_PENDING_KINDS = new Set(['transaction_batch', 'goal_contribution'])
 
 export async function getPending(userId: string): Promise<BotPendingDraft | null> {
   const snap = await pendingRef(userId).get()
@@ -239,19 +223,16 @@ export async function getPending(userId: string): Promise<BotPendingDraft | null
     await clearPending(userId)
     return null
   }
-  // Docs written before `pendingKind` existed have no such field — they can only ever
-  // have been a category confirmation, the only pending flow back then.
-  const data = raw.pendingKind ? raw : { ...raw, pendingKind: 'category_confirm' as const }
-  if (typeof data.pendingKind !== 'string' || !KNOWN_PENDING_KINDS.has(data.pendingKind)) {
+  if (typeof raw.pendingKind !== 'string' || !KNOWN_PENDING_KINDS.has(raw.pendingKind)) {
     await clearPending(userId)
     return null
   }
-  return data as unknown as BotPendingDraft
+  return raw as unknown as BotPendingDraft
 }
 
 export async function setPending(
   userId: string,
-  payload: CategoryConfirmDraft | GoalContributionDraft | DraftBatch,
+  payload: GoalContributionDraft | DraftBatch,
 ): Promise<void> {
   await pendingRef(userId).set(
     stripUndefined({

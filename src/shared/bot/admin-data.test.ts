@@ -179,7 +179,8 @@ describe('getPending', () => {
     const get = vi.fn().mockResolvedValue({
       exists: true,
       data: () => ({
-        draft: { amount: 1, description: null, dateIso: '2026-01-01' },
+        pendingKind: 'goal_contribution',
+        step: 'pick_goal',
         options: [],
         expiresAt: { toMillis: () => Date.now() + 10_000 },
       }),
@@ -193,21 +194,24 @@ describe('getPending', () => {
   })
 })
 
-describe('getPending — backward compatibility', () => {
-  it('treats a draft written before `pendingKind` existed as a category confirmation', async () => {
+describe('getPending — unknown kinds', () => {
+  it('drops a draft with no `pendingKind` (the retired pre-field / `category_confirm` shape)', async () => {
+    const del = vi.fn().mockResolvedValue(undefined)
     const get = vi.fn().mockResolvedValue({
       exists: true,
       data: () => ({
-        // No `pendingKind` field at all — the shape every draft had before this field existed.
+        // No `pendingKind` field at all — the shape every draft had before this field
+        // existed, and the retired `category_confirm` flow. No longer answerable.
         draft: { amount: 1, description: null, dateIso: '2026-01-01' },
         options: [{ categoryId: 'cat-food', name: 'Makan & Minum' }],
         expiresAt: { toMillis: () => Date.now() + 10_000 },
       }),
     })
-    getAdminDb.mockReturnValue({ doc: vi.fn().mockReturnValue({ get, delete: vi.fn() }) })
+    getAdminDb.mockReturnValue({ doc: vi.fn().mockReturnValue({ get, delete: del }) })
 
     const result = await getPending('user-1')
-    expect(result?.pendingKind).toBe('category_confirm')
+    expect(result).toBeNull()
+    expect(del).toHaveBeenCalledTimes(1)
   })
 })
 

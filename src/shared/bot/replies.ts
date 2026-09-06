@@ -153,7 +153,7 @@ export const replies = {
 
   /** Gemini returned 429 (kuota/rate limit) or 503 (overload) — distinct from
    *  `genericError` so the user knows to wait rather than that something is broken.
-   *  The photo is safe on Drive already (see `handleImage`); nothing was recorded. */
+   *  Nothing was recorded (see `handlePhoto`); the user can resend later. */
   aiUnavailable: (): BotReply =>
     reply(
       '⏳ Layanan AI-nya lagi sibuk atau kuota hariannya sudah habis, jadi struk ini belum bisa dibaca. ' +
