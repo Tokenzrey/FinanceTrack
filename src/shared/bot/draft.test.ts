@@ -201,6 +201,13 @@ describe('buildLinesFromReceipt', () => {
     expect(lines[0].dateIso.slice(0, 10)).toBe('2026-09-06')
   })
 
+  it('falls back to now for a well-formed but impossible date, not a rolled-over one (W7)', () => {
+    for (const bad of ['2026-02-30', '2026-13-01']) {
+      const lines = buildLinesFromReceipt({ ...result, extraction: { ...result.extraction, date: bad } }, CATEGORIES, NOW)
+      expect(lines[0].dateIso.slice(0, 10)).toBe('2026-09-06')
+    }
+  })
+
   it('carries quantity through and leaves an unmapped item without a category', () => {
     const lines = buildLinesFromReceipt(result, CATEGORIES, NOW)
     expect(lines[1].quantity).toBe(2)

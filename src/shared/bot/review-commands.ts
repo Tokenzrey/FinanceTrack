@@ -133,14 +133,18 @@ export function parseReviewCommand(raw: string, now: Date): ReviewCommand {
   if (amount) {
     const n = lineNumber(amount[1])
     const value = parseAmount(amount[2])
-    return n && value !== null && value > 0 ? { kind: 'set_amount', n, amount: value } : NONE
+    // Reject an absurd figure (>1e12) rather than let it into the ledger / CSV export.
+    return n && value !== null && value > 0 && value <= 1_000_000_000_000
+      ? { kind: 'set_amount', n, amount: value }
+      : NONE
   }
 
-  // Description keeps the original casing — it is user prose, not a keyword.
+  // Description keeps the original casing — it is user prose, not a keyword. Capped at
+  // 500 chars (not rejected) so a multi-KB paste can't land in the ledger / HTML / CSV.
   const description = text.match(/^(?:ket|keterangan|nama) (\d{1,3}) (.+)$/i)
   if (description) {
     const n = lineNumber(description[1])
-    const value = description[2].trim()
+    const value = description[2].trim().slice(0, 500)
     return n && value ? { kind: 'set_description', n, text: value } : NONE
   }
 

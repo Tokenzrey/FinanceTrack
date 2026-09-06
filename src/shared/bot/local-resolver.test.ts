@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest'
 import type { Category } from '@/shared/types/domain'
 import type { CategoryHint } from '@/shared/types/receipt-scanner.types'
-import { detectDateOffset, detectType, resolveLocally, splitSegments, tryLocalBatch } from './local-resolver'
+import {
+  detectDateOffset,
+  detectType,
+  hasUnresolvedDateHint,
+  resolveLocally,
+  splitSegments,
+  tryLocalBatch,
+} from './local-resolver'
 
 const NOW = new Date(Date.UTC(2026, 8, 6, 7, 32, 0))
 
@@ -52,6 +59,17 @@ describe('resolveLocally', () => {
     expect(match?.categoryId).not.toBe('c-salary')
   })
 
+  it('does not match a category head inside a longer word — "makan" in "makanan kucing" (W6)', () => {
+    // "makanan kucing" (cat food) must not file as the food category via a substring hit.
+    expect(resolveLocally('beli makanan kucing 80rb', CATEGORIES, [])).toBeNull()
+  })
+
+  it('still matches a category head that stands as its own word (W6)', () => {
+    const match = resolveLocally('makan siang 35rb', CATEGORIES, [])
+    expect(match?.categoryId).toBe('c-food')
+    expect(match?.reason).toBe('category-name')
+  })
+
   it('resolves an income message only within income categories', () => {
     const match = resolveLocally('gaji masuk 5jt', CATEGORIES, [hint('gaji', 'c-salary', 9)], 'income')
     expect(match?.categoryId).toBe('c-salary')
@@ -81,6 +99,20 @@ describe('detectDateOffset', () => {
     expect(detectDateOffset('kopi kemarin 20rb')).toBe(-1)
     expect(detectDateOffset('kopi kemarin lusa 20rb')).toBe(-2)
     expect(detectDateOffset('kopi 20rb')).toBe(0)
+  })
+})
+
+describe('hasUnresolvedDateHint', () => {
+  it('flags backdate phrases L0 does not resolve', () => {
+    for (const s of ['beras 3 hari lalu 50rb', 'bayar minggu lalu 50rb', 'jajan tanggal 5 20rb', 'kopi besok 20rb', 'makan tadi 30rb']) {
+      expect(hasUnresolvedDateHint(s)).toBe(true)
+    }
+  })
+
+  it('does not flag a segment whose only date word is one detectDateOffset handles', () => {
+    expect(hasUnresolvedDateHint('kopi kemarin 20rb')).toBe(false)
+    expect(hasUnresolvedDateHint('kopi kemarin lusa 20rb')).toBe(false)
+    expect(hasUnresolvedDateHint('kopi 20rb')).toBe(false)
   })
 })
 
@@ -165,5 +197,12 @@ describe('tryLocalBatch', () => {
     expect(lines).toHaveLength(2)
     expect(lines![0].amount).toBe(20_000)
     expect(lines![1].amount).toBe(50_000)
+  })
+
+  it('bails to the model path when a segment carries a backdate phrase L0 cannot resolve (W5)', () => {
+    // "beras" is a strong confirmed hint, so without the date guard this would auto-commit
+    // a line dated today with no review.
+    const strong = [hint('beras', 'c-food', 9)]
+    expect(tryLocalBatch('beras 3 hari lalu 50rb', CATEGORIES, strong, NOW)).toBeNull()
   })
 })

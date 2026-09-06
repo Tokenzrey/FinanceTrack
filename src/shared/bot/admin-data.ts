@@ -219,9 +219,14 @@ const KNOWN_PENDING_KINDS = new Set(['transaction_batch', 'goal_contribution'])
 export async function getPending(userId: string): Promise<BotPendingDraft | null> {
   const snap = await pendingRef(userId).get()
   if (!snap.exists) return null
-  const raw = snap.data() as Record<string, unknown> & { expiresAt: Timestamp }
+  const raw = snap.data() as Record<string, unknown> & { expiresAt?: Timestamp }
 
-  if (raw.expiresAt.toMillis() < Date.now()) {
+  // `expiresAt` is a plain `{_seconds,_nanoseconds}` (not a live `Timestamp`) on a doc
+  // written by a REST call, export-import, or a console edit — `.toMillis()` would then
+  // throw and every inbound message for this user would fail. Treat a missing/unreadable
+  // stamp as expired, same as `claimPendingForCommit` does.
+  const ms = raw.expiresAt?.toMillis?.()
+  if (ms == null || ms < Date.now()) {
     await clearPending(userId)
     return null
   }
@@ -611,7 +616,17 @@ export async function clearLastBatch(userId: string): Promise<void> {
 export async function getUserTimezone(userId: string): Promise<string> {
   const snap = await getAdminDb().doc(`users/${userId}/meta/profile`).get()
   const tz = snap.exists ? (snap.data()?.timezone as string | undefined) : undefined
-  return tz && tz.trim() ? tz.trim() : 'Asia/Jakarta'
+  const trimmed = tz?.trim()
+  if (!trimmed) return 'Asia/Jakarta'
+  // A stored value like "WIB" or a typo'd "Asia/Jkarta" throws `RangeError` in every
+  // `Intl.DateTimeFormat({ timeZone })` on the hot path (`formatDateTime`, `dayKeyInTz`)
+  // — validate once here so one bad profile can't break every review card.
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: trimmed })
+  } catch {
+    return 'Asia/Jakarta'
+  }
+  return trimmed
 }
 
 // ─── Per-user bot preferences (/mode, /atur) ────────────────────

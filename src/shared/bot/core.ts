@@ -301,7 +301,9 @@ async function handleCommandWithArgs(userId: string, cmd: CommandArgs): Promise<
     case 'riwayat':
     case 'history': {
       const hasCount = /^\d{1,2}$/.test(cmd.args[0] ?? '')
-      const limit = hasCount ? Math.min(20, Number(cmd.args[0])) : 5
+      // `Math.max(1, …)` so `/riwayat 0` behaves like `/riwayat 1` rather than passing
+      // 0 to `searchTransactions` ("no results") or Firestore `.limit(0)` (rejects).
+      const limit = hasCount ? Math.min(20, Math.max(1, Number(cmd.args[0]))) : 5
       const keyword = hasCount ? cmd.args.slice(1).join(' ') : cmd.raw
       return handleRecent(userId, limit, keyword)
     }

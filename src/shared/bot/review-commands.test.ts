@@ -36,6 +36,16 @@ describe('parseReviewCommand — line edits', () => {
     expect(cmd('nom 1 banyak')).toEqual({ kind: 'none' })
   })
 
+  it('rejects an absurd amount edit above 1e12 (N7)', () => {
+    expect(cmd('nom 1 999999999999999')).toEqual({ kind: 'none' })
+  })
+
+  it('caps a long description edit at 500 chars rather than rejecting it (N7)', () => {
+    const parsed = cmd(`ket 1 ${'x'.repeat(600)}`) as { kind: string; text: string }
+    expect(parsed.kind).toBe('set_description')
+    expect(parsed.text.length).toBe(500)
+  })
+
   it('takes the whole remainder as the description, spaces and all', () => {
     expect(cmd('ket 2 kopi susu gula aren')).toEqual({
       kind: 'set_description',

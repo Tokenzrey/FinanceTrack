@@ -41,6 +41,30 @@ export function detectDateOffset(text: string): number {
   return 0
 }
 
+/** Date-ish phrases the L0 layer does NOT understand — "3 hari lalu", "minggu lalu",
+ *  "tanggal 5", weekday names, "besok"/"lusa"/"tadi"/"barusan", "kemarin sore". If a
+ *  segment carries one, `tryLocalBatch` must not auto-commit it dated today: hand the
+ *  whole message to the model path (which clamps ±365 and shows the date on the card). */
+const UNRESOLVED_DATE_RE =
+  /\b(\d+\s*(hari|minggu|bulan|pekan)\s*(lalu|yang lalu)|tanggal\s+\d|senin|selasa|rabu|kamis|jumat|sabtu|minggu|kemarin\s+\w+|lusa|besok|tadi|barusan)\b/i
+
+export function hasUnresolvedDateHint(segment: string): boolean {
+  // Only "kemarin" / "kemarin lusa" are actually resolved by `detectDateOffset`; a
+  // non-zero offset means the date hint was handled, so it is not "unresolved".
+  return UNRESOLVED_DATE_RE.test(segment) && detectDateOffset(segment) === 0
+}
+
+/** Escapes a category name for use as a literal inside a `\b`-anchored `RegExp`. */
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+/** Whole-word test — "makan" must not match inside "makanan", the way `String.includes`
+ *  would (which files "makanan kucing" as groceries). */
+function matchesWholeWord(haystack: string, word: string): boolean {
+  return new RegExp(`\\b${escapeRegex(word)}\\b`, 'i').test(haystack)
+}
+
 /**
  * Splits "makan 35rb, bensin 50rb dan kopi 20rb" into its parts.
  *
@@ -86,16 +110,17 @@ export function resolveLocally(
   const lower = text.toLowerCase()
 
   // 1. The category's own name said outright. Length floors keep a two-letter category
-  //    from matching half the alphabet.
+  //    from matching half the alphabet; the whole-word test keeps a head like "makan"
+  //    from matching inside "makanan" ("makanan kucing" is not groceries).
   for (const category of pool) {
     const name = category.name.toLowerCase()
-    if (name.length >= 4 && lower.includes(name)) {
+    if (name.length >= 4 && matchesWholeWord(lower, name)) {
       return { categoryId: category.id, categoryName: category.name, confidence: CATEGORY_NAME_CONFIDENCE, reason: 'category-name' }
     }
   }
   for (const category of pool) {
     const head = category.name.toLowerCase().split(/[\s&/]+/)[0]
-    if (head.length >= 5 && lower.includes(head)) {
+    if (head.length >= 5 && matchesWholeWord(lower, head)) {
       return { categoryId: category.id, categoryName: category.name, confidence: CATEGORY_HEAD_CONFIDENCE, reason: 'category-name' }
     }
   }
@@ -136,6 +161,10 @@ export function tryLocalBatch(
   const lines: DraftLine[] = []
 
   for (const segment of segments) {
+    // A backdate phrase L0 can't resolve ("3 hari lalu", "tanggal 5") would be silently
+    // committed dated today with no review — bail to the model path instead.
+    if (hasUnresolvedDateHint(segment)) return null
+
     const amount = parseAmount(segment)
     if (amount === null || amount <= 0) return null
 

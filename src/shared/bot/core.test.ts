@@ -658,6 +658,13 @@ describe('handleIncoming — argument-taking commands', () => {
     expect(searchTransactions).toHaveBeenCalledWith('user-1', 'kopi', 10)
   })
 
+  it('/riwayat 0 clamps the count to 1 rather than passing 0 to the query (W8)', async () => {
+    getRecentTransactions.mockResolvedValue([mockTransaction()])
+    const reply = await handleIncoming(textMsg('/riwayat 0'))
+    expect(getRecentTransactions).toHaveBeenCalledWith('user-1', 1)
+    expect(reply.text).not.toContain('Belum ada transaksi')
+  })
+
   it('/kategori <nama> details the matched active category', async () => {
     const reply = await handleIncoming(textMsg('/kategori makan'))
     expect(reply.text).toContain('Makan &amp; Minum')

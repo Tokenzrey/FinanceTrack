@@ -81,7 +81,11 @@ function receiptDate(isoDay: string | null, now: Date): Date {
   const [y, m, d] = isoDay.split('-').map(Number)
   const dated = new Date(now.getTime())
   dated.setUTCFullYear(y, m - 1, d)
-  return Number.isNaN(dated.getTime()) ? now : dated
+  if (Number.isNaN(dated.getTime())) return now
+  // The regex accepts "2026-13-01" / "2026-02-30"; `setUTCFullYear` then rolls over to a
+  // real-but-wrong date. Reject it the same way `review-commands.ts` `withClockOf` does.
+  if (dated.getUTCFullYear() !== y || dated.getUTCMonth() !== m - 1 || dated.getUTCDate() !== d) return now
+  return dated
 }
 
 export function buildLinesFromReceipt(

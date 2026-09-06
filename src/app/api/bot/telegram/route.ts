@@ -1,3 +1,4 @@
+import { timingSafeEqual } from 'node:crypto'
 import { NextResponse, type NextRequest } from 'next/server'
 import { waitUntil } from '@vercel/functions'
 import { claimInboundMessage } from '@/shared/bot/admin-data'
@@ -34,6 +35,15 @@ interface TelegramUpdate {
 
 function botToken(): string | undefined {
   return process.env.TELEGRAM_BOT_TOKEN
+}
+
+/** Constant-time compare of the webhook secret, like the GOWA route's HMAC check —
+ *  `timingSafeEqual` throws on unequal lengths, so guard that first (a length mismatch
+ *  is simply "not equal"). */
+function secretMatches(provided: string, expected: string): boolean {
+  const a = Buffer.from(provided)
+  const b = Buffer.from(expected)
+  return a.length === b.length && timingSafeEqual(a, b)
 }
 
 function toReplyMarkup(reply: BotReply): Record<string, unknown> | undefined {
@@ -78,15 +88,19 @@ async function sendMessageReturningId(chatId: number, reply: BotReply): Promise<
 }
 
 /** Replaces a tapped-button message with the result and removes its keyboard, so a
- *  stale button can never be tapped a second time. */
+ *  stale button can never be tapped a second time. Falls back to a fresh send if the
+ *  edit is refused ("message to edit not found", "can't be edited", a blip), so a
+ *  stranded placeholder can never be the last thing the user sees — mirrors the
+ *  WhatsApp route. */
 async function editMessage(chatId: number, messageId: number, reply: BotReply): Promise<void> {
-  await callTelegram('editMessageText', {
+  const body = (await callTelegram('editMessageText', {
     chat_id: chatId,
     message_id: messageId,
     text: reply.text,
     parse_mode: reply.html === false ? undefined : 'HTML',
     reply_markup: toReplyMarkup(reply) ?? {},
-  })
+  })) as { ok?: boolean } | null
+  if (!body || body.ok === false) await sendMessage(chatId, reply)
 }
 
 async function answerCallbackQuery(callbackQueryId: string): Promise<void> {
@@ -218,7 +232,7 @@ async function handleCallbackQuery(query: TelegramCallbackQuery, updateId: numbe
 export async function POST(request: NextRequest): Promise<NextResponse> {
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET
   const provided = request.headers.get('x-telegram-bot-api-secret-token')
-  if (!secret || provided !== secret) {
+  if (!secret || !provided || !secretMatches(provided, secret)) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -228,6 +242,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   } catch {
     return NextResponse.json({ ok: true })
   }
+
+  // The bot is 1:1 only — linking is per private chat. A group/supergroup has a
+  // negative chat id; ignore it so no member can drive another's review card.
+  const chatId = update.callback_query?.message?.chat.id ?? update.message?.chat.id
+  if (chatId != null && chatId < 0) return NextResponse.json({ ok: true })
 
   if (update.callback_query) {
     waitUntil(handleCallbackQuery(update.callback_query, update.update_id))

@@ -527,6 +527,14 @@ describe('multi-transaction persistence', () => {
       const pending = await adminData.getPending('user-1')
       expect(pending?.pendingKind).toBe('transaction_batch')
     })
+
+    it('clears and returns null (never a TypeError) when expiresAt is a plain object with no toMillis (W2)', async () => {
+      // A REST write / export-import / console edit stores `expiresAt` as a plain
+      // `{_seconds,_nanoseconds}` rather than a live `Timestamp`.
+      docData = { pendingKind: 'transaction_batch', lines: [], mode: 'itemized', expiresAt: { _seconds: 1 } }
+      expect(await adminData.getPending('user-1')).toBeNull()
+      expect(docDelete).toHaveBeenCalled()
+    })
   })
 
   describe('getUserTimezone', () => {
@@ -542,6 +550,14 @@ describe('multi-transaction persistence', () => {
       docExists = true
       docData = { timezone: '  ' }
       expect(await adminData.getUserTimezone('user-1')).toBe('Asia/Jakarta')
+    })
+
+    it('falls back to Asia/Jakarta when the stored zone is not a valid IANA name (W1)', async () => {
+      // A bogus zone would throw RangeError in every Intl.DateTimeFormat on the hot path.
+      for (const bogus of ['Asia/Jkarta', 'WIB', 'not a zone']) {
+        docData = { timezone: bogus }
+        expect(await adminData.getUserTimezone('user-1')).toBe('Asia/Jakarta')
+      }
     })
   })
 

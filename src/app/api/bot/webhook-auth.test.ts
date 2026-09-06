@@ -74,6 +74,12 @@ describe('Telegram webhook — X-Telegram-Bot-Api-Secret-Token', () => {
     expect(handleIncoming).not.toHaveBeenCalled()
   })
 
+  it('rejects a same-length but wrong secret with 403 (constant-time compare path, N1)', async () => {
+    const res = await telegramPost(req({ 'x-telegram-bot-api-secret-token': 'tg-secreX' })) // same length as "tg-secret"
+    expect(res.status).toBe(403)
+    expect(handleIncoming).not.toHaveBeenCalled()
+  })
+
   it('accepts the correct secret header with 200 and processes the update', async () => {
     const res = await telegramPost(req({ 'x-telegram-bot-api-secret-token': 'tg-secret' }))
     await flush()

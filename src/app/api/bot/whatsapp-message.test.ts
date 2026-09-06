@@ -101,8 +101,8 @@ describe('WhatsApp (GOWA) — message normalization', () => {
     expect(JSON.parse(sendCall?.[1].body).phone).toBe('628123456789@s.whatsapp.net') // full JID, not the stripped id
   })
 
-  it('strips the group JID suffix (@g.us) the same way', async () => {
-    await POST(
+  it('ignores a group chat (@g.us) entirely — the bot is 1:1 only (N3)', async () => {
+    const res = await POST(
       req({
         event: 'message',
         device_id: '628987654321@s.whatsapp.net',
@@ -117,7 +117,9 @@ describe('WhatsApp (GOWA) — message normalization', () => {
       }),
     )
     await flush()
-    expect(handleIncoming).toHaveBeenCalledWith(expect.objectContaining({ externalId: '120363012345678901' }))
+    expect(res.status).toBe(200)
+    expect(claimInboundMessage).not.toHaveBeenCalled()
+    expect(handleIncoming).not.toHaveBeenCalled()
   })
 
   it('skips processing entirely when the message id was already claimed (GOWA retry / redelivery)', async () => {

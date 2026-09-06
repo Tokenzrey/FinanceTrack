@@ -242,6 +242,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const payload = body.payload
+  // The bot is 1:1 only — linking is per private chat. A group chat (`@g.us`) collapses
+  // every member onto the one linked identity, so any member could drive another's
+  // review card. Ignore it outright.
+  if (payload?.chat_id?.endsWith('@g.us')) return NextResponse.json({ ok: true })
+
   if (body.event === 'message' && payload && !payload.is_from_me) {
     let shouldProcess = true
     try {

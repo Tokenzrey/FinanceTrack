@@ -120,6 +120,43 @@ describe('Telegram webhook — callback_query (inline keyboard taps)', () => {
     expect(calledMethods()).toEqual(['answerCallbackQuery']) // answered, but no editMessageText / handleIncoming
     expect(handleIncoming).not.toHaveBeenCalled()
   })
+
+  it('falls back to a fresh sendMessage when the placeholder edit is refused (W10)', async () => {
+    global.fetch = vi.fn().mockImplementation((u: string) =>
+      (u as string).endsWith('/editMessageText')
+        ? Promise.resolve({ ok: true, json: async () => ({ ok: false, description: 'message to edit not found' }) })
+        : Promise.resolve({ ok: true, json: async () => ({ ok: true, result: { message_id: 900 } }) }),
+    ) as unknown as typeof fetch
+
+    await POST(
+      req({ update_id: 6, callback_query: { id: 'cbq-1', data: 'batal', message: { chat: { id: 42 }, message_id: 99 } } }),
+    )
+    await flush()
+
+    const methods = calledMethods()
+    expect(methods).toContain('editMessageText')
+    expect(methods).toContain('sendMessage') // the real reply is delivered anyway
+  })
+})
+
+describe('Telegram webhook — group chats (N3)', () => {
+  it('ignores a message from a group/supergroup (negative chat id) and never processes it', async () => {
+    const res = await POST(req({ update_id: 50, message: { chat: { id: -100123 }, message_id: 1, text: 'ringkasan' } }))
+    await flush()
+    expect(res.status).toBe(200)
+    expect(claimInboundMessage).not.toHaveBeenCalled()
+    expect(handleIncoming).not.toHaveBeenCalled()
+  })
+
+  it('ignores a button tap inside a group (negative chat id)', async () => {
+    const res = await POST(
+      req({ update_id: 51, callback_query: { id: 'cbq-9', data: 'rv:save', message: { chat: { id: -100123 }, message_id: 2 } } }),
+    )
+    await flush()
+    expect(res.status).toBe(200)
+    expect(handleIncoming).not.toHaveBeenCalled()
+    expect(calledMethods()).not.toContain('answerCallbackQuery')
+  })
 })
 
 describe('Telegram webhook — message de-dup', () => {
