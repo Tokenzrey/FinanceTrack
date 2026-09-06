@@ -131,3 +131,24 @@ export interface ParsedIntent {
   /** Confidence in `categoryCandidates[0]` specifically (0-100). */
   confidence: number
 }
+
+/**
+ * One deterministic edit against the review card, produced by `parseReviewCommand`
+ * from either typed text or a Telegram `rv:*` callback token — a tap and a typed
+ * command land on the same code path (GOWA exposes no buttons, so WhatsApp users
+ * only ever type).
+ */
+export type ReviewCommand =
+  | { kind: 'save' }
+  | { kind: 'cancel' }
+  | { kind: 'remove'; n: number }
+  | { kind: 'set_category'; n: number; option: number }
+  | { kind: 'set_amount'; n: number; amount: number }
+  | { kind: 'set_description'; n: number; text: string }
+  | { kind: 'set_date'; n: number; date: Date }
+  | { kind: 'set_type'; n: number; type: BotTxType }
+  | { kind: 'set_mode'; mode: 'single' | 'itemized' }
+  /** Tombol "✏️ n" di Telegram: tampilkan menu edit untuk satu baris saja. */
+  | { kind: 'focus'; n: number }
+  | { kind: 'help' }
+  | { kind: 'none' }
