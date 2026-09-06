@@ -16,6 +16,7 @@ import { analyseWishlistItem } from '@/shared/use-cases/wishlist/CalculateAfford
 import * as adminData from './admin-data'
 import type { BotPendingDraft } from './admin-data'
 import { uploadReceiptForUser } from './drive-upload'
+import { handleReviewMessage } from './flow-review'
 import { parseAmount } from './parse-amount'
 import { matchReadCommand, parseIntent } from './parse-intent'
 import { replies } from './replies'
@@ -76,10 +77,31 @@ export async function handleIncoming(msg: BotIncoming): Promise<BotReply> {
     }
   }
 
-  // A pending multi-step draft (category confirmation or goal contribution) takes
-  // priority over everything else.
+  // A pending draft takes priority over everything else. A `transaction_batch` goes to
+  // the review loop; the goal-contribution flow keeps its own two-step handler.
   const pending = await adminData.getPending(userId)
-  if (pending) return handlePendingReply(userId, pending, msg)
+  if (pending) {
+    if (pending.pendingKind === 'transaction_batch') {
+      // Read commands still work mid-review — answering "/ringkasan" should not cost
+      // the user their draft (see flow-review's no-silent-drop rule).
+      if (msg.kind === 'text') {
+        const readCommand = matchReadCommand(msg.text.trim())
+        if (readCommand && readCommand !== 'cancel_pending') {
+          const answer = await handleReadCommand(userId, readCommand)
+          return {
+            ...answer,
+            text: `${answer.text}\n\n<i>ℹ️ Masih ada ${pending.lines.length} transaksi menunggu — balas <code>ok</code> untuk simpan, <code>batal</code> untuk buang.</i>`,
+          }
+        }
+        if (readCommand === 'cancel_pending') {
+          await adminData.clearPending(userId)
+          return replies.batchCancelled(pending.lines.length)
+        }
+      }
+      return handleReviewMessage(userId, pending, msg)
+    }
+    return handlePendingReply(userId, pending, msg)
+  }
 
   if (msg.kind === 'image') return handleImage(userId, msg)
   return handleText(userId, msg.text)
@@ -105,10 +127,9 @@ async function handlePendingReply(
   }
 
   if (pending.pendingKind === 'transaction_batch') {
-    // The editable review loop is wired up in Task 8; until then a batch draft can't
-    // be answered here — drop it and process the message as a fresh one.
-    await adminData.clearPending(userId)
-    return handleText(userId, msg.text)
+    // `handleIncoming` routes batch drafts to the review loop before reaching here;
+    // this stays as a guard so the batch is never dropped if that path ever changes.
+    return handleReviewMessage(userId, pending, msg)
   }
 
   const trimmed = msg.text.trim()
