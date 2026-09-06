@@ -54,9 +54,12 @@ export interface BotReply {
    *  WhatsApp's own lite-markdown instead of sending them raw. */
   html?: boolean
   /** One row per array entry. Telegram renders this as a tappable inline keyboard.
-   *  WhatsApp has no equivalent — its adapter falls back to a numbered text list built
-   *  from the same buttons, exactly like the pre-keyboard text-only flow. */
+   *  WhatsApp has no equivalent — GOWA exposes no interactive message type at all. */
   keyboard?: BotKeyboardButton[][]
+  /** Typed equivalents of `keyboard`, used ONLY by the WhatsApp adapter. When present
+   *  it replaces the generic keyboard fallback entirely: a review card needs
+   *  `kat 2 1`-style instructions, which no automatic numbering could produce. */
+  whatsappHints?: string[]
 }
 
 /** What a platform media downloader hands back — already normalized, so `core.ts`

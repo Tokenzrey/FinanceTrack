@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { waitUntil } from '@vercel/functions'
 import { claimInboundMessage } from '@/shared/bot/admin-data'
 import { handleIncoming } from '@/shared/bot/core'
+import { renderForWhatsApp } from '@/shared/bot/format-wa'
 import { downloadWhatsAppMedia } from '@/shared/bot/media-whatsapp'
 import type { BotIncoming, BotReply } from '@/shared/bot/types'
 
@@ -48,44 +49,6 @@ function verifySignature(rawBody: string, signatureHeader: string | null): boole
   // is simply not equal, not a crash.
   if (expectedBuf.length !== providedBuf.length) return false
   return timingSafeEqual(expectedBuf, providedBuf)
-}
-
-/**
- * WhatsApp has no HTML/inline-keyboard support, so a `BotReply` is downgraded here,
- * once, in the one place that actually sends via GOWA — `core.ts`/`replies.ts` stay
- * platform-agnostic.
- *
- * A keyboard whose every value is either a bare number or `"batal"` (the
- * category-confirm and goal-contribution flows) renders as a plain numbered list —
- * typing the number reproduces exactly what tapping the button would have sent, so
- * the underlying flow needs no WhatsApp-specific branch at all. A keyboard carrying
- * self-contained action tokens instead (`unlink:confirm`, `skip_recurring:<id>:<day>`)
- * has no typed equivalent a user could plausibly guess, so those stay Telegram-only —
- * the message says so rather than silently going nowhere.
- */
-function renderForWhatsApp(reply: BotReply): string {
-  let text = reply.text
-    .replace(/<b>([\s\S]*?)<\/b>/g, '*$1*')
-    .replace(/<i>([\s\S]*?)<\/i>/g, '_$1_')
-    .replace(/<code>([\s\S]*?)<\/code>/g, '`$1`')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-
-  if (reply.keyboard && reply.keyboard.length > 0) {
-    const buttons = reply.keyboard.flat()
-    const allTypeable = buttons.every((b) => /^\d+$/.test(b.value) || b.value === 'batal')
-
-    if (allTypeable) {
-      const lines = buttons.map((b) => `${b.value === 'batal' ? '"batal"' : `${b.value})`} ${b.label}`)
-      text += `\n\n${lines.join('\n')}`
-    } else {
-      text += '\n\n(Aksi ini saat ini hanya bisa dikonfirmasi lewat Telegram, atau lewat Pengaturan di web.)'
-    }
-  }
-
-  return text
 }
 
 async function sendMessage(chatId: string, reply: BotReply): Promise<void> {
