@@ -39,6 +39,52 @@ export interface BotIncomingImage {
  *  media ids, signatures) never cross this boundary. */
 export type BotIncoming = BotIncomingText | BotIncomingImage
 
+export type BotTxType = 'expense' | 'income' | 'transfer'
+
+/** Satu calon transaksi di dalam kartu tinjauan. */
+export interface DraftLine {
+  /** Nomor 1-based yang dilihat user; dihitung ulang setiap ada baris dihapus. */
+  n: number
+  type: BotTxType
+  amount: number
+  description: string | null
+  categoryId: string | null
+  categoryName: string | null
+  /** ISO 8601 UTC. Ditampilkan dalam zona waktu user. */
+  dateIso: string
+  /** Kandidat kategori bernomor untuk perintah `kat <n> <k>`. Maks 4. */
+  options: { categoryId: string; name: string }[]
+  /** Hanya untuk baris asal struk. */
+  quantity?: number | null
+}
+
+export interface DraftBatch {
+  pendingKind: 'transaction_batch'
+  source: 'text' | 'receipt'
+  /** SELALU rincian per item. `mode` hanya mengubah commit & render (§2 D2). */
+  lines: DraftLine[]
+  /** `single` hanya bermakna untuk `source: 'receipt'`. */
+  mode: 'single' | 'itemized'
+  merchant: string | null
+  /** Total yang dibaca model dari struk — dibandingkan dengan jumlah baris. */
+  receiptTotal: number | null
+  receipt?: { gDriveFileId: string; gDriveWebViewLink: string }
+  /** Peringatan dari ekstraksi, ditampilkan di kartu. */
+  warnings: string[]
+}
+
+/** Satu segmen transaksi hasil bacaan Gemini atas pesan teks. */
+export interface ParsedLine {
+  type: BotTxType
+  description: string | null
+  /** Potongan teks PERSIS dari pesan asli yang memuat nominal. Di-reparse oleh
+   *  `parseAmount` — tidak pernah dipercaya sebagai angka (§2 D1). */
+  amountText: string
+  categoryCandidates: string[]
+  dateOffset: number
+  confidence: number
+}
+
 /** A single button in an inline keyboard row. `value` is what comes back as the
  *  incoming message when tapped — Telegram sends it as `callback_query.data`, treated
  *  identically to the user having typed it (see `core.ts`). */
