@@ -299,6 +299,45 @@ export async function getRecentTransactions(userId: string, limit = 5): Promise<
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Transaction)
 }
 
+/** Half-open range `[from, to)`. Callers pass instants (already resolved to the user's
+ *  local midnight — see `core.ts`'s `handlePeriodSummary`), so the DST-free +7 offset
+ *  never has to be reasoned about here. */
+export async function getTransactionsBetween(userId: string, from: Date, to: Date): Promise<Transaction[]> {
+  const snap = await getAdminDb()
+    .collection(`users/${userId}/transactions`)
+    .where('date', '>=', Timestamp.fromDate(from))
+    .where('date', '<', Timestamp.fromDate(to))
+    .orderBy('date', 'desc')
+    .get()
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Transaction)
+}
+
+/**
+ * Keyword search over descriptions. Firestore has no substring operator, so the recent
+ * window is fetched and filtered in memory — bounded by `scanLimit`, which is what
+ * keeps this from turning into a full-collection read as the ledger grows.
+ */
+export async function searchTransactions(
+  userId: string,
+  keyword: string,
+  limit = 10,
+  scanLimit = 500,
+): Promise<Transaction[]> {
+  const needle = keyword.trim().toLowerCase()
+  if (!needle) return []
+
+  const snap = await getAdminDb()
+    .collection(`users/${userId}/transactions`)
+    .orderBy('date', 'desc')
+    .limit(scanLimit)
+    .get()
+
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as Transaction)
+    .filter((tx) => (tx.description ?? '').toLowerCase().includes(needle))
+    .slice(0, limit)
+}
+
 export async function getYearTransactions(userId: string, year: number): Promise<Transaction[]> {
   const from = Timestamp.fromDate(new Date(year, 0, 1))
   const to = Timestamp.fromDate(new Date(year + 1, 0, 1))

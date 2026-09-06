@@ -29,3 +29,23 @@ describe('matchReadCommand', () => {
     expect(matchReadCommand('ABC123')).toBeNull()
   })
 })
+
+describe('matchReadCommand — new commands', () => {
+  it('matches the new read commands in both slash and bare form', () => {
+    expect(matchReadCommand('/hariini')).toBe('today_summary')
+    expect(matchReadCommand('hari ini')).toBe('today_summary')
+    expect(matchReadCommand('/minggu')).toBe('week_summary')
+    expect(matchReadCommand('/statistik')).toBe('stats')
+    expect(matchReadCommand('/undo')).toBe('undo')
+  })
+
+  it('does not treat /cari as a bare read command — it carries an argument', () => {
+    expect(matchReadCommand('/cari')).toBe('search')
+    expect(matchReadCommand('/cari kopi')).toBeNull()
+  })
+
+  it('still matches every command that already existed', () => {
+    expect(matchReadCommand('/ringkasan')).toBe('get_summary')
+    expect(matchReadCommand('saldo')).toBe('get_balance')
+  })
+})

@@ -1,6 +1,6 @@
 import { projectSavings } from '@/shared/lib/analytics'
 import { buildMonthlySummary } from '@/shared/lib/budget-math'
-import { formatIDR, formatMonthLong } from '@/shared/lib/format'
+import { dayKeyInTz, formatDayLong, formatIDR, formatMonthLong } from '@/shared/lib/format'
 import { configureRouterIO } from '@/shared/lib/gemini-router'
 import { dayKey, pendingOccurrences } from '@/shared/lib/recurring'
 import { buildYearSummary } from '@/shared/lib/year-summary'
@@ -103,6 +103,10 @@ async function dispatchText(userId: string, text: string): Promise<BotReply> {
     if (prefsCommand.kind === 'show') return replies.prefsCard(await adminData.getBotPrefs(userId))
     return replies.prefsUpdated(await adminData.saveBotPrefs(userId, prefsCommand.patch))
   }
+
+  // `/cari kopi` carries an argument, so it cannot be a bare read-command match.
+  const search = trimmed.match(/^\/?(?:cari|search)\s+(.+)$/i)
+  if (search) return handleSearch(userId, search[1].trim())
 
   const readCommand = matchReadCommand(trimmed)
   if (readCommand) return handleReadCommand(userId, readCommand)
@@ -212,6 +216,12 @@ async function handleReadCommand(userId: string, intent: BotIntent): Promise<Bot
   if (intent === 'list_recurring') return handleListRecurring(userId)
   if (intent === 'list_wishlist') return handleListWishlist(userId)
 
+  if (intent === 'search') return replies.searchNeedsKeyword()
+  if (intent === 'undo') return handleUndo(userId)
+  if (intent === 'today_summary') return handlePeriodSummary(userId, 'today')
+  if (intent === 'week_summary') return handlePeriodSummary(userId, 'week')
+  if (intent === 'stats') return handleStats(userId)
+
   // get_summary / get_balance both need the full monthly summary.
   const now = new Date()
   const year = now.getFullYear()
@@ -232,6 +242,108 @@ async function handleReadCommand(userId: string, intent: BotIntent): Promise<Bot
   })
 
   return intent === 'get_summary' ? replies.summary(summary) : replies.balance(summary)
+}
+
+// ─── /undo, /cari, /hariini, /minggu, /statistik ────────────────
+
+async function handleUndo(userId: string): Promise<BotReply> {
+  const last = await adminData.getLastBatch(userId)
+  if (!last) return replies.nothingToUndo()
+  const count = await adminData.deleteTransactions(userId, last.transactionIds)
+  await adminData.clearLastBatch(userId)
+  return replies.undone(count)
+}
+
+async function handleSearch(userId: string, keyword: string): Promise<BotReply> {
+  const [matches, categories, tz] = await Promise.all([
+    adminData.searchTransactions(userId, keyword, 10),
+    adminData.findCategories(userId),
+    adminData.getUserTimezone(userId),
+  ])
+  if (matches.length === 0) return replies.searchEmpty(keyword)
+
+  const byId = new Map(categories.map((c) => [c.id, c.name]))
+  return replies.searchResults(
+    keyword,
+    matches.map((tx) => ({
+      amount: tx.amount,
+      categoryName: byId.get(tx.categoryId) ?? 'Tanpa kategori',
+      description: tx.description ?? '—',
+      date: tx.date.toDate(),
+    })),
+    tz,
+  )
+}
+
+/** Milliseconds `timeZone` is ahead of UTC at `at`. Derived from Intl rather than a
+ *  hardcoded +7, so a user in WITA/WIT gets their own midnight. */
+function tzOffsetMs(at: Date, timeZone: string): number {
+  const asUtc = new Date(at.toLocaleString('en-US', { timeZone: 'UTC' }))
+  const asLocal = new Date(at.toLocaleString('en-US', { timeZone }))
+  return asLocal.getTime() - asUtc.getTime()
+}
+
+/** "Today" and "this week" must be bounded by the USER's midnight, not the server's —
+ *  a 23:30 WIB expense belongs to today, and a UTC boundary would file it as tomorrow. */
+async function handlePeriodSummary(userId: string, period: 'today' | 'week'): Promise<BotReply> {
+  const tz = await adminData.getUserTimezone(userId)
+  const now = new Date()
+  const [y, m, d] = dayKeyInTz(now, tz).split('-').map(Number)
+
+  // Local midnight as an instant: read the local wall-clock midnight as if it were
+  // UTC, then subtract the zone's offset at that moment.
+  const from = new Date(Date.UTC(y, m - 1, d) - tzOffsetMs(now, tz))
+  if (period === 'week') from.setUTCDate(from.getUTCDate() - 6)
+  const to = new Date(from.getTime() + (period === 'week' ? 7 : 1) * 86_400_000)
+
+  const [transactions, categories] = await Promise.all([
+    adminData.getTransactionsBetween(userId, from, to),
+    adminData.findCategories(userId),
+  ])
+
+  const spend = transactions.filter((tx) => tx.type === 'expense')
+  const byId = new Map(categories.map((c) => [c.id, c.name]))
+  const totals = new Map<string, number>()
+  for (const tx of spend) {
+    const name = byId.get(tx.categoryId) ?? 'Tanpa kategori'
+    totals.set(name, (totals.get(name) ?? 0) + tx.amount)
+  }
+
+  const rows = [...totals.entries()]
+    .map(([name, amount]) => ({ name, amount }))
+    .sort((a, b) => b.amount - a.amount)
+  const total = rows.reduce((sum, r) => sum + r.amount, 0)
+  const title =
+    period === 'today' ? `📅 <b>Hari Ini</b> — ${formatDayLong(now, tz)}` : '📅 <b>7 Hari Terakhir</b>'
+
+  return replies.periodSummary(title, rows, total, spend.length)
+}
+
+async function handleStats(userId: string): Promise<BotReply> {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = now.getMonth() + 1
+  const [categories, budget, transactions] = await Promise.all([
+    adminData.findCategories(userId),
+    adminData.getMonthlyBudget(userId, year, month),
+    adminData.getMonthTransactions(userId, year, month),
+  ])
+
+  const summary = buildMonthlySummary(categories, transactions, {
+    year,
+    month,
+    totalIncome: budget?.totalIncome ?? 0,
+    pillarConfig: budget?.pillarConfig ?? DEFAULT_PILLAR_CONFIG,
+    overrides: budget?.categoryOverrides,
+  })
+
+  const top = [...summary.categories]
+    .sort((a, b) => b.used - a.used)
+    .slice(0, 5)
+    .map((c) => ({ name: c.category.name, amount: c.used }))
+
+  const projected = summary.categories.reduce((sum, c) => sum + c.projectedMonthEnd, 0)
+  return replies.stats(formatMonthLong(year, month), summary.dailyAvgSpend, projected, top)
 }
 
 // ─── /target & /setor ────────────────────────────────────────────

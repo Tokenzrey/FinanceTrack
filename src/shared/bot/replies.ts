@@ -114,25 +114,35 @@ export const replies = {
       [
         '🤖 <b>FinanceTrack Bot</b>',
         '',
-        '<b>Catat transaksi</b>',
-        'Ketik langsung, mis. <code>makan siang 35rb</code> atau <code>gaji masuk 5jt</code> — atau kirim foto struk.',
+        '<b>💸 Catat transaksi</b>',
+        'Ketik apa adanya — <code>makan siang 35rb</code>, atau beberapa sekaligus:',
+        '<code>makan 35rb, bensin 50rb, gaji masuk 5jt</code>',
+        'Atau kirim <b>foto struk</b> (boleh pakai caption untuk memperjelas item yang buram).',
+        'Semua yang lebih dari satu transaksi selalu ditinjau dulu sebelum disimpan.',
         '',
-        '<b>Ringkasan &amp; riwayat</b>',
-        '/ringkasan — ringkasan bulan ini',
+        '<b>📊 Ringkasan</b>',
+        '/hariini — pengeluaran hari ini',
+        '/minggu — 7 hari terakhir',
+        '/ringkasan — anggaran bulan ini',
         '/saldo — sisa anggaran per pilar',
-        '/riwayat — 5 transaksi terakhir',
         '/tahunan — ringkasan tahun berjalan',
+        '/statistik — rata-rata harian &amp; kategori teratas',
         '',
-        '<b>Target &amp; kekayaan</b>',
+        '<b>🔎 Riwayat</b>',
+        '/riwayat — 5 transaksi terakhir',
+        '/cari &lt;kata&gt; — cari transaksi, mis. <code>/cari kopi</code>',
+        '/undo — batalkan pencatatan terakhir',
+        '',
+        '<b>🎯 Target &amp; kekayaan</b>',
         '/target — target tabungan &amp; progres',
         '/setor — setor dana ke target tabungan',
         '/kekayaan — kekayaan bersih terkini',
         '',
-        '<b>Lainnya</b>',
+        '<b>⚙️ Lainnya</b>',
         '/kategori — daftar kategori aktif',
         '/rutin — transaksi rutin aktif',
         '/wishlist — wishlist &amp; kelayakan beli',
-        '/batal — batalkan konfirmasi yang tertunda',
+        '/batal — batalkan tinjauan yang tertunda',
         '/putuskan — putuskan tautan akun ini',
       ].join('\n'),
     ),
@@ -391,6 +401,71 @@ export const replies = {
   prefsInvalid: (field: string): BotReply =>
     reply(
       `🤔 Tidak paham "<b>${escapeHtml(field)}</b>". Ketik <code>/atur</code> untuk melihat daftar pengaturan yang tersedia.`,
+    ),
+
+  // ─── /hariini, /minggu, /cari, /undo, /statistik ───────────────
+  // Amounts go through `idr()` (NBSP stripped) like every other chat reply, not the
+  // raw `formatIDR` — chat clients render the plain space and the tests expect it.
+
+  periodSummary: (
+    title: string,
+    rows: { name: string; amount: number }[],
+    total: number,
+    count: number,
+  ): BotReply => {
+    if (count === 0) return reply(`${title}\n\nBelum ada transaksi tercatat di periode ini.`)
+    const width = Math.max(...rows.map((r) => idr(r.amount).length))
+    const lines = rows.map((r) => `${escapeHtml(r.name)}  <code>${idr(r.amount).padStart(width, ' ')}</code>`)
+    return reply(
+      [title, '', ...lines, '────────────────', `<b>Total  ${idr(total)}</b>`, '', `<i>${count} transaksi</i>`].join('\n'),
+    )
+  },
+
+  searchNeedsKeyword: (): BotReply => reply('🔎 Sertakan kata kuncinya, mis. <code>/cari kopi</code>.'),
+
+  searchEmpty: (keyword: string): BotReply =>
+    reply(`🔎 Tidak ada transaksi yang cocok dengan "<b>${escapeHtml(keyword)}</b>".`),
+
+  searchResults: (
+    keyword: string,
+    rows: { amount: number; categoryName: string; description: string; date: Date }[],
+    tz: string,
+  ): BotReply =>
+    reply(
+      [
+        `🔎 <b>Hasil untuk "${escapeHtml(keyword)}"</b>`,
+        '',
+        ...rows.map(
+          (r) =>
+            `<b>${idr(r.amount)}</b> · ${escapeHtml(r.categoryName)}\n    <i>${escapeHtml(r.description)}</i> · ${formatDateTime(r.date, tz)}`,
+        ),
+      ].join('\n'),
+    ),
+
+  undone: (count: number): BotReply =>
+    reply(`↩️ <b>${count} transaksi dibatalkan</b> dan dihapus dari catatanmu.`),
+
+  nothingToUndo: (): BotReply =>
+    reply(
+      'Tidak ada pencatatan terakhir yang bisa dibatalkan. <code>/undo</code> hanya membatalkan satu pencatatan terakhir dari bot.',
+    ),
+
+  stats: (
+    monthLabel: string,
+    dailyAverage: number,
+    projectedMonthEnd: number,
+    topCategories: { name: string; amount: number }[],
+  ): BotReply =>
+    reply(
+      [
+        `📈 <b>Statistik ${monthLabel}</b>`,
+        '',
+        `Rata-rata harian    <code>${idr(dailyAverage)}</code>`,
+        `Proyeksi akhir bulan <code>${idr(projectedMonthEnd)}</code>`,
+        '',
+        '<b>Kategori teratas</b>',
+        ...topCategories.map((c, i) => `${i + 1}. ${escapeHtml(c.name)} — ${idr(c.amount)}`),
+      ].join('\n'),
     ),
 
   // ─── Kartu tinjauan ────────────────────────────────────────────

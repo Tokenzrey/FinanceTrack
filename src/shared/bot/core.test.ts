@@ -35,6 +35,12 @@ const findRecurringRules = vi.fn()
 const skipRecurringOccurrence = vi.fn()
 const findWishlist = vi.fn()
 const getFinancialContextAdmin = vi.fn()
+const getUserTimezone = vi.fn()
+const getTransactionsBetween = vi.fn()
+const searchTransactions = vi.fn()
+const getLastBatch = vi.fn()
+const deleteTransactions = vi.fn()
+const clearLastBatch = vi.fn()
 
 vi.mock('./admin-data', () => ({
   findLinkByExternalId: (...args: unknown[]) => findLinkByExternalId(...args),
@@ -59,9 +65,12 @@ vi.mock('./admin-data', () => ({
   skipRecurringOccurrence: (...args: unknown[]) => skipRecurringOccurrence(...args),
   findWishlist: (...args: unknown[]) => findWishlist(...args),
   getFinancialContextAdmin: (...args: unknown[]) => getFinancialContextAdmin(...args),
-  // `transactionRecorded` stamps the reply in the user's zone; read-command replies
-  // read the tz here. No test asserts on the stamp itself.
-  getUserTimezone: async () => 'Asia/Jakarta',
+  getUserTimezone: (...args: unknown[]) => getUserTimezone(...args),
+  getTransactionsBetween: (...args: unknown[]) => getTransactionsBetween(...args),
+  searchTransactions: (...args: unknown[]) => searchTransactions(...args),
+  getLastBatch: (...args: unknown[]) => getLastBatch(...args),
+  deleteTransactions: (...args: unknown[]) => deleteTransactions(...args),
+  clearLastBatch: (...args: unknown[]) => clearLastBatch(...args),
   // Gemini quota ledger — core.ts wires these into the router on every call. No test
   // here drives a real router call, so plain stubs suffice.
   getModelHealth: async () => ({ dayKey: '', models: {} }),
@@ -213,6 +222,7 @@ beforeEach(() => {
   getMonthlyBudget.mockResolvedValue(null)
   isBudgetClosedAdmin.mockReturnValue(false)
   findCategories.mockResolvedValue([mockCategory()])
+  getUserTimezone.mockResolvedValue('Asia/Jakarta')
   handleTextTransaction.mockResolvedValue({ text: 'stub: text transaction' })
   handlePhoto.mockResolvedValue({ text: 'stub: photo' })
 })
@@ -529,5 +539,76 @@ describe('handleIncoming — unlink', () => {
     const reply = await handleIncoming(textMsg('unlink:cancel'))
     expect(deleteLink).not.toHaveBeenCalled()
     expect(reply.text).toContain('Dibatalkan')
+  })
+})
+
+// ─── /undo, /cari, /hariini (Task 11) ───────────────────────────
+
+describe('handleIncoming — /undo', () => {
+  beforeEach(() => {
+    findLinkByExternalId.mockResolvedValue(LINK)
+    matchReadCommand.mockReturnValue('undo')
+  })
+
+  it('deletes the transactions from the last commit and clears the memory', async () => {
+    getLastBatch.mockResolvedValue({ transactionIds: ['t1', 't2'], createdAt: {} })
+    deleteTransactions.mockResolvedValue(2)
+
+    const reply = await handleIncoming(textMsg('/undo'))
+
+    expect(deleteTransactions).toHaveBeenCalledWith('user-1', ['t1', 't2'])
+    expect(clearLastBatch).toHaveBeenCalledWith('user-1')
+    expect(reply.text).toContain('2 transaksi dibatalkan')
+  })
+
+  it('says so plainly when there is nothing to undo', async () => {
+    getLastBatch.mockResolvedValue(null)
+    const reply = await handleIncoming(textMsg('/undo'))
+    expect(deleteTransactions).not.toHaveBeenCalled()
+    expect(reply.text).toContain('Tidak ada')
+  })
+})
+
+describe('handleIncoming — /cari', () => {
+  beforeEach(() => {
+    findLinkByExternalId.mockResolvedValue(LINK)
+  })
+
+  it('searches by keyword and lists what it found', async () => {
+    searchTransactions.mockResolvedValue([
+      { id: 't1', amount: 35000, categoryId: 'cat-food', type: 'expense', description: 'kopi susu', date: { toDate: () => new Date() } },
+    ])
+    const reply = await handleIncoming(textMsg('/cari kopi'))
+    expect(searchTransactions).toHaveBeenCalledWith('user-1', 'kopi', expect.any(Number))
+    expect(reply.text).toContain('kopi susu')
+  })
+
+  it('asks for a keyword when /cari is sent bare', async () => {
+    matchReadCommand.mockReturnValue('search')
+    const reply = await handleIncoming(textMsg('/cari'))
+    expect(searchTransactions).not.toHaveBeenCalled()
+    expect(reply.text).toContain('kata kunci')
+  })
+
+  it('reports an empty result rather than an empty list', async () => {
+    searchTransactions.mockResolvedValue([])
+    const reply = await handleIncoming(textMsg('/cari xyz'))
+    expect(reply.text).toContain('Tidak ada transaksi')
+  })
+})
+
+describe('handleIncoming — /hariini', () => {
+  beforeEach(() => {
+    findLinkByExternalId.mockResolvedValue(LINK)
+    matchReadCommand.mockReturnValue('today_summary')
+  })
+
+  it('sums only the transactions inside the user local day', async () => {
+    getUserTimezone.mockResolvedValue('Asia/Jakarta')
+    getTransactionsBetween.mockResolvedValue([
+      { id: 't1', amount: 35000, type: 'expense', categoryId: 'cat-food', date: { toDate: () => new Date() } },
+    ])
+    const reply = await handleIncoming(textMsg('/hariini'))
+    expect(reply.text).toContain('Rp 35.000')
   })
 })

@@ -17,6 +17,12 @@ const READ_COMMANDS: { pattern: RegExp; intent: BotIntent }[] = [
   { pattern: /^\/?(kekayaan|networth)$/i, intent: 'net_worth' },
   { pattern: /^\/?rutin$/i, intent: 'list_recurring' },
   { pattern: /^\/?wishlist$/i, intent: 'list_wishlist' },
+  { pattern: /^\/?(hariini|hari ini|today)$/i, intent: 'today_summary' },
+  { pattern: /^\/?(minggu|mingguan|pekan|week)$/i, intent: 'week_summary' },
+  { pattern: /^\/?(statistik|stats)$/i, intent: 'stats' },
+  { pattern: /^\/?(undo|urungkan)$/i, intent: 'undo' },
+  // Bare `/cari` only — with an argument it is handled before matchReadCommand runs.
+  { pattern: /^\/?(cari|search)$/i, intent: 'search' },
   { pattern: /^\/?(batal|cancel)$/i, intent: 'cancel_pending' },
   { pattern: /^\/?(bantuan|help|start)$/i, intent: 'help' },
   { pattern: /^\/?putuskan$/i, intent: 'unlink' },
