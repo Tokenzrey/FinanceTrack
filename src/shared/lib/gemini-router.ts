@@ -54,23 +54,26 @@ const OVERLOAD_COOLDOWN_MS = 60_000
 export const DEFAULT_ROSTER: Record<GeminiTask, ModelSpec[]> = {
   // 6 x 20/day = 120 receipt reads. Only this tier accepts inlineData images.
   vision: [
-    { id: 'gemini-3.5-flash', rpd: 20, rpm: 5 },
     { id: 'gemini-3.8-flash', rpd: 20, rpm: 5 },
     { id: 'gemini-3.7-flash', rpd: 20, rpm: 5 },
     { id: 'gemini-3.6-flash', rpd: 20, rpm: 5 },
-    { id: 'gemini-3-flash', rpd: 20, rpm: 5 },
+    { id: 'gemini-3.5-flash', rpd: 20, rpm: 5 },
+    { id: 'gemini-3.1-pro-preview', rpd: 20, rpm: 5 },
+    { id: 'gemini-3-flash-preview', rpd: 20, rpm: 5 },
+    { id: 'gemini-2.5-pro', rpd: 20, rpm: 5 },
     { id: 'gemini-2.5-flash', rpd: 20, rpm: 5 },
-    // `-latest` aliases are Google-maintained; last resort if every pinned id is wrong.
     { id: 'gemini-flash-latest', rpd: 20, rpm: 5 },
   ],
+
   // 2 x 500/day, and lower latency than flash — text work belongs here, not in the
   // scarce vision pool. The 20/day lite model trails as a last resort.
   text: [
     { id: 'gemini-3.5-flash-lite', rpd: 500, rpm: 15 },
     { id: 'gemini-3.1-flash-lite', rpd: 500, rpm: 15 },
-    { id: 'gemini-2.5-flash-lite', rpd: 20, rpm: 10 },
-    // `-latest` aliases are Google-maintained; last resort if every pinned id is wrong.
-    { id: 'gemini-flash-lite-latest', rpd: 20, rpm: 10 },
+    { id: 'gemini-3.1-flash-lite-preview', rpd: 500, rpm: 15 },
+    { id: 'gemini-2.5-flash-lite', rpd: 500, rpm: 10 },
+    { id: 'gemini-flash-lite-latest', rpd: 500, rpm: 10 },
+    { id: 'gemini-pro-latest', rpd: 100, rpm: 10 },
   ],
 }
 
