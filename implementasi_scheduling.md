@@ -313,7 +313,7 @@ export interface CreateReminderDTO {
   message: string
   remindAt: Date
   recurrence?: { freq: ReminderFreq; until?: Date | null } | null
-  source: EntrySource
+  source: EntrySource | 'auto'   // 'auto' = a reminder the cron created (rolled recurrence, or a task's auto reminder)
 }
 
 /** Default lead time (minutes before `dueAt`) for a task's automatic reminder.
