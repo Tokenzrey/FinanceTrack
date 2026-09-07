@@ -5,10 +5,13 @@ import { formatDateTime } from '@/shared/lib/format'
 import {
   agenda,
   digest,
+  noRecentReminder,
   noteList,
   noteSaved,
   noteSearchResult,
   planFallbackError,
+  reminderGone,
+  reminderMarkedDone,
   reminderNeedsTime,
   reminderPush,
   reminderSet,
@@ -202,5 +205,11 @@ describe('replies-productivity', () => {
 
   it('taskRefNotFound mentions the bad reference number', () => {
     expect(taskRefNotFound(7).text).toContain('7')
+  })
+
+  it('snooze/mark-done fallbacks are non-empty Bahasa Indonesia lines', () => {
+    expect(noRecentReminder().text).toMatch(/pengingat/i)
+    expect(reminderGone().text).toMatch(/tidak ada/i)
+    expect(reminderMarkedDone().text).toMatch(/selesai/i)
   })
 })

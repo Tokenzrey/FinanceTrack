@@ -18,6 +18,10 @@ const {
   searchNotes,
   reapStuckSending,
   getPlannerPrefs,
+  getPlannerLastPush,
+  getReminderById,
+  listRemindersForDay,
+  deleteTask,
 } = await import('./admin-data-productivity')
 
 beforeEach(() => {
@@ -442,5 +446,82 @@ describe('getPlannerPrefs', () => {
     expect(merged).toEqual({ ...DEFAULT_PLANNER_PREFS, digestHour: 9 })
     expect(merged.taskLeadsMinutes).toEqual(DEFAULT_PLANNER_PREFS.taskLeadsMinutes)
     expect(merged.digestEnabled).toBe(DEFAULT_PLANNER_PREFS.digestEnabled)
+  })
+})
+
+// ─── getPlannerLastPush ───────────────────────────────────────
+
+describe('getPlannerLastPush', () => {
+  it('returns the stored reminderId, or null when the doc is missing', async () => {
+    getAdminDb.mockReturnValue({
+      doc: vi.fn().mockReturnValue({
+        get: vi.fn().mockResolvedValue({ exists: true, data: () => ({ reminderId: 'rem-9' }) }),
+      }),
+    })
+    expect(await getPlannerLastPush('u1')).toBe('rem-9')
+
+    getAdminDb.mockReturnValue({
+      doc: vi.fn().mockReturnValue({ get: vi.fn().mockResolvedValue({ exists: false }) }),
+    })
+    expect(await getPlannerLastPush('u1')).toBeNull()
+  })
+})
+
+// ─── getReminderById ──────────────────────────────────────────
+
+describe('getReminderById', () => {
+  it('hydrates the doc with its id, or returns null when it does not exist', async () => {
+    const doc = vi.fn().mockReturnValue({
+      get: vi.fn().mockResolvedValue({ exists: true, id: 'rem-1', data: () => ({ message: 'Bayar listrik', kind: 'standalone' }) }),
+    })
+    getAdminDb.mockReturnValue({ doc })
+    const r = await getReminderById('u1', 'rem-1')
+    expect(doc).toHaveBeenCalledWith('users/u1/reminders/rem-1')
+    expect(r).toMatchObject({ id: 'rem-1', message: 'Bayar listrik' })
+
+    getAdminDb.mockReturnValue({
+      doc: vi.fn().mockReturnValue({ get: vi.fn().mockResolvedValue({ exists: false }) }),
+    })
+    expect(await getReminderById('u1', 'nope')).toBeNull()
+  })
+})
+
+// ─── listRemindersForDay ──────────────────────────────────────
+
+describe('listRemindersForDay', () => {
+  it('bounds remindAt to the local-day window and returns results oldest-first', async () => {
+    const now = new Date('2026-09-08T05:00:00Z') // 12:00 in Asia/Jakarta (UTC+7)
+    const fromMs = Date.parse('2026-09-07T17:00:00Z')
+    const ts = (iso: string) => Timestamp.fromDate(new Date(iso))
+    const docs = [
+      mkDoc('late', { remindAt: ts('2026-09-08T14:00:00Z') }),
+      mkDoc('before', { remindAt: ts('2026-09-07T16:00:00Z') }),
+      mkDoc('early', { remindAt: ts('2026-09-08T02:00:00Z') }),
+    ]
+    const base = fakeQuery(docs)
+    const where = vi.fn((f: string, op: string, v: unknown) => base.where(f, op, v))
+    getAdminDb.mockReturnValue({ collection: vi.fn().mockReturnValue({ where }) })
+
+    const out = await listRemindersForDay('u1', now, 'Asia/Jakarta')
+
+    expect(where.mock.calls[0][0]).toBe('remindAt')
+    expect(where.mock.calls[0][1]).toBe('>=')
+    expect((where.mock.calls[0][2] as { toMillis: () => number }).toMillis()).toBe(fromMs)
+    expect(out.map((r) => r.id)).toEqual(['early', 'late'])
+  })
+})
+
+// ─── deleteTask ──────────────────────────────────────────────
+
+describe('deleteTask', () => {
+  it('deletes the task doc at the expected path', async () => {
+    const del = vi.fn().mockResolvedValue(undefined)
+    const doc = vi.fn().mockReturnValue({ delete: del })
+    getAdminDb.mockReturnValue({ doc })
+
+    await deleteTask('u1', 't1')
+
+    expect(doc).toHaveBeenCalledWith('users/u1/tasks/t1')
+    expect(del).toHaveBeenCalledTimes(1)
   })
 })

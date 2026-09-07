@@ -136,6 +136,21 @@ export function snoozed(r: Reminder, tz: string): BotReply {
   return reply(`😴 Oke, diingatkan lagi <b>${formatDateTime(r.remindAt.toDate(), tz)}</b>.`)
 }
 
+/** `/tunda N` with no button context and nothing pushed yet. */
+export function noRecentReminder(): BotReply {
+  return reply('🤔 Belum ada pengingat terakhir untuk ditunda.')
+}
+
+/** A `pr:done:<id>` / `pr:snooze:<id>` tap whose reminder has since been deleted. */
+export function reminderGone(): BotReply {
+  return reply('👍 Pengingat itu sudah tidak ada.')
+}
+
+/** `pr:done:<id>` on a standalone reminder (nothing to mark done beyond the reminder). */
+export function reminderMarkedDone(): BotReply {
+  return reply('✅ Pengingat ditandai selesai.')
+}
+
 /** Reminder body + action buttons for the cron send path (Task 10). Not a `BotReply`:
  *  `buttons` carry raw callback tokens the flow router parses (`pr:done:<id>` etc). */
 export function reminderPush(

@@ -147,6 +147,11 @@ export async function getTaskByIndex(
   return tasks[index1 - 1] ?? null
 }
 
+/** Hard-delete a task doc. Reminders are cancelled separately by the caller. */
+export async function deleteTask(userId: string, taskId: string): Promise<void> {
+  await getAdminDb().doc(`users/${userId}/tasks/${taskId}`).delete()
+}
+
 // ─── Notes ────────────────────────────────────────────────────
 
 export async function createNote(userId: string, dto: CreateNoteDTO): Promise<Note> {
@@ -279,6 +284,32 @@ export async function upsertTaskReminder(
   }
 
   await batch.commit()
+}
+
+/** One reminder by id, or `null` if it no longer exists. Used by the button-tap paths
+ *  (`mark_done_token`, `snooze` with an explicit id). */
+export async function getReminderById(userId: string, reminderId: string): Promise<Reminder | null> {
+  const snap = await getAdminDb().doc(`users/${userId}/reminders/${reminderId}`).get()
+  return snap.exists ? ({ id: snap.id, ...snap.data() } as unknown as Reminder) : null
+}
+
+/** Reminders whose `remindAt` falls inside `now`'s local day in `tz` — mirrors
+ *  `listTasks('today')`. Used by the `agenda` command. */
+export async function listRemindersForDay(
+  userId: string,
+  now: Date,
+  tz: string,
+): Promise<Reminder[]> {
+  const from = localDayStart(now, tz)
+  const to = new Date(from.getTime() + DAY_MS)
+  const snap = await getAdminDb()
+    .collection(`users/${userId}/reminders`)
+    .where('remindAt', '>=', Timestamp.fromDate(from))
+    .where('remindAt', '<', Timestamp.fromDate(to))
+    .get()
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as unknown as Reminder)
+    .sort((a, b) => a.remindAt.toMillis() - b.remindAt.toMillis())
 }
 
 export async function cancelRemindersForTask(userId: string, taskId: string): Promise<void> {
@@ -456,4 +487,13 @@ export async function getPlannerPrefs(userId: string): Promise<PlannerPrefs> {
   const snap = await getAdminDb().doc(`users/${userId}/meta/plannerPrefs`).get()
   if (!snap.exists) return DEFAULT_PLANNER_PREFS
   return { ...DEFAULT_PLANNER_PREFS, ...(snap.data() as Partial<PlannerPrefs>) }
+}
+
+/** The id of the last reminder the cron push delivered to this user
+ *  (`users/{uid}/meta/plannerLastPush`, written by Task 10). `null` when nothing has
+ *  been pushed yet — used to resolve `/tunda N` with no explicit id. */
+export async function getPlannerLastPush(userId: string): Promise<string | null> {
+  const snap = await getAdminDb().doc(`users/${userId}/meta/plannerLastPush`).get()
+  const id = snap.exists ? (snap.data()?.reminderId as string | undefined) : undefined
+  return id ?? null
 }
