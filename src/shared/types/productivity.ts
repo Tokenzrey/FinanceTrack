@@ -31,7 +31,7 @@ export interface Note {
 
 export interface ReminderRecurrence {
   freq: ReminderFreq
-  /** 0..6 (0 = Minggu, konvensi Date.getUTCDay). Wajib untuk 'weekly', diabaikan lainnya. */
+  /** 0..6 (0 = Sunday, Date.getUTCDay convention). Required for 'weekly', ignored otherwise. */
   weekday?: number
   until: Timestamp | null
 }
@@ -54,7 +54,7 @@ export interface Reminder {
   updatedAt: Timestamp
 }
 
-// ─── DTO (input dari web/bot; tanpa id/timestamp server) ───
+// ─── DTOs (input from web/bot; no server id/timestamps) ───
 export interface CreateTaskDTO {
   title: string
   notes?: string
@@ -82,14 +82,14 @@ export interface CreateReminderDTO {
   source: EntrySource
 }
 
-/** Default lead time (menit sebelum `dueAt`) untuk reminder otomatis sebuah task.
- *  Bisa dioverride user di Settings; disimpan di `users/{uid}/meta/plannerPrefs`. */
+/** Default lead time (minutes before dueAt) for a task's automatic reminder.
+ *  User can override in Settings; stored at users/{uid}/meta/plannerPrefs. */
 export interface PlannerPrefs {
-  /** Menit sebelum jatuh tempo. `[0]` = "tepat waktu". Default `[0, 60]`. */
+  /** Minutes before the due time. [0] = "on time". Default [0, 60]. */
   taskLeadsMinutes: number[]
-  /** Jam lokal (0..23) rekap pagi dikirim. Default 7. */
+  /** Local hour (0..23) the morning digest is sent. Default 7. */
   digestHour: number
-  /** Rekap pagi aktif. Default true. */
+  /** Morning digest enabled. Default true. */
   digestEnabled: boolean
 }
 export const DEFAULT_PLANNER_PREFS: PlannerPrefs = {
