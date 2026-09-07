@@ -24,13 +24,13 @@ export type ProductivityCommand =
   | { kind: 'note_list' }
   | { kind: 'reminder_add'; message: string; when: ParsedWhen }
   | { kind: 'agenda' }
-  | { kind: 'snooze'; ref: number | null; minutes: number }
+  | { kind: 'snooze'; ref: number | null; reminderId: string | null; minutes: number }
   | { kind: 'mark_done_token'; reminderId: string }
   | { kind: 'none' }
 
 export const PRODUCTIVITY_TOKEN_PREFIX = 'pr:'
 
-const NONE: ProductivityCommand = { kind: 'none' }
+const NONE: ProductivityCommand = Object.freeze({ kind: 'none' as const })
 
 type Verb = 'task' | 'done' | 'rm' | 'agenda' | 'note' | 'reminder' | 'snooze'
 
@@ -153,7 +153,9 @@ export function parseProductivityCommand(
     case 'reminder':
       return handleReminder(rest, now, timeZone)
     case 'snooze':
-      return RE_INT.test(rest) ? { kind: 'snooze', ref: null, minutes: Number(rest) } : NONE
+      return RE_INT.test(rest)
+        ? { kind: 'snooze', ref: null, reminderId: null, minutes: Number(rest) }
+        : NONE
   }
 }
 
@@ -164,8 +166,8 @@ export function parseProductivityToken(raw: string): ProductivityCommand {
   if (parts.length === 3 && parts[1] === 'done' && parts[2]) {
     return { kind: 'mark_done_token', reminderId: parts[2] }
   }
-  if (parts.length === 4 && parts[1] === 'snooze' && RE_INT.test(parts[3])) {
-    return { kind: 'snooze', ref: null, minutes: Number(parts[3]) }
+  if (parts.length === 4 && parts[1] === 'snooze' && parts[2] && RE_INT.test(parts[3])) {
+    return { kind: 'snooze', ref: null, reminderId: parts[2], minutes: Number(parts[3]) }
   }
   return NONE
 }

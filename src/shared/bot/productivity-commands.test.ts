@@ -43,7 +43,7 @@ describe('parseProductivityCommand', () => {
 describe('parseProductivityToken', () => {
   it('pr:snooze:<id>:15', () => {
     expect(parseProductivityToken('pr:snooze:abc123:15'))
-      .toEqual({ kind: 'snooze', ref: null, minutes: 15 })
+      .toEqual({ kind: 'snooze', ref: null, reminderId: 'abc123', minutes: 15 })
   })
   it('pr:done:<id>', () => {
     expect(parseProductivityToken('pr:done:abc123'))
