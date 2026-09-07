@@ -468,28 +468,36 @@ export function normalizeTags(raw: string[]): string[] {
 
 - [ ] **Step 4: Add Firestore rules**
 
-Di `firestore.rules`, di dalam `match /users/{userId}` (yang sudah `allow read, write: if request.auth.uid == userId` untuk subtree umum), tambah blok eksplisit supaya field internal reminder tidak bisa dipalsukan client:
+Di `firestore.rules`, blok eksplisit `reminders` HARUS ditaruh **di dalam** `match /users/{userId}` (bukan di root — kalau di root `userId` unbound dan aturannya mati), dan aturan lebar `match /{document=**}` juga di-nest di dalam `match /users/{userId}` dengan tambahan klausa `!(document[0] == 'reminders')`. Rules v2 meng-OR **semua** `allow` yang match, jadi tanpa mengecualikan subtree `reminders` di aturan lebar, grant lebar itu tetap menimpa field-lock di blok eksplisit. `tasks`/`notes` tidak perlu blok sendiri — aturan lebar sudah memberi owner CRUD penuh dan keduanya tidak masuk daftar exclusion.
 
 ```
-match /reminders/{reminderId} {
-  allow read: if request.auth.uid == userId;
-  allow create: if request.auth.uid == userId
-                && request.resource.data.status == 'pending'
-                && request.resource.data.attempts == 0
-                && request.resource.data.ownerId == userId;
-  // client may change message / remindAt / recurrence / cancel; MUST NOT touch machine fields
-  allow update: if request.auth.uid == userId
-                && !request.resource.data.diff(resource.data).affectedKeys()
-                     .hasAny(['attempts', 'nextAttemptAt', 'lastError', 'sentAt', 'ownerId'])
-                && (request.resource.data.status == resource.data.status
-                    || request.resource.data.status == 'cancelled');
-  allow delete: if request.auth.uid == userId;
-}
-match /tasks/{taskId} {
-  allow read, write: if request.auth.uid == userId;
-}
-match /notes/{noteId} {
-  allow read, write: if request.auth.uid == userId;
+match /users/{userId} {
+  match /{document=**} {
+    allow read: if request.auth != null && request.auth.uid == userId;
+    allow write: if request.auth != null
+                 && request.auth.uid == userId
+                 && !(document.size() == 2 && document[0] == 'meta'
+                      && (document[1] == 'botLinks' || document[1] == 'botPending'
+                          || document[1] == 'botLastBatch' || document[1] == 'botPrefs'
+                          || document[1] == 'botModelDay'))
+                 && !(document[0] == 'bot_receipt_cache' || document[0] == 'bot_parse_cache')
+                 && !(document[0] == 'reminders'); // fenced subtree — blok di bawah satu-satunya otoritas
+  }
+
+  match /reminders/{reminderId} {
+    allow read: if request.auth != null && request.auth.uid == userId;
+    allow create: if request.auth != null && request.auth.uid == userId
+                  && request.resource.data.status == 'pending'
+                  && request.resource.data.attempts == 0
+                  && request.resource.data.ownerId == userId;
+    // client may change message / remindAt / recurrence / cancel; MUST NOT touch machine fields
+    allow update: if request.auth != null && request.auth.uid == userId
+                  && !request.resource.data.diff(resource.data).affectedKeys()
+                       .hasAny(['attempts', 'nextAttemptAt', 'lastError', 'sentAt', 'ownerId'])
+                  && (request.resource.data.status == resource.data.status
+                      || request.resource.data.status == 'cancelled');
+    allow delete: if request.auth != null && request.auth.uid == userId;
+  }
 }
 ```
 
