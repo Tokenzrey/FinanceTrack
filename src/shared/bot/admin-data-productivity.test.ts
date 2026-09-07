@@ -19,6 +19,7 @@ const {
   reapStuckSending,
   getPlannerPrefs,
   getPlannerLastPush,
+  setPlannerLastPush,
   getReminderById,
   listRemindersForDay,
   deleteTask,
@@ -464,6 +465,23 @@ describe('getPlannerLastPush', () => {
       doc: vi.fn().mockReturnValue({ get: vi.fn().mockResolvedValue({ exists: false }) }),
     })
     expect(await getPlannerLastPush('u1')).toBeNull()
+  })
+})
+
+// ─── setPlannerLastPush ───────────────────────────────────────
+
+describe('setPlannerLastPush', () => {
+  it('merges the reminderId + a server timestamp into the meta doc', async () => {
+    const set = vi.fn().mockResolvedValue(undefined)
+    const doc = vi.fn().mockReturnValue({ set })
+    getAdminDb.mockReturnValue({ doc })
+
+    await setPlannerLastPush('u1', 'rem-7')
+
+    expect(doc).toHaveBeenCalledWith('users/u1/meta/plannerLastPush')
+    const [payload, opts] = set.mock.calls[0]
+    expect((payload as Record<string, unknown>).reminderId).toBe('rem-7')
+    expect(opts).toEqual({ merge: true })
   })
 })
 

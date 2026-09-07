@@ -497,3 +497,11 @@ export async function getPlannerLastPush(userId: string): Promise<string | null>
   const id = snap.exists ? (snap.data()?.reminderId as string | undefined) : undefined
   return id ?? null
 }
+
+/** Record the reminder the cron path just pushed to this user, so an id-less `/tunda N`
+ *  can resolve it. Written after a successful send by `/api/cron/reminders`. */
+export async function setPlannerLastPush(userId: string, reminderId: string): Promise<void> {
+  await getAdminDb()
+    .doc(`users/${userId}/meta/plannerLastPush`)
+    .set(stripUndefined({ reminderId, at: FieldValue.serverTimestamp() }), { merge: true })
+}

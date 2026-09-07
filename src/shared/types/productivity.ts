@@ -79,7 +79,8 @@ export interface CreateReminderDTO {
   message: string
   remindAt: Date
   recurrence?: { freq: ReminderFreq; until?: Date | null } | null
-  source: EntrySource
+  /** `'auto'` = system-generated (recurrence roll-forward, task lead reminders). */
+  source: EntrySource | 'auto'
 }
 
 /** Default lead time (minutes before dueAt) for a task's automatic reminder.
