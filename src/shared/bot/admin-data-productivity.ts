@@ -344,7 +344,7 @@ export async function claimReminder(ref: DocumentReference): Promise<Reminder | 
     const r = snap.data() as Reminder
     if (r.status !== 'pending' && r.status !== 'failed') return null
     if (r.status === 'failed' && r.nextAttemptAt && r.nextAttemptAt.toMillis() > Date.now()) return null
-    tx.update(ref, { status: 'sending', attempts: r.attempts + 1, updatedAt: Timestamp.now() })
+    tx.update(ref, stripUndefined({ status: 'sending', attempts: r.attempts + 1, updatedAt: Timestamp.now() }))
     return { ...r, status: 'sending', attempts: r.attempts + 1 } as Reminder
   })
 }
@@ -422,7 +422,7 @@ export async function usersDueForDigest(
 export async function markDigestSent(userId: string, dayKey: string): Promise<void> {
   await getAdminDb()
     .doc(`users/${userId}/meta/productivityDigest`)
-    .set({ lastSentDayKey: dayKey }, { merge: true })
+    .set(stripUndefined({ lastSentDayKey: dayKey }), { merge: true })
 }
 
 export async function recordCronRun(row: {

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Timestamp } from 'firebase-admin/firestore'
 import { DEFAULT_PLANNER_PREFS } from '@/shared/types/productivity'
 import type { Task } from '@/shared/types/productivity'
@@ -22,6 +22,10 @@ const {
 
 beforeEach(() => {
   vi.clearAllMocks()
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 // ─── Shared in-memory Firestore query fake ──────────────────────
@@ -146,6 +150,34 @@ describe('listTasks', () => {
 
     expect(where).toHaveBeenCalledWith('status', 'in', ['todo', 'doing'])
     expect(out.map((t) => t.id)).toEqual(['c', 'b', 'a'])
+  })
+
+  it("'today' bounds dueAt to [localMidnight, nextLocalMidnight) in the given tz", async () => {
+    // now = 12:00 on 2026-09-08 in Asia/Jakarta (UTC+7, no DST).
+    // → local day window is [2026-09-07T17:00Z, 2026-09-08T17:00Z).
+    vi.setSystemTime(new Date('2026-09-08T05:00:00Z'))
+    const fromMs = Date.parse('2026-09-07T17:00:00Z')
+
+    const ts = (iso: string) => Timestamp.fromDate(new Date(iso))
+    const docs = [
+      mkDoc('before', { status: 'todo', dueAt: ts('2026-09-07T16:59:00Z'), createdAt: { toMillis: () => 1 } }),
+      mkDoc('at-open', { status: 'todo', dueAt: ts('2026-09-07T17:00:00Z'), createdAt: { toMillis: () => 1 } }),
+      mkDoc('midday', { status: 'done', dueAt: ts('2026-09-08T10:00:00Z'), createdAt: { toMillis: () => 1 } }),
+      mkDoc('at-close', { status: 'todo', dueAt: ts('2026-09-08T17:00:00Z'), createdAt: { toMillis: () => 1 } }),
+      mkDoc('after', { status: 'todo', dueAt: ts('2026-09-08T20:00:00Z'), createdAt: { toMillis: () => 1 } }),
+    ]
+    const base = fakeQuery(docs)
+    const where = vi.fn((f: string, op: string, v: unknown) => base.where(f, op, v))
+    getAdminDb.mockReturnValue({ collection: vi.fn().mockReturnValue({ where }) })
+
+    const out = await listTasks('u1', 'today', 'Asia/Jakarta')
+
+    // Boundary math: the first where() clause carries the local-midnight lower bound.
+    expect(where.mock.calls[0][0]).toBe('dueAt')
+    expect(where.mock.calls[0][1]).toBe('>=')
+    expect((where.mock.calls[0][2] as { toMillis: () => number }).toMillis()).toBe(fromMs)
+    // Half-open window applied end to end: 'at-open' kept, 'before'/'at-close'/'after' dropped.
+    expect(out.map((t) => t.id)).toEqual(['at-open', 'midday'])
   })
 })
 
