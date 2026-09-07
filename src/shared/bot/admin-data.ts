@@ -43,7 +43,7 @@ function linkDocId(platform: BotPlatform, externalId: string): string {
 /** Firestore rejects `undefined` field values — this app's client repositories strip
  *  them the same way (see `paths.ts`); duplicated here rather than imported so this
  *  module stays fully independent of the client Firestore SDK. */
-function stripUndefined<T extends Record<string, unknown>>(data: T): Partial<T> {
+export function stripUndefined<T extends Record<string, unknown>>(data: T): Partial<T> {
   return Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined)) as Partial<T>
 }
 
