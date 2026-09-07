@@ -108,6 +108,10 @@ export async function handleTextTransaction(userId: string, text: string): Promi
   const parseKey = hashParse(text, active.map((c) => c.id))
   let parsed = await adminData.getCachedParse(userId, parseKey)
   if (!parsed) {
+    // A real model call is about to happen — meter it against the per-user daily cap.
+    // L0 and cache hits above never reach here, so they are never charged.
+    const n = await adminData.bumpUserModelCalls(userId)
+    if (n > adminData.DAILY_USER_MODEL_CAP) return replies.dailyAiLimit()
     // L1 — text tier (flash-lite): 500/day per model, and lower latency than flash.
     parsed = await parseTransactionBatch(text, active)
     // A fallback line means the model never actually answered; caching it would pin
@@ -159,7 +163,7 @@ async function extractFresh(
     )
     return { ok: true, result }
   } catch (error) {
-    console.error('bot readReceipt error:', error)
+    console.error('bot readReceipt error:', error instanceof Error ? error.message : error)
     return {
       ok: false,
       reply: isAiQuotaOrOverloadError(error) ? replies.aiUnavailable() : replies.genericError(),
@@ -200,6 +204,10 @@ export async function handlePhoto(
       await adminData.saveCachedReceipt(userId, imageKey, cached.result, uploaded)
     }
   } else {
+    // A real vision call is about to happen — meter it against the per-user daily cap.
+    // A cache hit (the `if (cached)` branch above) never reaches here, so it is free.
+    const n = await adminData.bumpUserModelCalls(userId)
+    if (n > adminData.DAILY_USER_MODEL_CAP) return replies.dailyAiLimit()
     // The Drive upload never depended on the extraction — it only needs the bytes,
     // already in hand. Running them in series wasted 2-5s on every receipt. Deliberate:
     // if the read then fails, the photo is already on Drive — acceptable.

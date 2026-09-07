@@ -78,7 +78,7 @@ async function gowaPost(path: string, body: Record<string, unknown>): Promise<vo
       body: JSON.stringify(body),
     })
   } catch (error) {
-    console.error(`whatsapp (gowa) ${path} error:`, error)
+    console.error(`whatsapp (gowa) ${path} error:`, error instanceof Error ? error.message : error)
   }
 }
 
@@ -105,7 +105,7 @@ async function sendMessage(chatId: string, reply: BotReply): Promise<string | nu
     const body = (await res.json()) as { results?: { message_id?: string } }
     return body.results?.message_id ?? null
   } catch (error) {
-    console.error('whatsapp (gowa) sendMessage error:', error)
+    console.error('whatsapp (gowa) sendMessage error:', error instanceof Error ? error.message : error)
     return null
   }
 }
@@ -124,7 +124,7 @@ async function editMessage(chatId: string, messageId: string, reply: BotReply): 
     })
     if (!res.ok) await sendMessage(chatId, reply)
   } catch (error) {
-    console.error('whatsapp (gowa) editMessage error:', error)
+    console.error('whatsapp (gowa) editMessage error:', error instanceof Error ? error.message : error)
     await sendMessage(chatId, reply)
   }
 }
@@ -145,7 +145,7 @@ async function sendDocument(chatId: string, doc: NonNullable<BotReply['document'
       body: form,
     })
   } catch (error) {
-    console.error('whatsapp (gowa) sendDocument error:', error)
+    console.error('whatsapp (gowa) sendDocument error:', error instanceof Error ? error.message : error)
   }
 }
 
@@ -200,7 +200,7 @@ async function processMessage(payload: GowaMessage): Promise<void> {
       await react(payload.id, payload.chat_id, '✅')
     }
   } catch (error) {
-    console.error('whatsapp (gowa) webhook message error:', error)
+    console.error('whatsapp (gowa) webhook message error:', error instanceof Error ? error.message : error)
     const errorReply: BotReply = { text: 'Ada masalah di sisi kami — coba lagi sebentar lagi.' }
     // Edit the "📸 Struk diterima…" placeholder into the error rather than leaving it
     // stranded above a fresh error bubble.
@@ -255,7 +255,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // fail-open: better a rare duplicate than a dropped message with no reply.
       shouldProcess = await claimInboundMessage('whatsapp', payload.id)
     } catch (error) {
-      console.error('whatsapp (gowa) claimInboundMessage error (processing anyway):', error)
+      console.error(
+        'whatsapp (gowa) claimInboundMessage error (processing anyway):',
+        error instanceof Error ? error.message : error,
+      )
     }
     if (shouldProcess) waitUntil(processMessage(payload))
   }

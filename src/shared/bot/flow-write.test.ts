@@ -17,8 +17,11 @@ const getCachedReceipt = vi.fn()
 const saveCachedReceipt = vi.fn()
 const getCachedParse = vi.fn()
 const saveCachedParse = vi.fn()
+const bumpUserModelCalls = vi.fn()
 
 vi.mock('./admin-data', () => ({
+  DAILY_USER_MODEL_CAP: 40,
+  bumpUserModelCalls: (...a: unknown[]) => bumpUserModelCalls(...a),
   findCategories: (...a: unknown[]) => findCategories(...a),
   getMonthlyBudget: (...a: unknown[]) => getMonthlyBudget(...a),
   isBudgetClosedAdmin: (...a: unknown[]) => isBudgetClosedAdmin(...a),
@@ -103,6 +106,7 @@ beforeEach(() => {
   saveCachedReceipt.mockResolvedValue(undefined)
   getCachedParse.mockResolvedValue(null)
   saveCachedParse.mockResolvedValue(undefined)
+  bumpUserModelCalls.mockResolvedValue(1)
 })
 
 describe('handleTextTransaction', () => {
@@ -238,6 +242,30 @@ describe('handleTextTransaction', () => {
     expect(createTransactionsBatch).not.toHaveBeenCalled()
     expect(setPending).toHaveBeenCalledTimes(1)
   })
+
+  it('stops before the L1 model call once the per-user daily AI cap is exceeded (W1)', async () => {
+    getScanHints.mockResolvedValue([])
+    bumpUserModelCalls.mockResolvedValue(41)
+    parseTransactionBatch.mockResolvedValue([parsed()])
+    const reply = await handleTextTransaction('u1', 'sesuatu yang baru 35rb')
+    expect(parseTransactionBatch).not.toHaveBeenCalled()
+    expect(createTransactionsBatch).not.toHaveBeenCalled()
+    expect(reply.text).toContain('Batas pemakaian AI harianmu')
+  })
+
+  it('never bumps the per-user AI counter on the L0 zero-model path', async () => {
+    getScanHints.mockResolvedValue([{ keyword: 'kopi', categoryId: 'c-food', frequency: 9, updatedAt: 0 }])
+    await handleTextTransaction('u1', 'kopi 20rb')
+    expect(bumpUserModelCalls).not.toHaveBeenCalled()
+  })
+
+  it('never bumps the per-user AI counter on a cached-parse hit', async () => {
+    getScanHints.mockResolvedValue([])
+    getCachedParse.mockResolvedValue([parsed()])
+    await handleTextTransaction('u1', 'makan siang 35rb')
+    expect(bumpUserModelCalls).not.toHaveBeenCalled()
+    expect(parseTransactionBatch).not.toHaveBeenCalled()
+  })
 })
 
 describe('handlePhoto', () => {
@@ -321,7 +349,17 @@ describe('handlePhoto', () => {
     getCachedReceipt.mockResolvedValue({ result: receiptResult() })
     const reply = await handlePhoto('u1', photo())
     expect(extractReceipt).not.toHaveBeenCalled()
+    expect(bumpUserModelCalls).not.toHaveBeenCalled()
     expect(reply.text).toContain('Tinjau')
+  })
+
+  it('stops before the vision call once the per-user daily AI cap is exceeded (W1)', async () => {
+    bumpUserModelCalls.mockResolvedValue(41)
+    extractReceipt.mockResolvedValue(receiptResult())
+    const reply = await handlePhoto('u1', photo())
+    expect(extractReceipt).not.toHaveBeenCalled()
+    expect(setPending).not.toHaveBeenCalled()
+    expect(reply.text).toContain('Batas pemakaian AI harianmu')
   })
 
   it('re-uses the cached Drive upload on a re-send instead of uploading again (T15)', async () => {

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { dayKeyInTz } from '@/shared/lib/format'
 
 const getAdminDb = vi.fn()
 vi.mock('@/shared/lib/firebase-admin', () => ({
@@ -107,6 +108,25 @@ describe('consumeLinkCode', () => {
     expect(codeDocFn).toHaveBeenCalledWith('ABCDEF') // trimmed + uppercased
     expect(txUpdate).toHaveBeenCalledTimes(1) // usedAt marked
     expect(txSet).toHaveBeenCalledTimes(2) // bot_links doc + user-readable mirror doc
+  })
+})
+
+describe('createLinkCode', () => {
+  it('retries past a simulated code collision (gRPC code 6), then succeeds with .create()', async () => {
+    const create = vi
+      .fn()
+      .mockRejectedValueOnce(Object.assign(new Error('ALREADY_EXISTS'), { code: 6 }))
+      .mockResolvedValueOnce(undefined)
+    const doc = vi.fn().mockReturnValue({ create })
+    const collection = vi.fn().mockReturnValue({ doc })
+    getAdminDb.mockReturnValue({ collection })
+
+    const { code, expiresAt } = await adminData.createLinkCode('user-1')
+
+    expect(collection).toHaveBeenCalledWith('bot_link_codes')
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(code).toMatch(/^[A-Z2-9]{6}$/)
+    expect(expiresAt).toBeInstanceOf(Date)
   })
 })
 
@@ -583,6 +603,44 @@ describe('multi-transaction persistence', () => {
     it('commits nothing for an empty id list', async () => {
       expect(await adminData.deleteTransactions('user-1', [])).toBe(0)
       expect(batchCommit).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('saveModelHealth', () => {
+    it('merge-writes only the touched model, never the whole map', async () => {
+      await adminData.saveModelHealth('2026-09-07', 'gemini-3.5-flash', {
+        used: 3,
+        lastUsedAt: 1,
+        cooldownUntil: 0,
+      })
+      const [payload, opts] = docSet.mock.calls[0]
+      expect(opts).toEqual({ merge: true })
+      expect(payload.dayKey).toBe('2026-09-07')
+      expect(payload.models).toEqual({ 'gemini-3.5-flash': { used: 3, lastUsedAt: 1, cooldownUntil: 0 } })
+    })
+
+    it('does a whole-doc reset (no merge) when state is null', async () => {
+      await adminData.saveModelHealth('2026-09-08', '', null)
+      const [payload, opts] = docSet.mock.calls[0]
+      expect(opts).toBeUndefined()
+      expect(payload).toMatchObject({ dayKey: '2026-09-08', models: {} })
+    })
+  })
+
+  describe('bumpUserModelCalls', () => {
+    it('resets the counter to 1 on a new Pacific day', async () => {
+      docData = { day: '2000-01-01', count: 5 }
+      const n = await adminData.bumpUserModelCalls('user-1')
+      expect(n).toBe(1)
+      expect(docSet).toHaveBeenCalledWith(expect.objectContaining({ count: 1 }))
+    })
+
+    it('increments (merge-write, no day reset) when the stored day is today', async () => {
+      docData = { day: dayKeyInTz(new Date(), 'America/Los_Angeles'), count: 5 }
+      await adminData.bumpUserModelCalls('user-1')
+      const [payload, opts] = docSet.mock.calls[0]
+      expect(opts).toEqual({ merge: true })
+      expect(payload).not.toHaveProperty('day')
     })
   })
 })

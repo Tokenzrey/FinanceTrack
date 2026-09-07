@@ -1,6 +1,27 @@
-import { describe, expect, it } from 'vitest'
-import { noteFailure, noteSuccess, pickModel } from './gemini-router'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  DEFAULT_ROSTER,
+  QUOTA_DAY_TZ,
+  configureRouterIO,
+  generateWithRouter,
+  noteFailure,
+  noteSuccess,
+  pickModel,
+} from './gemini-router'
 import type { ModelHealth } from './gemini-router'
+import { dayKeyInTz } from './format'
+import { isAiQuotaOrOverloadError } from './receipt-extraction'
+
+const mockGenerateContent = vi.fn()
+vi.mock('@google/genai', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@google/genai')>()
+  return {
+    ...actual,
+    GoogleGenAI: class {
+      models = { generateContent: mockGenerateContent }
+    },
+  }
+})
 
 const NOW = 1_788_600_000_000
 
@@ -74,6 +95,43 @@ describe('pickModel — spreading load', () => {
     const textFirst = pickModel('text', {}, NOW)!
     // The text tier leads with a 500-RPD lite model, never a 20-RPD vision model.
     expect(textFirst.rpd).toBeGreaterThanOrEqual(500)
+  })
+})
+
+describe('DEFAULT_ROSTER shape', () => {
+  it('every model id (both tiers) looks like a real Gemini id — fails loudly on a typo', () => {
+    const re = /^gemini-[0-9.]+-flash(-lite)?$|^gemini-flash(-lite)?-latest$/
+    for (const spec of [...DEFAULT_ROSTER.vision, ...DEFAULT_ROSTER.text]) {
+      expect(spec.id, `bad roster id: ${spec.id}`).toMatch(re)
+    }
+  })
+})
+
+describe('generateWithRouter — nothing available', () => {
+  const OLD_KEY = process.env.GEMINI_API_KEY
+  const today = () => dayKeyInTz(new Date(), QUOTA_DAY_TZ)
+
+  afterEach(() => {
+    if (OLD_KEY === undefined) delete process.env.GEMINI_API_KEY
+    else process.env.GEMINI_API_KEY = OLD_KEY
+    configureRouterIO({
+      load: async () => ({ dayKey: today(), models: {} }),
+      save: async () => {},
+    })
+    mockGenerateContent.mockReset()
+  })
+
+  it('rejects with an error isAiQuotaOrOverloadError accepts when every model is cooling down (N8)', async () => {
+    process.env.GEMINI_API_KEY = 'test-key'
+    const soon = Date.now() + 60_000
+    const cooling = Object.fromEntries(
+      DEFAULT_ROSTER.text.map((s) => [s.id, { used: 0, lastUsedAt: 0, cooldownUntil: soon }]),
+    )
+    configureRouterIO({ load: async () => ({ dayKey: today(), models: cooling }), save: async () => {} })
+
+    const err = await generateWithRouter('text', { contents: 'x' } as never).catch((e) => e)
+    expect(isAiQuotaOrOverloadError(err)).toBe(true)
+    expect(mockGenerateContent).not.toHaveBeenCalled()
   })
 })
 

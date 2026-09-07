@@ -134,7 +134,7 @@ export async function parseTransactionBatch(text: string, categories: Category[]
 
     return lines.length > 0 ? lines : fallback(text)
   } catch (error) {
-    console.error('parseTransactionBatch error:', error)
+    console.error('parseTransactionBatch error:', error instanceof Error ? error.message : error)
     return fallback(text)
   }
 }

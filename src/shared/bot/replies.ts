@@ -169,6 +169,13 @@ export const replies = {
         'Coba kirim ulang beberapa saat lagi, atau catat manual lewat teks.',
     ),
 
+  /** The per-user daily AI-call cap (`DAILY_USER_MODEL_CAP`) is hit — distinct from
+   *  `aiUnavailable` (shared pool) so the user knows it is their own budget. */
+  dailyAiLimit: (): BotReply =>
+    reply(
+      '⏳ Batas pemakaian AI harianmu sudah tercapai. Coba lagi besok, atau catat transaksi manual lewat teks (mis. <code>kopi 20rb</code>).',
+    ),
+
   categoryConfirmPrompt: (amount: number, description: string | null, options: { name: string }[]): BotReply => {
     const label = description ? ` — <i>${escapeHtml(description)}</i>` : ''
     const keyboard: BotKeyboardButton[][] = [

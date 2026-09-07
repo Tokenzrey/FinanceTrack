@@ -1,4 +1,6 @@
-// ROSTER model ids are provisional — verify against scripts/list-gemini-models.mjs output before production use.
+// ROSTER model ids are provisional — verify against scripts/list-gemini-models.mjs
+// output, or override per environment with GEMINI_MODELS_VISION / GEMINI_MODELS_TEXT,
+// before production use.
 
 import { GoogleGenAI, type GenerateContentParameters, type GenerateContentResponse } from '@google/genai'
 import { dayKeyInTz } from './format'
@@ -45,11 +47,11 @@ const RPD_RESERVE = 1
 const OVERLOAD_COOLDOWN_MS = 60_000
 
 /**
- * Verified against `scripts/list-gemini-models.mjs` output and the account's own rate
- * limit dashboard. Override per environment with GEMINI_MODELS_VISION /
+ * Provisional — verify these ids against `scripts/list-gemini-models.mjs` output before
+ * production use. Override per environment with GEMINI_MODELS_VISION /
  * GEMINI_MODELS_TEXT (comma-separated `id:rpd:rpm`) so ops can retune without a deploy.
  */
-const DEFAULT_ROSTER: Record<GeminiTask, ModelSpec[]> = {
+export const DEFAULT_ROSTER: Record<GeminiTask, ModelSpec[]> = {
   // 6 x 20/day = 120 receipt reads. Only this tier accepts inlineData images.
   vision: [
     { id: 'gemini-3.5-flash', rpd: 20, rpm: 5 },
@@ -58,6 +60,8 @@ const DEFAULT_ROSTER: Record<GeminiTask, ModelSpec[]> = {
     { id: 'gemini-3.6-flash', rpd: 20, rpm: 5 },
     { id: 'gemini-3-flash', rpd: 20, rpm: 5 },
     { id: 'gemini-2.5-flash', rpd: 20, rpm: 5 },
+    // `-latest` aliases are Google-maintained; last resort if every pinned id is wrong.
+    { id: 'gemini-flash-latest', rpd: 20, rpm: 5 },
   ],
   // 2 x 500/day, and lower latency than flash — text work belongs here, not in the
   // scarce vision pool. The 20/day lite model trails as a last resort.
@@ -65,6 +69,8 @@ const DEFAULT_ROSTER: Record<GeminiTask, ModelSpec[]> = {
     { id: 'gemini-3.5-flash-lite', rpd: 500, rpm: 15 },
     { id: 'gemini-3.1-flash-lite', rpd: 500, rpm: 15 },
     { id: 'gemini-2.5-flash-lite', rpd: 20, rpm: 10 },
+    // `-latest` aliases are Google-maintained; last resort if every pinned id is wrong.
+    { id: 'gemini-flash-lite-latest', rpd: 20, rpm: 10 },
   ],
 }
 
@@ -172,10 +178,13 @@ export interface HealthLedger {
 
 export interface RouterIO {
   load: () => Promise<HealthLedger>
-  save: (dayKey: string, models: Record<string, ModelHealth>) => Promise<void>
+  /** Merge-writes one model's health. `state === null` means a whole-doc reset of the
+   *  day's ledger (Pacific-day rollover). */
+  save: (dayKey: string, modelId: string, state: ModelHealth | null) => Promise<void>
 }
 
-/** Set once at startup by `admin-data.ts`; kept injectable so tests never touch Firestore. */
+/** Re-pointed at the Firestore ledger by `core.ts` `handleIncoming` on every inbound
+ *  message — the assignment is idempotent. Injectable so tests never touch Firestore. */
 let io: RouterIO = {
   load: async () => ({ dayKey: dayKeyInTz(new Date(), QUOTA_DAY_TZ), models: {} }),
   save: async () => {},
@@ -196,29 +205,48 @@ export async function generateWithRouter(
   const today = dayKeyInTz(new Date(), QUOTA_DAY_TZ)
 
   const ledger = await io.load()
-  // A new Pacific day wipes the counters — that is exactly when Google resets them.
-  let models = ledger.dayKey === today ? ledger.models : {}
+  let models: Record<string, ModelHealth>
+  if (ledger.dayKey === today) {
+    models = ledger.models
+  } else {
+    // A new Pacific day is exactly when Google resets the real counters. One whole-doc
+    // reset here so yesterday's per-model `used` values don't survive under the
+    // merge-writes below and look quota-parked all day.
+    await io.save(today, '', null)
+    models = {}
+  }
 
   let lastError: unknown = new Error(`Tidak ada model tersedia untuk tier "${task}".`)
+  let pickReturnedNull = false
 
   for (let attempt = 0; attempt < rosterFor(task).length; attempt++) {
     const now = Date.now()
     const spec = pickModel(task, models, now)
-    if (!spec) break
+    if (!spec) {
+      pickReturnedNull = true
+      break
+    }
 
     try {
       const response = await ai.models.generateContent({ model: spec.id, ...params })
       models = noteSuccess(models, spec.id, Date.now())
-      await io.save(today, models)
+      await io.save(today, spec.id, models[spec.id])
       return response
     } catch (error) {
       lastError = error
       const kind = classify(error)
       models = noteFailure(models, spec.id, Date.now(), kind)
+      await io.save(today, spec.id, models[spec.id])
       console.warn(`gemini-router: ${spec.id} failed (${kind}), rotating.`)
     }
   }
 
-  await io.save(today, models)
+  // Zero successful calls. If the roster is populated but `pickModel` bailed because
+  // every model is cooling down / quota-parked, surface a 503 so the caller shows
+  // `aiUnavailable`, not `genericError`. The plain error stays only for an empty roster
+  // (genuine misconfig).
+  if (rosterFor(task).length > 0 && pickReturnedNull) {
+    throw Object.assign(new Error('all Gemini models temporarily unavailable'), { status: 503 })
+  }
   throw lastError
 }

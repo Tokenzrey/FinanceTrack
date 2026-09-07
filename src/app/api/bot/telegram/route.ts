@@ -62,7 +62,7 @@ async function callTelegram(method: string, payload: Record<string, unknown>): P
     })
     return await res.json()
   } catch (error) {
-    console.error(`telegram ${method} error:`, error)
+    console.error(`telegram ${method} error:`, error instanceof Error ? error.message : error)
     return null
   }
 }
@@ -119,7 +119,7 @@ async function sendDocument(chatId: number, doc: NonNullable<BotReply['document'
     form.append('document', new Blob([Buffer.from(doc.base64, 'base64')], { type: doc.mimeType }), doc.filename)
     await fetch(`https://api.telegram.org/bot${token}/sendDocument`, { method: 'POST', body: form })
   } catch (error) {
-    console.error('telegram sendDocument error:', error)
+    console.error('telegram sendDocument error:', error instanceof Error ? error.message : error)
   }
 }
 
@@ -144,7 +144,10 @@ async function claimUpdate(kind: 'msg' | 'cb', updateId: number | undefined): Pr
   try {
     return await claimInboundMessage('telegram', `${kind}_${updateId}`)
   } catch (error) {
-    console.error('telegram claimInboundMessage error (processing anyway):', error)
+    console.error(
+      'telegram claimInboundMessage error (processing anyway):',
+      error instanceof Error ? error.message : error,
+    )
     return true
   }
 }
@@ -186,7 +189,7 @@ async function handleTextOrPhotoMessage(message: NonNullable<TelegramUpdate['mes
       if (message.message_id) await reactTo(chatId, message.message_id, '✅')
     }
   } catch (error) {
-    console.error('telegram webhook error:', error)
+    console.error('telegram webhook error:', error instanceof Error ? error.message : error)
     await sendMessage(chatId, { text: 'Ada masalah di sisi kami — coba lagi sebentar lagi.' })
   }
 }
@@ -214,7 +217,7 @@ async function handleCallbackQuery(query: TelegramCallbackQuery, updateId: numbe
     const reply = await handleIncoming(incoming)
     await editMessage(chatId, query.message.message_id, reply)
   } catch (error) {
-    console.error('telegram callback_query error:', error)
+    console.error('telegram callback_query error:', error instanceof Error ? error.message : error)
     await editMessage(chatId, query.message.message_id, { text: 'Ada masalah di sisi kami — coba lagi sebentar lagi.' })
   }
 }

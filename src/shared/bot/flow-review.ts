@@ -103,7 +103,10 @@ async function commit(userId: string, batch: DraftBatch, categories: Category[])
       await adminData.saveScanHints(userId, applyCorrections(existing, corrections))
     }
   } catch (error) {
-    console.error('bot hint learning error (transactions already saved):', error)
+    console.error(
+      'bot hint learning error (transactions already saved):',
+      error instanceof Error ? error.message : error,
+    )
   }
 
   const tz = await adminData.getUserTimezone(userId)

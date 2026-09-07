@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto'
 import { FieldPath, FieldValue, Timestamp } from 'firebase-admin/firestore'
 import { getAdminDb } from '@/shared/lib/firebase-admin'
 import { liquidAssets } from '@/shared/lib/analytics'
@@ -14,6 +15,7 @@ import type { CreateTransactionDTO } from '@/shared/types/dto'
 import type { FinancialContext } from '@/shared/use-cases/wishlist/CalculateAffordability.usecase'
 import type { Wishlist } from '@/shared/types/wishlist.types'
 import { buildMonthlySummary } from '@/shared/lib/budget-math'
+import { dayKeyInTz } from '@/shared/lib/format'
 import { DEFAULT_PILLAR_CONFIG } from '@/shared/types/domain'
 import type { ModelHealth } from '@/shared/lib/gemini-router'
 import type { CategoryHint, ReceiptScanResult } from '@/shared/types/receipt-scanner.types'
@@ -64,26 +66,40 @@ export async function findLinkByExternalId(
 }
 
 /** Random, URL-safe, human-typeable — excludes visually ambiguous characters
- *  (0/O, 1/I/L) since the user has to retype this by hand into a chat. */
+ *  (0/O, 1/I/L) since the user has to retype this by hand into a chat. `randomInt` is a
+ *  CSPRNG: a guessable code links a stranger's chat to this account. */
 function randomLinkCode(): string {
   const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
   let code = ''
   for (let i = 0; i < 6; i++) {
-    code += alphabet[Math.floor(Math.random() * alphabet.length)]
+    code += alphabet[randomInt(0, alphabet.length)]
   }
   return code
 }
 
 export async function createLinkCode(userId: string): Promise<{ code: string; expiresAt: Date }> {
   const db = getAdminDb()
-  const code = randomLinkCode()
   const expiresAt = new Date(Date.now() + LINK_CODE_TTL_MS)
-  await db.collection('bot_link_codes').doc(code).set({
-    userId,
-    expiresAt: Timestamp.fromDate(expiresAt),
-    usedAt: null,
-  })
-  return { code, expiresAt }
+
+  // `.create()` (not `.set()`): a code collision must never silently overwrite another
+  // user's live code — that user would then link to this account. Try fresh codes until
+  // one is unclaimed.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = randomLinkCode()
+    try {
+      await db.collection('bot_link_codes').doc(code).create({
+        userId,
+        expiresAt: Timestamp.fromDate(expiresAt),
+        usedAt: null,
+      })
+      return { code, expiresAt }
+    } catch (err) {
+      // gRPC ALREADY_EXISTS = 6 → this code is taken; pick another.
+      if ((err as { code?: number }).code === 6) continue
+      throw err
+    }
+  }
+  throw new Error('createLinkCode: could not allocate an unused code after 5 attempts')
 }
 
 export type ConsumeLinkCodeResult =
@@ -665,10 +681,10 @@ export async function saveScanHints(userId: string, hints: CategoryHint[]): Prom
  * Shared Gemini quota ledger. Not scoped to a user: the free-tier quota belongs to the
  * API key, so every user's traffic draws from the same pool.
  *
- * ponytail: read-modify-write without a transaction. Two concurrent webhooks can both
- * read `used: 19` and both fire — worst case one extra 429, which the router already
- * handles by rotating. A transaction here would add a round trip to every model call
- * to prevent an error that is already harmless.
+ * Writes are per-model merge-writes (see `saveModelHealth`) so two concurrent pipelines
+ * touching different tiers no longer clobber each other's increments. The read is still
+ * a plain read-modify-write; a stale count at worst causes one extra 429, which the
+ * router already handles by rotating.
  */
 export async function getModelHealth(): Promise<{ dayKey: string; models: Record<string, ModelHealth> }> {
   const snap = await getAdminDb().doc('bot_meta/geminiHealth').get()
@@ -677,11 +693,51 @@ export async function getModelHealth(): Promise<{ dayKey: string; models: Record
   return { dayKey: data.dayKey ?? '', models: data.models ?? {} }
 }
 
+/**
+ * `state === null` → whole-doc reset for a new Pacific day (one write, wipes every
+ * prior per-model counter). Otherwise merge-write ONLY the touched model, so a
+ * concurrent pipeline incrementing a different model's counter is not overwritten.
+ */
 export async function saveModelHealth(
   dayKey: string,
-  models: Record<string, ModelHealth>,
+  modelId: string,
+  state: ModelHealth | null,
 ): Promise<void> {
-  await getAdminDb().doc('bot_meta/geminiHealth').set({ dayKey, models, updatedAt: FieldValue.serverTimestamp() })
+  const ref = getAdminDb().doc('bot_meta/geminiHealth')
+  if (state === null) {
+    await ref.set({ dayKey, models: {}, updatedAt: FieldValue.serverTimestamp() })
+    return
+  }
+  await ref.set(
+    { dayKey, models: { [modelId]: state }, updatedAt: FieldValue.serverTimestamp() },
+    { merge: true },
+  )
+}
+
+/** Per-user daily AI-call cap. The shared `bot_meta/geminiHealth` ledger only stops the
+ *  whole API key from running dry; this stops ONE linked account from spending the
+ *  free-tier pool on everyone else's behalf. */
+export const DAILY_USER_MODEL_CAP = 40
+
+/**
+ * Bumps `users/{uid}/meta/botModelDay` `{ day, count }` and returns the new count. `day`
+ * is the Pacific day key (matches Google's quota reset). A new day resets the counter
+ * to 1; same day is an atomic `FieldValue.increment`.
+ */
+export async function bumpUserModelCalls(userId: string): Promise<number> {
+  const ref = getAdminDb().doc(`users/${userId}/meta/botModelDay`)
+  const today = dayKeyInTz(new Date(), 'America/Los_Angeles')
+  const snap = await ref.get()
+  const stored = snap.exists ? (snap.data() as { day?: string; count?: number }) : null
+
+  if (!stored || stored.day !== today) {
+    await ref.set({ day: today, count: 1 })
+    return 1
+  }
+
+  await ref.set({ count: FieldValue.increment(1) }, { merge: true })
+  const after = await ref.get()
+  return (after.data() as { count?: number })?.count ?? 1
 }
 
 // ─── Model-result cache (keyed by content hash — see cache.ts) ──
