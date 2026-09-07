@@ -1,0 +1,400 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Category } from '@/shared/types/domain'
+import { DEFAULT_BOT_PREFS } from './types'
+import type { BotIncoming, DraftBatch } from './types'
+
+const findCategories = vi.fn()
+const getMonthlyBudget = vi.fn()
+const isBudgetClosedAdmin = vi.fn()
+const createTransactionsBatch = vi.fn()
+const rememberLastBatch = vi.fn()
+const getUserTimezone = vi.fn()
+const setPending = vi.fn()
+const getScanHints = vi.fn()
+const saveScanHints = vi.fn()
+const getBotPrefs = vi.fn()
+const getCachedReceipt = vi.fn()
+const saveCachedReceipt = vi.fn()
+const getCachedParse = vi.fn()
+const saveCachedParse = vi.fn()
+const bumpUserModelCalls = vi.fn()
+
+vi.mock('./admin-data', () => ({
+  DAILY_USER_MODEL_CAP: 40,
+  bumpUserModelCalls: (...a: unknown[]) => bumpUserModelCalls(...a),
+  findCategories: (...a: unknown[]) => findCategories(...a),
+  getMonthlyBudget: (...a: unknown[]) => getMonthlyBudget(...a),
+  isBudgetClosedAdmin: (...a: unknown[]) => isBudgetClosedAdmin(...a),
+  createTransactionsBatch: (...a: unknown[]) => createTransactionsBatch(...a),
+  rememberLastBatch: (...a: unknown[]) => rememberLastBatch(...a),
+  getUserTimezone: (...a: unknown[]) => getUserTimezone(...a),
+  setPending: (...a: unknown[]) => setPending(...a),
+  getScanHints: (...a: unknown[]) => getScanHints(...a),
+  saveScanHints: (...a: unknown[]) => saveScanHints(...a),
+  getBotPrefs: (...a: unknown[]) => getBotPrefs(...a),
+  getCachedReceipt: (...a: unknown[]) => getCachedReceipt(...a),
+  saveCachedReceipt: (...a: unknown[]) => saveCachedReceipt(...a),
+  getCachedParse: (...a: unknown[]) => getCachedParse(...a),
+  saveCachedParse: (...a: unknown[]) => saveCachedParse(...a),
+}))
+
+const parseTransactionBatch = vi.fn()
+vi.mock('./parse-batch', () => ({ parseTransactionBatch: (...a: unknown[]) => parseTransactionBatch(...a) }))
+
+const extractReceipt = vi.fn()
+vi.mock('@/shared/lib/receipt-extraction', () => ({
+  extractReceipt: (...a: unknown[]) => extractReceipt(...a),
+  isAiQuotaOrOverloadError: (e: unknown) => (e as { status?: number })?.status === 429,
+  ALLOWED_MIME: ['image/jpeg', 'image/png', 'image/webp', 'image/heic'],
+  MAX_BASE64_CHARS: 6 * 1024 * 1024,
+}))
+
+const uploadReceiptForUser = vi.fn()
+vi.mock('./drive-upload', () => ({ uploadReceiptForUser: (...a: unknown[]) => uploadReceiptForUser(...a) }))
+
+const { handlePhoto, handleTextTransaction } = await import('./flow-write')
+
+function cat(id: string, name: string, pillar: Category['pillar']): Category {
+  return {
+    id, name, pillar, percentOfIncome: 0, color: '#000', icon: 'star',
+    isSinkingFund: false, isRecurring: false, isActive: true, order: 0,
+    createdAt: null as never, updatedAt: null as never,
+  }
+}
+const CATEGORIES = [cat('c-food', 'Makan', 'needs'), cat('c-salary', 'Gaji', 'income')]
+
+const parsed = (over = {}) => ({
+  type: 'expense', description: 'makan siang', amountText: '35rb',
+  categoryCandidates: ['c-food'], dateOffset: 0, confidence: 95, ...over,
+})
+
+const photo = (caption?: string): Extract<BotIncoming, { kind: 'image' }> => ({
+  platform: 'whatsapp', externalId: '1', kind: 'image',
+  imageBase64: 'ZmFrZQ==', mimeType: 'image/jpeg', caption,
+})
+
+function receiptResult(over = {}) {
+  return {
+    extraction: {
+      merchant: 'Indomaret', merchantType: 'supermarket', date: null,
+      items: [{ name: 'Nasi goreng', totalPrice: 35000 }, { name: 'Teh', totalPrice: 24000 }],
+      subtotal: 59000, tax: null, serviceCharge: null, discount: null, total: 59000,
+      currency: 'IDR', confidence: 88, rawText: '', language: 'id',
+    },
+    mappedItems: [
+      { name: 'Nasi goreng', totalPrice: 35000, suggestedCategoryId: 'c-food', suggestedCategoryName: 'Makan', suggestedPillar: 'needs', mappingConfidence: 90, mappingReason: '', isManuallyMapped: false },
+      { name: 'Teh', totalPrice: 24000, suggestedCategoryId: 'c-food', suggestedCategoryName: 'Makan', suggestedPillar: 'needs', mappingConfidence: 85, mappingReason: '', isManuallyMapped: false },
+    ],
+    totalConfidence: 88,
+    warnings: [],
+    ...over,
+  }
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+  findCategories.mockResolvedValue(CATEGORIES)
+  getMonthlyBudget.mockResolvedValue(null)
+  isBudgetClosedAdmin.mockReturnValue(false)
+  createTransactionsBatch.mockResolvedValue(['t1'])
+  getUserTimezone.mockResolvedValue('Asia/Jakarta')
+  uploadReceiptForUser.mockResolvedValue({ gDriveFileId: 'f1', gDriveWebViewLink: 'https://drive/f1' })
+  getScanHints.mockResolvedValue([])
+  saveScanHints.mockResolvedValue(undefined)
+  getBotPrefs.mockResolvedValue(DEFAULT_BOT_PREFS)
+  getCachedReceipt.mockResolvedValue(null)
+  saveCachedReceipt.mockResolvedValue(undefined)
+  getCachedParse.mockResolvedValue(null)
+  saveCachedParse.mockResolvedValue(undefined)
+  bumpUserModelCalls.mockResolvedValue(1)
+})
+
+describe('handleTextTransaction', () => {
+  it('records a single confident line immediately, no review card', async () => {
+    parseTransactionBatch.mockResolvedValue([parsed()])
+    const reply = await handleTextTransaction('u1', 'makan siang 35rb')
+    expect(createTransactionsBatch).toHaveBeenCalledTimes(1)
+    expect(setPending).not.toHaveBeenCalled()
+    expect(reply.text).toContain('Tercatat')
+  })
+
+  it('opens a review card when the message yields more than one transaction', async () => {
+    parseTransactionBatch.mockResolvedValue([parsed(), parsed({ amountText: '50rb', description: 'bensin' })])
+    const reply = await handleTextTransaction('u1', 'makan 35rb, bensin 50rb')
+    expect(createTransactionsBatch).not.toHaveBeenCalled()
+    expect(setPending).toHaveBeenCalledTimes(1)
+    expect(reply.text).toContain('Tinjau 2 Transaksi')
+  })
+
+  it('opens a review card when the only line is low-confidence', async () => {
+    parseTransactionBatch.mockResolvedValue([parsed({ confidence: 20 })])
+    await handleTextTransaction('u1', 'itu tadi 35rb')
+    expect(setPending).toHaveBeenCalledTimes(1)
+    expect(createTransactionsBatch).not.toHaveBeenCalled()
+  })
+
+  it('opens a review card when the only line has no category at all', async () => {
+    parseTransactionBatch.mockResolvedValue([parsed({ categoryCandidates: [], confidence: 95 })])
+    await handleTextTransaction('u1', 'entah apa 35rb')
+    expect(setPending).toHaveBeenCalledTimes(1)
+  })
+
+  it('records income and transfer as their own types on the fast path', async () => {
+    parseTransactionBatch.mockResolvedValue([
+      parsed({ type: 'income', categoryCandidates: ['c-salary'], amountText: '5jt' }),
+    ])
+    await handleTextTransaction('u1', 'gaji masuk 5jt')
+    expect(createTransactionsBatch.mock.calls[0][1][0].type).toBe('income')
+  })
+
+  it('asks for a number when nothing in the message parses as an amount', async () => {
+    parseTransactionBatch.mockResolvedValue([parsed({ amountText: 'tidak ada angka' })])
+    const reply = await handleTextTransaction('u1', 'halo apa kabar')
+    expect(reply.text).toContain('Nominalnya tidak ketemu')
+    expect(setPending).not.toHaveBeenCalled()
+  })
+
+  it('never spends an L1 model call on a message with no parseable amount (I1)', async () => {
+    getScanHints.mockResolvedValue([])
+    const reply = await handleTextTransaction('u1', 'halo apa kabar')
+    expect(reply.text).toContain('Nominalnya tidak ketemu')
+    expect(parseTransactionBatch).not.toHaveBeenCalled()
+    expect(getCachedParse).not.toHaveBeenCalled()
+  })
+
+  it('refuses the fast path into a closed month', async () => {
+    isBudgetClosedAdmin.mockReturnValue(true)
+    parseTransactionBatch.mockResolvedValue([parsed()])
+    const reply = await handleTextTransaction('u1', 'makan 35rb')
+    expect(createTransactionsBatch).not.toHaveBeenCalled()
+    expect(reply.text).toContain('sudah ditutup')
+  })
+
+  it('records a known phrase with ZERO model calls', async () => {
+    getScanHints.mockResolvedValue([{ keyword: 'kopi', categoryId: 'c-food', frequency: 9, updatedAt: 0 }])
+    const reply = await handleTextTransaction('u1', 'kopi 20rb')
+    expect(parseTransactionBatch).not.toHaveBeenCalled()
+    expect(createTransactionsBatch).toHaveBeenCalledTimes(1)
+    expect(reply.text).toContain('Tercatat')
+  })
+
+  it('builds a multi-line batch locally, still with zero model calls', async () => {
+    getScanHints.mockResolvedValue([
+      { keyword: 'kopi', categoryId: 'c-food', frequency: 9, updatedAt: 0 },
+      { keyword: 'bensin', categoryId: 'c-food', frequency: 9, updatedAt: 0 },
+    ])
+    await handleTextTransaction('u1', 'kopi 20rb, bensin 50rb')
+    expect(parseTransactionBatch).not.toHaveBeenCalled()
+    expect(setPending).toHaveBeenCalledTimes(1)
+  })
+
+  it('falls through to the model when the local layer cannot resolve everything', async () => {
+    getScanHints.mockResolvedValue([])
+    parseTransactionBatch.mockResolvedValue([parsed()])
+    await handleTextTransaction('u1', 'sesuatu yang baru 35rb')
+    expect(parseTransactionBatch).toHaveBeenCalledTimes(1)
+  })
+
+  it('always opens the review card when the user set alwaysReview', async () => {
+    getBotPrefs.mockResolvedValue({ ...DEFAULT_BOT_PREFS, alwaysReview: true })
+    getScanHints.mockResolvedValue([{ keyword: 'kopi', categoryId: 'c-food', frequency: 9, updatedAt: 0 }])
+    await handleTextTransaction('u1', 'kopi 20rb')
+    expect(createTransactionsBatch).not.toHaveBeenCalled()
+    expect(setPending).toHaveBeenCalledTimes(1)
+  })
+
+  it('re-uses a cached parse instead of calling the model again', async () => {
+    getScanHints.mockResolvedValue([])
+    getCachedParse.mockResolvedValue([parsed()])
+    const reply = await handleTextTransaction('u1', 'makan siang 35rb')
+    expect(parseTransactionBatch).not.toHaveBeenCalled()
+    expect(reply.text).toContain('Tercatat')
+  })
+
+  it('does not cache a parse that came back as the zero-confidence fallback', async () => {
+    getScanHints.mockResolvedValue([])
+    getCachedParse.mockResolvedValue(null)
+    parseTransactionBatch.mockResolvedValue([parsed({ confidence: 0 })])
+    await handleTextTransaction('u1', 'entah 35rb')
+    expect(saveCachedParse).not.toHaveBeenCalled()
+  })
+
+  it('gates the L1 fast path on the SURVIVING line\'s confidence, not a dropped parsed[0] (W4)', async () => {
+    // Line 0 ("bayar 5 orang") has no parseable amount and is dropped; its high
+    // confidence must not license auto-commit of the low-confidence line that remains.
+    getScanHints.mockResolvedValue([])
+    parseTransactionBatch.mockResolvedValue([
+      parsed({ description: 'bayar 5 orang', amountText: '5 orang', confidence: 95 }),
+      parsed({ description: 'makan', amountText: '50rb', confidence: 35 }),
+    ])
+    const reply = await handleTextTransaction('u1', 'bayar 5 orang, makan 50rb')
+    expect(createTransactionsBatch).not.toHaveBeenCalled()
+    expect(setPending).toHaveBeenCalledTimes(1)
+    expect(reply.text).toContain('Tinjau')
+  })
+
+  it('honours a raised /atur autoaccept on the L0 known-phrase path too (W4)', async () => {
+    getBotPrefs.mockResolvedValue({ ...DEFAULT_BOT_PREFS, autoAcceptConfidence: 95 })
+    // freq 4 → hint confidence 80, clears LOCAL_ACCEPT_CONFIDENCE but not the user's 95.
+    getScanHints.mockResolvedValue([{ keyword: 'kopi', categoryId: 'c-food', frequency: 4, updatedAt: 0 }])
+    await handleTextTransaction('u1', 'kopi 20rb')
+    expect(parseTransactionBatch).not.toHaveBeenCalled()
+    expect(createTransactionsBatch).not.toHaveBeenCalled()
+    expect(setPending).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops before the L1 model call once the per-user daily AI cap is exceeded (W1)', async () => {
+    getScanHints.mockResolvedValue([])
+    bumpUserModelCalls.mockResolvedValue(41)
+    parseTransactionBatch.mockResolvedValue([parsed()])
+    const reply = await handleTextTransaction('u1', 'sesuatu yang baru 35rb')
+    expect(parseTransactionBatch).not.toHaveBeenCalled()
+    expect(createTransactionsBatch).not.toHaveBeenCalled()
+    expect(reply.text).toContain('Batas pemakaian AI harianmu')
+  })
+
+  it('never bumps the per-user AI counter on the L0 zero-model path', async () => {
+    getScanHints.mockResolvedValue([{ keyword: 'kopi', categoryId: 'c-food', frequency: 9, updatedAt: 0 }])
+    await handleTextTransaction('u1', 'kopi 20rb')
+    expect(bumpUserModelCalls).not.toHaveBeenCalled()
+  })
+
+  it('never bumps the per-user AI counter on a cached-parse hit', async () => {
+    getScanHints.mockResolvedValue([])
+    getCachedParse.mockResolvedValue([parsed()])
+    await handleTextTransaction('u1', 'makan siang 35rb')
+    expect(bumpUserModelCalls).not.toHaveBeenCalled()
+    expect(parseTransactionBatch).not.toHaveBeenCalled()
+  })
+})
+
+describe('handlePhoto', () => {
+  it('never writes straight away — a receipt always opens a review card', async () => {
+    extractReceipt.mockResolvedValue(receiptResult())
+    const reply = await handlePhoto('u1', photo())
+    expect(createTransactionsBatch).not.toHaveBeenCalled()
+    expect(setPending).toHaveBeenCalledTimes(1)
+    expect(reply.text).toContain('Tinjau 2 Transaksi')
+  })
+
+  it('uploads the photo to Drive and attaches it to the draft', async () => {
+    extractReceipt.mockResolvedValue(receiptResult())
+    await handlePhoto('u1', photo())
+    const draft = setPending.mock.calls[0][1] as DraftBatch
+    expect(draft.receipt).toEqual({ gDriveFileId: 'f1', gDriveWebViewLink: 'https://drive/f1' })
+  })
+
+  it('still opens the review card when Drive is not linked', async () => {
+    uploadReceiptForUser.mockResolvedValue(null)
+    extractReceipt.mockResolvedValue(receiptResult())
+    const reply = await handlePhoto('u1', photo())
+    expect((setPending.mock.calls[0][1] as DraftBatch).receipt).toBeUndefined()
+    expect(reply.text).toContain('Tinjau')
+  })
+
+  it('carries the extraction warnings into the draft so the card shows them', async () => {
+    extractReceipt.mockResolvedValue(receiptResult({ warnings: ['Gambar kurang jelas.'] }))
+    await handlePhoto('u1', photo())
+    expect((setPending.mock.calls[0][1] as DraftBatch).warnings).toContain('Gambar kurang jelas.')
+  })
+
+  it('opens a one-line review card from the receipt total when no items were read', async () => {
+    extractReceipt.mockResolvedValue(
+      receiptResult({
+        extraction: { ...receiptResult().extraction, items: [] },
+        mappedItems: [],
+      }),
+    )
+    const reply = await handlePhoto('u1', photo())
+    const draft = setPending.mock.calls[0][1] as DraftBatch
+    expect(draft.lines).toHaveLength(1)
+    expect(draft.lines[0].amount).toBe(59000)
+    expect(reply.text).toContain('Tinjau Transaksi')
+  })
+
+  it('passes the photo caption to extractReceipt as extraction context', async () => {
+    extractReceipt.mockResolvedValue(receiptResult())
+    await handlePhoto('u1', photo('struk indomaret, yang buram teh botol 2x12rb'))
+    expect(extractReceipt.mock.calls[0][4]).toBe('struk indomaret, yang buram teh botol 2x12rb')
+  })
+
+  it('passes the learned hints to the receipt extractor instead of an empty list', async () => {
+    const hints = [{ keyword: 'indomie', categoryId: 'c-food', frequency: 4, updatedAt: 0 }]
+    getScanHints.mockResolvedValue(hints)
+    extractReceipt.mockResolvedValue(receiptResult())
+    await handlePhoto('u1', photo())
+    expect(extractReceipt.mock.calls[0][3]).toEqual(hints)
+  })
+
+  it('reports a quota failure distinctly and writes nothing', async () => {
+    extractReceipt.mockRejectedValue(Object.assign(new Error('quota'), { status: 429 }))
+    const reply = await handlePhoto('u1', photo())
+    expect(reply.text).toContain('kuota')
+    expect(setPending).not.toHaveBeenCalled()
+  })
+
+  it('rejects an oversized image before spending a model call', async () => {
+    const reply = await handlePhoto('u1', { ...photo(), imageBase64: 'x'.repeat(7 * 1024 * 1024) })
+    expect(extractReceipt).not.toHaveBeenCalled()
+    expect(reply.text).toContain('terlalu besar')
+  })
+
+  it('rejects an unsupported mime type before spending a model call', async () => {
+    const reply = await handlePhoto('u1', { ...photo(), mimeType: 'application/pdf' })
+    expect(extractReceipt).not.toHaveBeenCalled()
+    expect(reply.text).toContain('bukan foto struk')
+  })
+
+  it('re-uses a cached receipt read instead of spending vision quota again', async () => {
+    getCachedReceipt.mockResolvedValue({ result: receiptResult() })
+    const reply = await handlePhoto('u1', photo())
+    expect(extractReceipt).not.toHaveBeenCalled()
+    expect(bumpUserModelCalls).not.toHaveBeenCalled()
+    expect(reply.text).toContain('Tinjau')
+  })
+
+  it('stops before the vision call once the per-user daily AI cap is exceeded (W1)', async () => {
+    bumpUserModelCalls.mockResolvedValue(41)
+    extractReceipt.mockResolvedValue(receiptResult())
+    const reply = await handlePhoto('u1', photo())
+    expect(extractReceipt).not.toHaveBeenCalled()
+    expect(setPending).not.toHaveBeenCalled()
+    expect(reply.text).toContain('Batas pemakaian AI harianmu')
+  })
+
+  it('re-uses the cached Drive upload on a re-send instead of uploading again (T15)', async () => {
+    getCachedReceipt.mockResolvedValue({
+      result: receiptResult(),
+      receipt: { gDriveFileId: 'f1', gDriveWebViewLink: 'https://drive/f1' },
+    })
+    await handlePhoto('u1', photo())
+    expect(uploadReceiptForUser).not.toHaveBeenCalled()
+    const draft = setPending.mock.calls[0][1] as DraftBatch
+    expect(draft.receipt).toEqual({ gDriveFileId: 'f1', gDriveWebViewLink: 'https://drive/f1' })
+  })
+
+  it('uploads once when the cached read predates upload-caching, and back-fills the cache', async () => {
+    getCachedReceipt.mockResolvedValue({ result: receiptResult() }) // no `receipt`
+    await handlePhoto('u1', photo())
+    expect(uploadReceiptForUser).toHaveBeenCalledTimes(1)
+    expect(saveCachedReceipt).toHaveBeenCalledWith(
+      'u1',
+      expect.any(String),
+      expect.anything(),
+      { gDriveFileId: 'f1', gDriveWebViewLink: 'https://drive/f1' },
+    )
+  })
+
+  it('caches a usable read, but not a rejected one', async () => {
+    getCachedReceipt.mockResolvedValue(null)
+    extractReceipt.mockResolvedValue(receiptResult())
+    await handlePhoto('u1', photo())
+    expect(saveCachedReceipt).toHaveBeenCalledTimes(1)
+
+    vi.clearAllMocks()
+    getCachedReceipt.mockResolvedValue(null)
+    extractReceipt.mockResolvedValue(receiptResult({ totalConfidence: 5 }))
+    await handlePhoto('u1', photo())
+    expect(saveCachedReceipt).not.toHaveBeenCalled()
+  })
+})

@@ -88,7 +88,7 @@ export async function uploadReceiptForUser(
     const uploaded = await uploadFileToGDrive(file, filename, receiptsId, accessToken)
     return { gDriveFileId: uploaded.fileId, gDriveWebViewLink: uploaded.webViewLink }
   } catch (error) {
-    console.error('uploadReceiptForUser error:', error)
+    console.error('uploadReceiptForUser error:', error instanceof Error ? error.message : error)
     return null
   }
 }

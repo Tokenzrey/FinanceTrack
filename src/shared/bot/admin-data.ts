@@ -1,3 +1,4 @@
+import { randomInt } from 'node:crypto'
 import { FieldPath, FieldValue, Timestamp } from 'firebase-admin/firestore'
 import { getAdminDb } from '@/shared/lib/firebase-admin'
 import { liquidAssets } from '@/shared/lib/analytics'
@@ -14,8 +15,12 @@ import type { CreateTransactionDTO } from '@/shared/types/dto'
 import type { FinancialContext } from '@/shared/use-cases/wishlist/CalculateAffordability.usecase'
 import type { Wishlist } from '@/shared/types/wishlist.types'
 import { buildMonthlySummary } from '@/shared/lib/budget-math'
+import { dayKeyInTz } from '@/shared/lib/format'
 import { DEFAULT_PILLAR_CONFIG } from '@/shared/types/domain'
-import type { BotPlatform } from './types'
+import type { ModelHealth } from '@/shared/lib/gemini-router'
+import type { CategoryHint, ReceiptScanResult } from '@/shared/types/receipt-scanner.types'
+import { DEFAULT_BOT_PREFS } from './types'
+import type { BotPlatform, BotPrefs, DraftBatch, ParsedLine } from './types'
 
 /**
  * The one module in the bot subsystem that talks to Firestore. Everything here reads
@@ -61,26 +66,40 @@ export async function findLinkByExternalId(
 }
 
 /** Random, URL-safe, human-typeable — excludes visually ambiguous characters
- *  (0/O, 1/I/L) since the user has to retype this by hand into a chat. */
+ *  (0/O, 1/I/L) since the user has to retype this by hand into a chat. `randomInt` is a
+ *  CSPRNG: a guessable code links a stranger's chat to this account. */
 function randomLinkCode(): string {
   const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'
   let code = ''
   for (let i = 0; i < 6; i++) {
-    code += alphabet[Math.floor(Math.random() * alphabet.length)]
+    code += alphabet[randomInt(0, alphabet.length)]
   }
   return code
 }
 
 export async function createLinkCode(userId: string): Promise<{ code: string; expiresAt: Date }> {
   const db = getAdminDb()
-  const code = randomLinkCode()
   const expiresAt = new Date(Date.now() + LINK_CODE_TTL_MS)
-  await db.collection('bot_link_codes').doc(code).set({
-    userId,
-    expiresAt: Timestamp.fromDate(expiresAt),
-    usedAt: null,
-  })
-  return { code, expiresAt }
+
+  // `.create()` (not `.set()`): a code collision must never silently overwrite another
+  // user's live code — that user would then link to this account. Try fresh codes until
+  // one is unclaimed.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = randomLinkCode()
+    try {
+      await db.collection('bot_link_codes').doc(code).create({
+        userId,
+        expiresAt: Timestamp.fromDate(expiresAt),
+        usedAt: null,
+      })
+      return { code, expiresAt }
+    } catch (err) {
+      // gRPC ALREADY_EXISTS = 6 → this code is taken; pick another.
+      if ((err as { code?: number }).code === 6) continue
+      throw err
+    }
+  }
+  throw new Error('createLinkCode: could not allocate an unused code after 5 attempts')
 }
 
 export type ConsumeLinkCodeResult =
@@ -183,60 +202,60 @@ export async function deleteLink(userId: string, platform: BotPlatform): Promise
   await batch.commit()
 }
 
-// ─── Pending draft (category confirmation, goal contribution) ───
+// ─── Pending draft (transaction-batch review, goal contribution) ───
 //
 // Two unrelated multi-step flows share one `meta/botPending` doc, so at most one can
 // be in flight per user at a time — starting a new one abandons whichever was already
-// there, same as a fresh message abandoning a stale category confirmation always has.
-// `pendingKind` tells `handlePendingReply` which flow a stored draft belongs to.
-
-interface CategoryConfirmDraft {
-  pendingKind: 'category_confirm'
-  draft: {
-    amount: number
-    description: string | null
-    /** ISO string, not a Timestamp — sidesteps any Admin/client Timestamp
-     *  nominal-typing friction when this later becomes a `CreateTransactionDTO.date`. */
-    dateIso: string
-  }
-  options: { categoryId: string; name: string }[]
-  receipt?: { gDriveFileId: string; gDriveWebViewLink: string }
-}
+// there. `pendingKind` tells the caller which flow a stored draft belongs to.
 
 interface GoalContributionDraft {
   pendingKind: 'goal_contribution'
   /** Candidate goals offered in step 1, in display order — `step: 'pick_goal'`
-   *  interprets a numeric reply as a 1-based index into this list, same convention as
-   *  `category_confirm.options`. */
+   *  interprets a numeric reply as a 1-based index into this list. */
   options: { goalId: string; name: string }[]
   step: 'pick_goal' | 'enter_amount'
   goalId?: string
   goalName?: string
 }
 
-export type BotPendingDraft = (CategoryConfirmDraft | GoalContributionDraft) & { expiresAt: Timestamp }
+export type BotPendingDraft = (GoalContributionDraft | DraftBatch) & {
+  expiresAt: Timestamp
+}
 
 function pendingRef(userId: string) {
   return getAdminDb().doc(`users/${userId}/meta/botPending`)
 }
 
+/** The pending-flow kinds this build knows how to answer. A doc holding anything else
+ *  (no `pendingKind`, or one from a build with a different flow set — e.g. the retired
+ *  `category_confirm`) is dropped rather than half-answered; TTL is 15 minutes, so at
+ *  most one in-flight draft per user is affected by a deploy. */
+const KNOWN_PENDING_KINDS = new Set(['transaction_batch', 'goal_contribution'])
+
 export async function getPending(userId: string): Promise<BotPendingDraft | null> {
   const snap = await pendingRef(userId).get()
   if (!snap.exists) return null
-  const raw = snap.data() as Record<string, unknown> & { expiresAt: Timestamp }
-  if (raw.expiresAt.toMillis() < Date.now()) {
+  const raw = snap.data() as Record<string, unknown> & { expiresAt?: Timestamp }
+
+  // `expiresAt` is a plain `{_seconds,_nanoseconds}` (not a live `Timestamp`) on a doc
+  // written by a REST call, export-import, or a console edit — `.toMillis()` would then
+  // throw and every inbound message for this user would fail. Treat a missing/unreadable
+  // stamp as expired, same as `claimPendingForCommit` does.
+  const ms = raw.expiresAt?.toMillis?.()
+  if (ms == null || ms < Date.now()) {
     await clearPending(userId)
     return null
   }
-  // Docs written before `pendingKind` existed have no such field — they can only ever
-  // have been a category confirmation, since that was the only pending flow back then.
-  const data = raw.pendingKind ? raw : { ...raw, pendingKind: 'category_confirm' as const }
-  return data as unknown as BotPendingDraft
+  if (typeof raw.pendingKind !== 'string' || !KNOWN_PENDING_KINDS.has(raw.pendingKind)) {
+    await clearPending(userId)
+    return null
+  }
+  return raw as unknown as BotPendingDraft
 }
 
 export async function setPending(
   userId: string,
-  payload: CategoryConfirmDraft | GoalContributionDraft,
+  payload: GoalContributionDraft | DraftBatch,
 ): Promise<void> {
   await pendingRef(userId).set(
     stripUndefined({
@@ -248,6 +267,33 @@ export async function setPending(
 
 export async function clearPending(userId: string): Promise<void> {
   await pendingRef(userId).delete()
+}
+
+/**
+ * Atomically claims the pending transaction batch for a commit: in one Firestore
+ * transaction, reads the draft and — if it is a live `transaction_batch` — deletes it
+ * and returns it. A second concurrent `commit()` (double `ok`, double Simpan-tap, or a
+ * retry after a post-write bookkeeping failure) then finds nothing and gets `null`, so
+ * the batch is written exactly once. Returns `null` for a missing, expired, or
+ * non-batch draft (the expired one is also cleared).
+ */
+export async function claimPendingForCommit(userId: string): Promise<BotPendingDraft | null> {
+  const ref = pendingRef(userId)
+  return getAdminDb().runTransaction(async (tx) => {
+    const snap = await tx.get(ref)
+    if (!snap.exists) return null
+    const raw = snap.data() as Record<string, unknown> & { expiresAt?: Timestamp }
+
+    const ms = raw.expiresAt?.toMillis?.()
+    if (ms == null || ms < Date.now()) {
+      tx.delete(ref)
+      return null
+    }
+    if (raw.pendingKind !== 'transaction_batch') return null
+
+    tx.delete(ref)
+    return raw as unknown as BotPendingDraft
+  })
 }
 
 // ─── Financial data ──────────────────────────────────────────────
@@ -300,6 +346,59 @@ export async function getRecentTransactions(userId: string, limit = 5): Promise<
     .limit(limit)
     .get()
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Transaction)
+}
+
+/** Half-open range `[from, to)`. Callers pass instants (already resolved to the user's
+ *  local midnight — see `core.ts`'s `handlePeriodSummary`), so the DST-free +7 offset
+ *  never has to be reasoned about here. */
+export async function getTransactionsBetween(userId: string, from: Date, to: Date): Promise<Transaction[]> {
+  const snap = await getAdminDb()
+    .collection(`users/${userId}/transactions`)
+    .where('date', '>=', Timestamp.fromDate(from))
+    .where('date', '<', Timestamp.fromDate(to))
+    .orderBy('date', 'desc')
+    .get()
+  return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Transaction)
+}
+
+/**
+ * Keyword search over descriptions. Firestore has no substring operator, so the recent
+ * window is fetched and filtered in memory — bounded by `scanLimit`, which is what
+ * keeps this from turning into a full-collection read as the ledger grows.
+ */
+export async function searchTransactions(
+  userId: string,
+  keyword: string,
+  limit = 10,
+  scanLimit = 500,
+): Promise<Transaction[]> {
+  const needle = keyword.trim().toLowerCase()
+  if (!needle) return []
+
+  const snap = await getAdminDb()
+    .collection(`users/${userId}/transactions`)
+    .orderBy('date', 'desc')
+    .limit(scanLimit)
+    .get()
+
+  return snap.docs
+    .map((d) => ({ id: d.id, ...d.data() }) as Transaction)
+    .filter((tx) => (tx.description ?? '').toLowerCase().includes(needle))
+    .slice(0, limit)
+}
+
+/**
+ * Reads specific transactions by id. Used by `/undo` to learn which months a batch
+ * touched before deleting from them. `documentId() in` caps at 10 values per query, so
+ * ids are chunked — a bot batch is <=20, so this is one or two queries.
+ */
+export async function getTransactionsByIds(userId: string, ids: string[]): Promise<Transaction[]> {
+  if (ids.length === 0) return []
+  const col = getAdminDb().collection(`users/${userId}/transactions`)
+  const chunks: string[][] = []
+  for (let i = 0; i < ids.length; i += 10) chunks.push(ids.slice(i, i + 10))
+  const snaps = await Promise.all(chunks.map((chunk) => col.where(FieldPath.documentId(), 'in', chunk).get()))
+  return snaps.flatMap((snap) => snap.docs.map((d) => ({ id: d.id, ...d.data() }) as Transaction))
 }
 
 export async function getYearTransactions(userId: string, year: number): Promise<Transaction[]> {
@@ -426,10 +525,11 @@ export async function getFinancialContextAdmin(
   }
 }
 
-export async function createTransaction(userId: string, dto: CreateTransactionDTO): Promise<void> {
-  const db = getAdminDb()
-  const ref = db.collection(`users/${userId}/transactions`).doc()
-  const payload = stripUndefined({
+/** The one place the Firestore write shape for a transaction is defined — shared by the
+ *  single-write and batch paths so a batch row is byte-for-byte what `createTransaction`
+ *  would have written. */
+function transactionPayload(dto: CreateTransactionDTO): Record<string, unknown> {
+  return stripUndefined({
     date: Timestamp.fromDate(dto.date),
     type: dto.type,
     pillar: dto.pillar,
@@ -447,9 +547,253 @@ export async function createTransaction(userId: string, dto: CreateTransactionDT
     location: dto.location,
     mood: dto.mood,
   })
+}
+
+export async function createTransaction(userId: string, dto: CreateTransactionDTO): Promise<void> {
+  const ref = getAdminDb().collection(`users/${userId}/transactions`).doc()
   await ref.set({
-    ...payload,
+    ...transactionPayload(dto),
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   })
+}
+
+// ─── Batch writes, timezone, undo memory ───────────────────────
+
+/** Firestore caps a batch at 500 writes; `MAX_DRAFT_LINES` (20) keeps us far below,
+ *  and this guard makes that dependency explicit rather than implicit. */
+const MAX_BATCH_WRITES = 400
+
+/**
+ * Writes a whole reviewed batch atomically. All-or-nothing matters here: a partial
+ * write would leave the user's ledger holding half of what the confirmation card
+ * promised, with no way to tell which half.
+ */
+export async function createTransactionsBatch(
+  userId: string,
+  dtos: CreateTransactionDTO[],
+): Promise<string[]> {
+  if (dtos.length === 0) return []
+  const db = getAdminDb()
+  const batch = db.batch()
+  const ids: string[] = []
+
+  for (const dto of dtos.slice(0, MAX_BATCH_WRITES)) {
+    const ref = db.collection(`users/${userId}/transactions`).doc()
+    ids.push(ref.id)
+    batch.set(ref, {
+      ...transactionPayload(dto),
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    })
+  }
+
+  await batch.commit()
+  return ids
+}
+
+export async function deleteTransactions(userId: string, ids: string[]): Promise<number> {
+  if (ids.length === 0) return 0
+  const db = getAdminDb()
+  const batch = db.batch()
+  for (const id of ids.slice(0, MAX_BATCH_WRITES)) {
+    batch.delete(db.doc(`users/${userId}/transactions/${id}`))
+  }
+  await batch.commit()
+  return Math.min(ids.length, MAX_BATCH_WRITES)
+}
+
+function lastBatchRef(userId: string) {
+  return getAdminDb().doc(`users/${userId}/meta/botLastBatch`)
+}
+
+/** What `/undo` reverses. Only ever the most recent commit — deeper history is the
+ *  web app's job, where a list with checkboxes beats a chat command. */
+export async function rememberLastBatch(userId: string, transactionIds: string[]): Promise<void> {
+  await lastBatchRef(userId).set({ transactionIds, createdAt: FieldValue.serverTimestamp() })
+}
+
+export async function getLastBatch(
+  userId: string,
+): Promise<{ transactionIds: string[]; createdAt: Timestamp } | null> {
+  const snap = await lastBatchRef(userId).get()
+  if (!snap.exists) return null
+  const data = snap.data() as { transactionIds?: string[]; createdAt?: Timestamp }
+  if (!Array.isArray(data.transactionIds) || data.transactionIds.length === 0) return null
+  return { transactionIds: data.transactionIds, createdAt: data.createdAt ?? Timestamp.now() }
+}
+
+export async function clearLastBatch(userId: string): Promise<void> {
+  await lastBatchRef(userId).delete()
+}
+
+/** The Vercel runtime is UTC. Every user-facing timestamp must be rendered in the
+ *  user's own zone or it reads seven hours wrong for an Indonesian user. */
+export async function getUserTimezone(userId: string): Promise<string> {
+  const snap = await getAdminDb().doc(`users/${userId}/meta/profile`).get()
+  const tz = snap.exists ? (snap.data()?.timezone as string | undefined) : undefined
+  const trimmed = tz?.trim()
+  if (!trimmed) return 'Asia/Jakarta'
+  // A stored value like "WIB" or a typo'd "Asia/Jkarta" throws `RangeError` in every
+  // `Intl.DateTimeFormat({ timeZone })` on the hot path (`formatDateTime`, `dayKeyInTz`)
+  // — validate once here so one bad profile can't break every review card.
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: trimmed })
+  } catch {
+    return 'Asia/Jakarta'
+  }
+  return trimmed
+}
+
+// ─── Per-user bot preferences (/mode, /atur) ────────────────────
+
+/** Merged over defaults so a doc written by an older build stays valid, exactly like
+ *  `FirestoreUserRepository.findSettings` does for the web app's settings. */
+export async function getBotPrefs(userId: string): Promise<BotPrefs> {
+  const snap = await getAdminDb().doc(`users/${userId}/meta/botPrefs`).get()
+  if (!snap.exists) return DEFAULT_BOT_PREFS
+  return { ...DEFAULT_BOT_PREFS, ...(snap.data() as Partial<BotPrefs>) }
+}
+
+export async function saveBotPrefs(userId: string, patch: Partial<BotPrefs>): Promise<BotPrefs> {
+  await getAdminDb().doc(`users/${userId}/meta/botPrefs`).set(stripUndefined(patch), { merge: true })
+  return getBotPrefs(userId)
+}
+
+// ─── Scan hints (shared with the web receipt scanner) ──────────
+
+/** The SAME document the web scanner learns into — `FirestoreReceiptScanRepository`
+ *  writes `users/{uid}/meta/scan_hints`. Sharing it means a correction made on the web
+ *  immediately makes the bot smarter, and a correction in chat improves the scanner. */
+export async function getScanHints(userId: string): Promise<CategoryHint[]> {
+  const snap = await getAdminDb().doc(`users/${userId}/meta/scan_hints`).get()
+  if (!snap.exists) return []
+  return (snap.data()?.hints ?? []) as CategoryHint[]
+}
+
+export async function saveScanHints(userId: string, hints: CategoryHint[]): Promise<void> {
+  await getAdminDb().doc(`users/${userId}/meta/scan_hints`).set({ hints }, { merge: true })
+}
+
+// ─── Gemini quota ledger ───────────────────────────────────────
+
+/**
+ * Shared Gemini quota ledger. Not scoped to a user: the free-tier quota belongs to the
+ * API key, so every user's traffic draws from the same pool.
+ *
+ * Writes are per-model merge-writes (see `saveModelHealth`) so two concurrent pipelines
+ * touching different tiers no longer clobber each other's increments. The read is still
+ * a plain read-modify-write; a stale count at worst causes one extra 429, which the
+ * router already handles by rotating.
+ */
+export async function getModelHealth(): Promise<{ dayKey: string; models: Record<string, ModelHealth> }> {
+  const snap = await getAdminDb().doc('bot_meta/geminiHealth').get()
+  if (!snap.exists) return { dayKey: '', models: {} }
+  const data = snap.data() as { dayKey?: string; models?: Record<string, ModelHealth> }
+  return { dayKey: data.dayKey ?? '', models: data.models ?? {} }
+}
+
+/**
+ * `state === null` → whole-doc reset for a new Pacific day (one write, wipes every
+ * prior per-model counter). Otherwise merge-write ONLY the touched model, so a
+ * concurrent pipeline incrementing a different model's counter is not overwritten.
+ */
+export async function saveModelHealth(
+  dayKey: string,
+  modelId: string,
+  state: ModelHealth | null,
+): Promise<void> {
+  const ref = getAdminDb().doc('bot_meta/geminiHealth')
+  if (state === null) {
+    await ref.set({ dayKey, models: {}, updatedAt: FieldValue.serverTimestamp() })
+    return
+  }
+  await ref.set(
+    { dayKey, models: { [modelId]: state }, updatedAt: FieldValue.serverTimestamp() },
+    { merge: true },
+  )
+}
+
+/** Per-user daily AI-call cap. The shared `bot_meta/geminiHealth` ledger only stops the
+ *  whole API key from running dry; this stops ONE linked account from spending the
+ *  free-tier pool on everyone else's behalf. */
+export const DAILY_USER_MODEL_CAP = 40
+
+/**
+ * Bumps `users/{uid}/meta/botModelDay` `{ day, count }` and returns the new count. `day`
+ * is the Pacific day key (matches Google's quota reset). A new day resets the counter
+ * to 1; same day is an atomic `FieldValue.increment`.
+ */
+export async function bumpUserModelCalls(userId: string): Promise<number> {
+  const ref = getAdminDb().doc(`users/${userId}/meta/botModelDay`)
+  const today = dayKeyInTz(new Date(), 'America/Los_Angeles')
+  const snap = await ref.get()
+  const stored = snap.exists ? (snap.data() as { day?: string; count?: number }) : null
+
+  if (!stored || stored.day !== today) {
+    await ref.set({ day: today, count: 1 })
+    return 1
+  }
+
+  await ref.set({ count: FieldValue.increment(1) }, { merge: true })
+  const after = await ref.get()
+  return (after.data() as { count?: number })?.count ?? 1
+}
+
+// ─── Model-result cache (keyed by content hash — see cache.ts) ──
+//
+// The same photo or sentence arriving twice is routine: GOWA retries a webhook it
+// thinks failed, and a user who saw no reply re-sends. Each repeat used to cost two
+// calls out of a twenty-a-day budget.
+
+/** 30 days. Long enough that a re-send weeks later is free; short enough that a
+ *  Firestore native TTL policy on `expiresAt` keeps the collection from growing. */
+const CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000
+
+/** A Drive upload that already happened for this exact image — cached next to the
+ *  read so a re-send reuses the file instead of creating a duplicate. */
+type CachedReceiptUpload = { gDriveFileId: string; gDriveWebViewLink: string }
+
+export interface CachedReceipt {
+  result: ReceiptScanResult
+  /** Absent on entries written before upload-caching, or when the upload had failed. */
+  receipt?: CachedReceiptUpload
+}
+
+export async function getCachedReceipt(userId: string, hash: string): Promise<CachedReceipt | null> {
+  const snap = await getAdminDb().doc(`users/${userId}/bot_receipt_cache/${hash}`).get()
+  if (!snap.exists) return null
+  const data = snap.data()
+  if (!data?.result) return null
+  return { result: data.result as ReceiptScanResult, receipt: (data.receipt as CachedReceiptUpload) ?? undefined }
+}
+
+export async function saveCachedReceipt(
+  userId: string,
+  hash: string,
+  result: ReceiptScanResult,
+  receipt?: CachedReceiptUpload,
+): Promise<void> {
+  await getAdminDb()
+    .doc(`users/${userId}/bot_receipt_cache/${hash}`)
+    .set(
+      stripUndefined({
+        result,
+        receipt,
+        expiresAt: Timestamp.fromMillis(Date.now() + CACHE_TTL_MS),
+      }),
+    )
+}
+
+export async function getCachedParse(userId: string, hash: string): Promise<ParsedLine[] | null> {
+  const snap = await getAdminDb().doc(`users/${userId}/bot_parse_cache/${hash}`).get()
+  if (!snap.exists) return null
+  const lines = snap.data()?.lines
+  return Array.isArray(lines) ? (lines as ParsedLine[]) : null
+}
+
+export async function saveCachedParse(userId: string, hash: string, lines: ParsedLine[]): Promise<void> {
+  await getAdminDb()
+    .doc(`users/${userId}/bot_parse_cache/${hash}`)
+    .set({ lines, expiresAt: Timestamp.fromMillis(Date.now() + CACHE_TTL_MS) })
 }

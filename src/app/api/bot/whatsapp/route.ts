@@ -3,7 +3,9 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { waitUntil } from '@vercel/functions'
 import { claimInboundMessage } from '@/shared/bot/admin-data'
 import { handleIncoming } from '@/shared/bot/core'
+import { renderForWhatsApp } from '@/shared/bot/format-wa'
 import { downloadWhatsAppMedia } from '@/shared/bot/media-whatsapp'
+import { replies } from '@/shared/bot/replies'
 import type { BotIncoming, BotReply } from '@/shared/bot/types'
 
 export const runtime = 'nodejs'
@@ -50,58 +52,100 @@ function verifySignature(rawBody: string, signatureHeader: string | null): boole
   return timingSafeEqual(expectedBuf, providedBuf)
 }
 
-/**
- * WhatsApp has no HTML/inline-keyboard support, so a `BotReply` is downgraded here,
- * once, in the one place that actually sends via GOWA — `core.ts`/`replies.ts` stay
- * platform-agnostic.
- *
- * A keyboard whose every value is either a bare number or `"batal"` (the
- * category-confirm and goal-contribution flows) renders as a plain numbered list —
- * typing the number reproduces exactly what tapping the button would have sent, so
- * the underlying flow needs no WhatsApp-specific branch at all. A keyboard carrying
- * self-contained action tokens instead (`unlink:confirm`, `skip_recurring:<id>:<day>`)
- * has no typed equivalent a user could plausibly guess, so those stay Telegram-only —
- * the message says so rather than silently going nowhere.
- */
-function renderForWhatsApp(reply: BotReply): string {
-  let text = reply.text
-    .replace(/<b>([\s\S]*?)<\/b>/g, '*$1*')
-    .replace(/<i>([\s\S]*?)<\/i>/g, '_$1_')
-    .replace(/<code>([\s\S]*?)<\/code>/g, '`$1`')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-
-  if (reply.keyboard && reply.keyboard.length > 0) {
-    const buttons = reply.keyboard.flat()
-    const allTypeable = buttons.every((b) => /^\d+$/.test(b.value) || b.value === 'batal')
-
-    if (allTypeable) {
-      const lines = buttons.map((b) => `${b.value === 'batal' ? '"batal"' : `${b.value})`} ${b.label}`)
-      text += `\n\n${lines.join('\n')}`
-    } else {
-      text += '\n\n(Aksi ini saat ini hanya bisa dikonfirmasi lewat Telegram, atau lewat Pengaturan di web.)'
-    }
-  }
-
-  return text
-}
-
-async function sendMessage(chatId: string, reply: BotReply): Promise<void> {
+function gowaAuth(): { baseUrl: string; authHeader: string } | null {
   const baseUrl = process.env.GOWA_BASE_URL
   const user = process.env.GOWA_BASIC_AUTH_USER
   const password = process.env.GOWA_BASIC_AUTH_PASSWORD
-  if (!baseUrl || !user || !password) return
+  if (!baseUrl || !user || !password) return null
+  return {
+    baseUrl: baseUrl.replace(/\/+$/, ''),
+    authHeader: `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`,
+  }
+}
+
+/**
+ * Fire-and-forget acknowledgements. None of these are worth failing a transaction
+ * over — a dropped typing indicator is invisible, a dropped reply is not — so every
+ * one of them swallows its own error.
+ */
+async function gowaPost(path: string, body: Record<string, unknown>): Promise<void> {
+  const auth = gowaAuth()
+  if (!auth) return
   try {
-    const authHeader = `Basic ${Buffer.from(`${user}:${password}`).toString('base64')}`
-    await fetch(`${baseUrl}/send/message`, {
+    await fetch(`${auth.baseUrl}${path}`, {
       method: 'POST',
-      headers: { Authorization: authHeader, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: chatId, message: renderForWhatsApp(reply) }),
+      headers: { Authorization: auth.authHeader, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
     })
   } catch (error) {
-    console.error('whatsapp (gowa) sendMessage error:', error)
+    console.error(`whatsapp (gowa) ${path} error:`, error instanceof Error ? error.message : error)
+  }
+}
+
+/** WhatsApp shows this for a few seconds; GOWA needs an explicit stop. */
+function setTyping(chatId: string, action: 'start' | 'stop'): Promise<void> {
+  return gowaPost('/send/chat-presence', { phone: chatId, action })
+}
+
+/** 👀 on arrival, ✅ when the reply is out — the cheapest possible "I heard you". */
+function react(messageId: string, chatId: string, emoji: string): Promise<void> {
+  return gowaPost(`/message/${encodeURIComponent(messageId)}/reaction`, { phone: chatId, emoji })
+}
+
+/** Returns the sent message's id so a placeholder can later be edited in place. */
+async function sendMessage(chatId: string, reply: BotReply): Promise<string | null> {
+  const auth = gowaAuth()
+  if (!auth) return null
+  try {
+    const res = await fetch(`${auth.baseUrl}/send/message`, {
+      method: 'POST',
+      headers: { Authorization: auth.authHeader, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: chatId, message: renderForWhatsApp(reply) }),
+    })
+    const body = (await res.json()) as { results?: { message_id?: string } }
+    return body.results?.message_id ?? null
+  } catch (error) {
+    console.error('whatsapp (gowa) sendMessage error:', error instanceof Error ? error.message : error)
+    return null
+  }
+}
+
+/** WhatsApp allows editing your own message for about 15 minutes — far longer than any
+ *  receipt read takes. Falls back to a fresh message if the edit is refused, so a stale
+ *  placeholder can never be the last thing the user sees. */
+async function editMessage(chatId: string, messageId: string, reply: BotReply): Promise<void> {
+  const auth = gowaAuth()
+  if (!auth) return
+  try {
+    const res = await fetch(`${auth.baseUrl}/message/${encodeURIComponent(messageId)}/update`, {
+      method: 'POST',
+      headers: { Authorization: auth.authHeader, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: chatId, message: renderForWhatsApp(reply) }),
+    })
+    if (!res.ok) await sendMessage(chatId, reply)
+  } catch (error) {
+    console.error('whatsapp (gowa) editMessage error:', error instanceof Error ? error.message : error)
+    await sendMessage(chatId, reply)
+  }
+}
+
+/** Uploads `reply.document` via GOWA's `/send/file` (multipart `phone` + `file`), after
+ *  the text reply. No `Content-Type` header — `fetch` must set the multipart boundary
+ *  itself. Best-effort: a failed upload never breaks the text reply. */
+async function sendDocument(chatId: string, doc: NonNullable<BotReply['document']>): Promise<void> {
+  const auth = gowaAuth()
+  if (!auth) return
+  try {
+    const form = new FormData()
+    form.append('phone', chatId)
+    form.append('file', new Blob([Buffer.from(doc.base64, 'base64')], { type: doc.mimeType }), doc.filename)
+    await fetch(`${auth.baseUrl}/send/file`, {
+      method: 'POST',
+      headers: { Authorization: auth.authHeader },
+      body: form,
+    })
+  } catch (error) {
+    console.error('whatsapp (gowa) sendDocument error:', error instanceof Error ? error.message : error)
   }
 }
 
@@ -120,10 +164,18 @@ async function processMessage(payload: GowaMessage): Promise<void> {
   if (!payload.chat_id) return
   const externalId = stripJidSuffix(payload.chat_id)
 
+  await react(payload.id, payload.chat_id, '👀')
+  await setTyping(payload.chat_id, 'start')
+
+  let placeholderId: string | null = null
+
   try {
     let incoming: BotIncoming | null = null
 
     if (payload.image) {
+      // Only photos are slow enough to need a placeholder; a text message is usually
+      // answered from the local layer before one would even render.
+      placeholderId = await sendMessage(payload.chat_id, replies.receiptReceived())
       // `chat_id` (full JID) is required by GOWA's download endpoint as `phone` — it
       // rejects a blank one with HTTP 400 and cross-checks it against the message's
       // own chat.
@@ -142,11 +194,20 @@ async function processMessage(payload: GowaMessage): Promise<void> {
 
     if (incoming) {
       const reply = await handleIncoming(incoming)
-      await sendMessage(payload.chat_id, reply)
+      if (placeholderId) await editMessage(payload.chat_id, placeholderId, reply)
+      else await sendMessage(payload.chat_id, reply)
+      if (reply.document) await sendDocument(payload.chat_id, reply.document)
+      await react(payload.id, payload.chat_id, '✅')
     }
   } catch (error) {
-    console.error('whatsapp (gowa) webhook message error:', error)
-    await sendMessage(payload.chat_id, { text: 'Ada masalah di sisi kami — coba lagi sebentar lagi.' })
+    console.error('whatsapp (gowa) webhook message error:', error instanceof Error ? error.message : error)
+    const errorReply: BotReply = { text: 'Ada masalah di sisi kami — coba lagi sebentar lagi.' }
+    // Edit the "📸 Struk diterima…" placeholder into the error rather than leaving it
+    // stranded above a fresh error bubble.
+    if (placeholderId) await editMessage(payload.chat_id, placeholderId, errorReply)
+    else await sendMessage(payload.chat_id, errorReply)
+  } finally {
+    await setTyping(payload.chat_id, 'stop')
   }
 }
 
@@ -181,6 +242,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
   }
 
   const payload = body.payload
+  // The bot is 1:1 only — linking is per private chat. A group chat (`@g.us`) collapses
+  // every member onto the one linked identity, so any member could drive another's
+  // review card. Ignore it outright.
+  if (payload?.chat_id?.endsWith('@g.us')) return NextResponse.json({ ok: true })
+
   if (body.event === 'message' && payload && !payload.is_from_me) {
     let shouldProcess = true
     try {
@@ -189,7 +255,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       // fail-open: better a rare duplicate than a dropped message with no reply.
       shouldProcess = await claimInboundMessage('whatsapp', payload.id)
     } catch (error) {
-      console.error('whatsapp (gowa) claimInboundMessage error (processing anyway):', error)
+      console.error(
+        'whatsapp (gowa) claimInboundMessage error (processing anyway):',
+        error instanceof Error ? error.message : error,
+      )
     }
     if (shouldProcess) waitUntil(processMessage(payload))
   }

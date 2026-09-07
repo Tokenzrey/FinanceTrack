@@ -55,7 +55,9 @@ beforeEach(() => {
   waitUntilPromises.length = 0
   handleIncoming.mockResolvedValue({ text: 'ok' })
   claimInboundMessage.mockResolvedValue(true)
-  global.fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({}) }) as unknown as typeof fetch
+  global.fetch = vi
+    .fn()
+    .mockResolvedValue({ ok: true, json: async () => ({ results: { message_id: 'ph1' } }) }) as unknown as typeof fetch
 
   process.env.WHATSAPP_WEBHOOK_SECRET = 'gowa-secret'
   process.env.GOWA_BASE_URL = 'https://gowatokenzrey.my.id'
@@ -92,13 +94,15 @@ describe('WhatsApp (GOWA) — message normalization', () => {
       text: 'ringkasan',
     })
 
-    const [sendUrl, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
-    expect(sendUrl).toBe('https://gowatokenzrey.my.id/send/message')
-    expect(JSON.parse(init.body).phone).toBe('628123456789@s.whatsapp.net') // full JID, not the stripped id
+    const sendCall = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.find((c) =>
+      (c[0] as string).endsWith('/send/message'),
+    )
+    expect(sendCall?.[0]).toBe('https://gowatokenzrey.my.id/send/message')
+    expect(JSON.parse(sendCall?.[1].body).phone).toBe('628123456789@s.whatsapp.net') // full JID, not the stripped id
   })
 
-  it('strips the group JID suffix (@g.us) the same way', async () => {
-    await POST(
+  it('ignores a group chat (@g.us) entirely — the bot is 1:1 only (N3)', async () => {
+    const res = await POST(
       req({
         event: 'message',
         device_id: '628987654321@s.whatsapp.net',
@@ -113,7 +117,9 @@ describe('WhatsApp (GOWA) — message normalization', () => {
       }),
     )
     await flush()
-    expect(handleIncoming).toHaveBeenCalledWith(expect.objectContaining({ externalId: '120363012345678901' }))
+    expect(res.status).toBe(200)
+    expect(claimInboundMessage).not.toHaveBeenCalled()
+    expect(handleIncoming).not.toHaveBeenCalled()
   })
 
   it('skips processing entirely when the message id was already claimed (GOWA retry / redelivery)', async () => {
@@ -213,7 +219,166 @@ describe('WhatsApp (GOWA) — message normalization', () => {
 
     expect(res.status).toBe(200)
     expect(handleIncoming).not.toHaveBeenCalled()
-    const [, init] = (global.fetch as ReturnType<typeof vi.fn>).mock.calls[0]
-    expect(JSON.parse(init.body).message).toContain('masalah')
+    // A photo placeholder went out first; the error then edits that placeholder in
+    // place (via /update) rather than being sent as a fresh bubble above a stale one.
+    const updateCall = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.find((c) =>
+      (c[0] as string).includes('/message/ph1/update'),
+    )
+    expect(updateCall).toBeDefined()
+    expect(JSON.parse((updateCall![1] as { body: string }).body).message).toContain('masalah')
+    // ...and not also re-sent as a new /send/message carrying the error.
+    const errorSends = (global.fetch as ReturnType<typeof vi.fn>).mock.calls
+      .filter((c) => (c[0] as string).endsWith('/send/message'))
+      .map((c) => JSON.parse((c[1] as { body: string }).body).message as string)
+      .filter((m) => m.includes('masalah'))
+    expect(errorSends).toHaveLength(0)
+  })
+
+  it('sends a placeholder for a photo and edits it into the final reply', async () => {
+    downloadWhatsAppMedia.mockResolvedValue({ base64: 'ZmFrZQ==', mimeType: 'image/jpeg' })
+    handleIncoming.mockResolvedValue({ text: 'Tinjau 2 Transaksi', html: true })
+
+    await POST(req({
+      event: 'message', device_id: 'd@s.whatsapp.net',
+      payload: { id: 'm1', chat_id: '628@s.whatsapp.net', from: '628@s.whatsapp.net', timestamp: 't', is_from_me: false, body: '', image: 'statics/media/x.jpg' },
+    }))
+    await flush()
+
+    const urls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0] as string)
+    expect(urls.filter((u) => u.endsWith('/send/message'))).toHaveLength(1) // the placeholder only
+    expect(urls.some((u) => u.includes('/update'))).toBe(true)
+  })
+
+  it('sends no placeholder for a plain text message', async () => {
+    await POST(req({
+      event: 'message', device_id: 'd@s.whatsapp.net',
+      payload: { id: 'm2', chat_id: '628@s.whatsapp.net', from: '628@s.whatsapp.net', timestamp: 't', is_from_me: false, body: 'ringkasan' },
+    }))
+    await flush()
+    const urls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0] as string)
+    expect(urls.some((u) => u.includes('/update'))).toBe(false)
+  })
+
+  it('falls back to a fresh message when the edit is refused', async () => {
+    global.fetch = vi.fn().mockImplementation((url: string) =>
+      url.includes('/update')
+        ? Promise.resolve({ ok: false, status: 400, json: async () => ({}) })
+        : Promise.resolve({ ok: true, json: async () => ({ results: { message_id: 'ph1' } }) }),
+    ) as unknown as typeof fetch
+    downloadWhatsAppMedia.mockResolvedValue({ base64: 'ZmFrZQ==', mimeType: 'image/jpeg' })
+
+    await POST(req({
+      event: 'message', device_id: 'd@s.whatsapp.net',
+      payload: { id: 'm3', chat_id: '628@s.whatsapp.net', from: '628@s.whatsapp.net', timestamp: 't', is_from_me: false, body: '', image: 'statics/media/x.jpg' },
+    }))
+    await flush()
+
+    const sends = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.filter((c) => (c[0] as string).endsWith('/send/message'))
+    expect(sends.length).toBeGreaterThanOrEqual(2) // placeholder + fallback
+  })
+})
+
+describe('WhatsApp (GOWA) — document attachment', () => {
+  it('uploads the reply document via /send/file, after the text reply, for /export', async () => {
+    handleIncoming.mockResolvedValue({
+      text: 'export ready',
+      html: true,
+      document: { filename: 'fintrack-2026-08.csv', mimeType: 'text/csv', base64: Buffer.from('Tanggal\r\n').toString('base64') },
+    })
+
+    await POST(
+      req({
+        event: 'message',
+        device_id: 'd@s.whatsapp.net',
+        payload: {
+          id: 'mx', chat_id: '628@s.whatsapp.net', from: '628@s.whatsapp.net',
+          timestamp: 't', is_from_me: false, body: '/export 8',
+        },
+      }),
+    )
+    await flush()
+
+    const urls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0] as string)
+    expect(urls.some((u) => u.endsWith('/send/message'))).toBe(true)
+    expect(urls.some((u) => u.endsWith('/send/file'))).toBe(true)
+  })
+
+  it('sends no file when the reply carries no document', async () => {
+    await POST(
+      req({
+        event: 'message',
+        device_id: 'd@s.whatsapp.net',
+        payload: {
+          id: 'my', chat_id: '628@s.whatsapp.net', from: '628@s.whatsapp.net',
+          timestamp: 't', is_from_me: false, body: 'ringkasan',
+        },
+      }),
+    )
+    await flush()
+
+    const urls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0] as string)
+    expect(urls.some((u) => u.endsWith('/send/file'))).toBe(false)
+  })
+})
+
+describe('WhatsApp (GOWA) — live acknowledgements', () => {
+  it('acknowledges the message with a reaction and a typing indicator before working', async () => {
+    await POST(
+      req({
+        event: 'message',
+        device_id: '628987654321@s.whatsapp.net',
+        payload: {
+          id: 'msg-live', chat_id: '628123456789@s.whatsapp.net', from: '628123456789@s.whatsapp.net',
+          timestamp: '2026-09-01T10:00:00Z', is_from_me: false, body: 'ringkasan',
+        },
+      }),
+    )
+    await flush()
+
+    const calls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0] as string)
+    expect(calls.some((u) => u.endsWith('/message/msg-live/reaction'))).toBe(true)
+    expect(calls.some((u) => u.endsWith('/send/chat-presence'))).toBe(true)
+    // The reply must still go out.
+    expect(calls.some((u) => u.endsWith('/send/message'))).toBe(true)
+  })
+
+  it('stops the typing indicator after replying', async () => {
+    await POST(
+      req({
+        event: 'message', device_id: '628987654321@s.whatsapp.net',
+        payload: {
+          id: 'msg-live2', chat_id: '628123456789@s.whatsapp.net', from: '628123456789@s.whatsapp.net',
+          timestamp: '2026-09-01T10:00:00Z', is_from_me: false, body: 'ringkasan',
+        },
+      }),
+    )
+    await flush()
+
+    const presence = (global.fetch as ReturnType<typeof vi.fn>).mock.calls
+      .filter((c) => (c[0] as string).endsWith('/send/chat-presence'))
+      .map((c) => JSON.parse((c[1] as { body: string }).body).action)
+    expect(presence).toEqual(['start', 'stop'])
+  })
+
+  it('never fails the pipeline when a presence or reaction call errors', async () => {
+    global.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/reaction') || url.includes('/chat-presence')) {
+        return Promise.reject(new Error('gowa down'))
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) })
+    }) as unknown as typeof fetch
+
+    await POST(
+      req({
+        event: 'message', device_id: '628987654321@s.whatsapp.net',
+        payload: {
+          id: 'msg-live3', chat_id: '628123456789@s.whatsapp.net', from: '628123456789@s.whatsapp.net',
+          timestamp: '2026-09-01T10:00:00Z', is_from_me: false, body: 'ringkasan',
+        },
+      }),
+    )
+    await flush()
+
+    expect(handleIncoming).toHaveBeenCalledTimes(1)
   })
 })
