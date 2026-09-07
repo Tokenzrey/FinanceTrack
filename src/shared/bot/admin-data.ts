@@ -65,6 +65,25 @@ export async function findLinkByExternalId(
   return snap.exists ? (snap.data() as BotLink) : null
 }
 
+/**
+ * Reverse of `findLinkByExternalId`: which external chats a user is linked to. The
+ * cron send path (`outbound.ts`) needs this direction — user → link(s) — to push a
+ * reminder or digest. Doc ids are `${platform}_${externalId}`; split on the FIRST
+ * `_` only so an external id that itself contains `_` still round-trips.
+ */
+export async function getLinksForUser(
+  userId: string,
+): Promise<Array<{ platform: 'whatsapp' | 'telegram'; externalId: string }>> {
+  const snap = await getAdminDb().collection('bot_links').where('userId', '==', userId).get()
+  return snap.docs.map((d) => {
+    const i = d.id.indexOf('_')
+    return {
+      platform: d.id.slice(0, i) as 'whatsapp' | 'telegram',
+      externalId: d.id.slice(i + 1),
+    }
+  })
+}
+
 /** Random, URL-safe, human-typeable — excludes visually ambiguous characters
  *  (0/O, 1/I/L) since the user has to retype this by hand into a chat. `randomInt` is a
  *  CSPRNG: a guessable code links a stranger's chat to this account. */
