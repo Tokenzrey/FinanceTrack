@@ -137,23 +137,6 @@ export interface DownloadedImage {
 }
 
 /**
- * Gemini's read on a text message's *meaning*. The amount is deliberately not part of
- * this shape — see `parse-amount.ts` for why nominal values are never trusted to the
- * model.
- */
-export interface ParsedIntent {
-  intent: BotIntent
-  description: string | null
-  /** Ranked candidate category ids, most likely first, up to 3. Empty when Gemini
-   *  found no plausible match at all. */
-  categoryCandidates: string[]
-  /** Days to shift the transaction date by (0 = today, -1 = yesterday, ...). */
-  dateOffset: number
-  /** Confidence in `categoryCandidates[0]` specifically (0-100). */
-  confidence: number
-}
-
-/**
  * One deterministic edit against the review card, produced by `parseReviewCommand`
  * from either typed text or a Telegram `rv:*` callback token — a tap and a typed
  * command land on the same code path (GOWA exposes no buttons, so WhatsApp users

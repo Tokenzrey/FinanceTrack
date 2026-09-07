@@ -33,11 +33,19 @@ export function statusEmoji(status: BudgetStatus): string {
   return map[status]
 }
 
-/** Amounts right-aligned to a common width so the block reads as a column. */
+/** `formatIDR` (Intl `id-ID`) joins "Rp" to the number with a non-breaking space;
+ *  chat clients render a plain one and the byte-exact reply tests assert it. */
+function idr(amount: number): string {
+  return formatIDR(amount).replace(/\u00A0/g, ' ')
+}
+
+/** The one money-column helper: amounts right-aligned to a common width so the block
+ *  reads as a column, NBSP normalised to a plain space. `replies.ts` routes its totals
+ *  blocks through this too — there is no second convention. */
 export function moneyColumn(rows: { label: string; amount: number }[]): string[] {
-  const width = Math.max(...rows.map((r) => formatIDR(r.amount).length))
+  const width = Math.max(...rows.map((r) => idr(r.amount).length))
   const labelWidth = Math.max(...rows.map((r) => r.label.length))
   return rows.map(
-    (r) => `${r.label.padEnd(labelWidth, ' ')}  <code>${formatIDR(r.amount).padStart(width, ' ')}</code>`,
+    (r) => `${r.label.padEnd(labelWidth, ' ')}  <code>${idr(r.amount).padStart(width, ' ')}</code>`,
   )
 }

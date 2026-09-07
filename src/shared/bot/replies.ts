@@ -49,21 +49,6 @@ const TYPE_LABEL: Record<DraftLine['type'], string> = {
   transfer: 'Transfer',
 }
 
-/** Right-aligns the digits so the totals block reads as a column — the "Rp" mark stays
- *  flush left and the padding goes between it and the number (§5). Wrapped in <code> by
- *  the caller: WhatsApp and Telegram both render monospace, the only way it survives. */
-function padAmount(value: number, width: number): string {
-  const s = idr(value)
-  const gap = s.indexOf(' ')
-  if (gap < 0) return s.padStart(width, ' ')
-  const mark = s.slice(0, gap)
-  return `${mark} ${s.slice(gap + 1).padStart(width - mark.length - 1, ' ')}`
-}
-
-function amountColumnWidth(values: number[]): number {
-  return Math.max(...values.map((v) => idr(v).length))
-}
-
 function renderLine(line: DraftLine, tz: string, showDate: boolean): string {
   const category = line.categoryName
     ? escapeHtml(line.categoryName)
@@ -624,20 +609,26 @@ export const replies = {
     parts.push(shown.map((l) => renderLine(l, tz, !uniformDate)).join('\n\n'))
 
     // Totals block: only the types actually present, plus the receipt cross-check.
-    const totalValues = [totals.expense, totals.income, totals.transfer, batch.receiptTotal ?? 0]
-    const width = amountColumnWidth(totalValues.filter((v) => v > 0).concat(0))
-    const totalLines: string[] = []
-    if (totals.expense > 0) totalLines.push(`Pengeluaran  <code>${padAmount(totals.expense, width)}</code>`)
-    if (totals.income > 0) totalLines.push(`Pemasukan    <code>${padAmount(totals.income, width)}</code>`)
-    if (totals.transfer > 0) totalLines.push(`Transfer     <code>${padAmount(totals.transfer, width)}</code>`)
+    // Routed through the single `moneyColumn` helper (`render.ts`) — no second column
+    // convention.
+    const totalRows: { label: string; amount: number }[] = []
+    if (totals.expense > 0) totalRows.push({ label: 'Pengeluaran', amount: totals.expense })
+    if (totals.income > 0) totalRows.push({ label: 'Pemasukan', amount: totals.income })
+    if (totals.transfer > 0) totalRows.push({ label: 'Transfer', amount: totals.transfer })
 
+    let verdict = ''
     if (batch.receiptTotal !== null) {
       const lineSum = batch.lines.reduce((sum, l) => sum + l.amount, 0)
       const diff = batch.receiptTotal - lineSum
       // 500 rupiah is the same tolerance the web scanner uses for rounding noise.
-      const verdict =
-        Math.abs(diff) <= 500 ? '✅ cocok' : `⚠️ selisih ${idr(Math.abs(diff))}`
-      totalLines.push(`Total struk  <code>${padAmount(batch.receiptTotal, width)}</code> ${verdict}`)
+      verdict = Math.abs(diff) <= 500 ? ' ✅ cocok' : ` ⚠️ selisih ${idr(Math.abs(diff))}`
+      totalRows.push({ label: 'Total struk', amount: batch.receiptTotal })
+    }
+
+    const totalLines = moneyColumn(totalRows)
+    // The receipt cross-check verdict rides on the last row when `receiptTotal` is set.
+    if (verdict && totalLines.length > 0) {
+      totalLines[totalLines.length - 1] += verdict
     }
 
     if (totalLines.length > 0) {
