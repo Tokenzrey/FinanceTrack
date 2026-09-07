@@ -1,4 +1,5 @@
-import type { Reminder } from '@/shared/types/productivity'
+import { formatDateTime } from '@/shared/lib/format'
+import type { Reminder, Task } from '@/shared/types/productivity'
 
 /**
  * Pure scheduling maths for the reminder cron consumer (`/api/cron/reminders`) and
@@ -46,4 +47,31 @@ export function rollRecurrence(
   }
   if (r.recurrence.until && next > r.recurrence.until.toDate()) return null
   return next
+}
+
+function escapeHtml(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+}
+
+/** Compose a morning digest message body for a user's task + reminder agenda.
+ *  Pure: no I/O, no Date.now(). */
+export function digestBody(tasks: Task[], reminders: Reminder[], tz: string, dayLabel: string): string {
+  const header = `☀️ <b>Selamat pagi!</b> — ${escapeHtml(dayLabel)}`
+  const countLine = `${tasks.length} tugas, ${reminders.length} pengingat untuk hari ini`
+
+  // Empty agenda → early return with all-clear line
+  if (tasks.length === 0 && reminders.length === 0) {
+    return `${header}\n${countLine}\n\nTidak ada agenda hari ini — nikmati harimu ☕`
+  }
+
+  // Build task list
+  const taskLines = tasks.map((t, i) => `${i + 1}. ${escapeHtml(t.title)}`)
+
+  // Build reminder list
+  const reminderLines = reminders.map(
+    (r) => `• ${escapeHtml(r.message)} — ${formatDateTime(r.remindAt.toDate(), tz)}`,
+  )
+
+  const content = [...taskLines, ...reminderLines].join('\n')
+  return `${header}\n${countLine}\n\n${content}`
 }
