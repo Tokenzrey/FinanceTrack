@@ -101,6 +101,14 @@ vi.mock('./flow-write', () => ({
   handlePhoto: (...args: unknown[]) => handlePhoto(...args),
 }))
 
+// Productivity executor (own test file: flow-productivity.test.ts). core.ts only routes
+// to it — parseProductivityCommand / parseProductivityToken run for real (pure, and
+// already covered by productivity-commands.test.ts).
+const handleProductivityCommand = vi.fn()
+vi.mock('./flow-productivity', () => ({
+  handleProductivityCommand: (...args: unknown[]) => handleProductivityCommand(...args),
+}))
+
 // parse-amount is pure & already unit-tested (parse-amount.test.ts) — used for real here.
 const { handleIncoming } = await import('./core')
 
@@ -227,6 +235,7 @@ beforeEach(() => {
   getUserTimezone.mockResolvedValue('Asia/Jakarta')
   handleTextTransaction.mockResolvedValue({ text: 'stub: text transaction' })
   handlePhoto.mockResolvedValue({ text: 'stub: photo' })
+  handleProductivityCommand.mockResolvedValue({ text: 'stub: productivity' })
   getTransactionsByIds.mockResolvedValue([])
 })
 
@@ -747,6 +756,44 @@ describe('handleIncoming — bare /export (N5)', () => {
     await handleIncoming(textMsg('/ekspor'))
     expect(getMonthTransactions).toHaveBeenCalledTimes(1)
     expect(handleTextTransaction).not.toHaveBeenCalled()
+  })
+})
+
+// ─── Productivity commands (Task 9 wiring) ──────────────────────
+
+describe('handleIncoming — productivity dispatch', () => {
+  beforeEach(() => {
+    findLinkByExternalId.mockResolvedValue(LINK)
+  })
+
+  it('routes a /tugas text message to handleProductivityCommand, not the transaction path', async () => {
+    const reply = await handleIncoming(textMsg('/tugas', 'whatsapp'))
+    expect(handleProductivityCommand).toHaveBeenCalledWith(
+      'user-1',
+      expect.objectContaining({ kind: 'task_list' }),
+      'whatsapp',
+    )
+    expect(handleTextTransaction).not.toHaveBeenCalled()
+    expect(reply.text).toBe('stub: productivity')
+  })
+
+  it('handles a pr:done:<id> token without hitting the pending-draft or transaction path', async () => {
+    getPending.mockResolvedValue({ pendingKind: 'transaction_batch', lines: [{ n: 1 }], expiresAt: {} as never })
+    const reply = await handleIncoming(textMsg('pr:done:abc'))
+    expect(handleProductivityCommand).toHaveBeenCalledWith(
+      'user-1',
+      { kind: 'mark_done_token', reminderId: 'abc' },
+      'telegram',
+    )
+    expect(handleTextTransaction).not.toHaveBeenCalled()
+    expect(reply.text).toBe('stub: productivity')
+  })
+
+  it('lets a plain finance message fall through to handleTextTransaction', async () => {
+    const reply = await handleIncoming(textMsg('kopi 25rb'))
+    expect(handleProductivityCommand).not.toHaveBeenCalled()
+    expect(handleTextTransaction).toHaveBeenCalledWith('user-1', 'kopi 25rb')
+    expect(reply.text).toBe('stub: text transaction')
   })
 })
 
