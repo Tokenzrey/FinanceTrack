@@ -346,7 +346,7 @@ export type ProductivityCommand =
   | { kind: 'note_list' }
   | { kind: 'reminder_add'; message: string; when: ParsedWhen }
   | { kind: 'agenda' }
-  | { kind: 'snooze'; ref: number | null; minutes: number }   // dari `/tunda 15` atau tombol `pr:snooze:<id>:15`
+  | { kind: 'snooze'; ref: number | null; reminderId: string | null; minutes: number }   // `/tunda 15` → reminderId null (uses meta/plannerLastPush); tombol `pr:snooze:<id>:15` → reminderId set
   | { kind: 'mark_done_token'; reminderId: string }           // tombol `pr:done:<id>`
   | { kind: 'none' }
 
@@ -981,7 +981,7 @@ describe('parseProductivityCommand', () => {
 describe('parseProductivityToken', () => {
   it('pr:snooze:<id>:15', () => {
     expect(parseProductivityToken('pr:snooze:abc123:15'))
-      .toEqual({ kind: 'snooze', ref: null, minutes: 15 })
+      .toEqual({ kind: 'snooze', ref: null, reminderId: 'abc123', minutes: 15 })
   })
   it('pr:done:<id>', () => {
     expect(parseProductivityToken('pr:done:abc123'))
