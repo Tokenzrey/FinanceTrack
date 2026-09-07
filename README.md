@@ -83,7 +83,9 @@ milikmu sendiri, bukan di server pihak ketiga mana pun.
   subtotal, pajak, diskon, dan total secara otomatis, termasuk format harga ala
   Indonesia (pemisah ribuan titik).
 - Setiap item otomatis dipetakan ke kategori keuanganmu, dan aplikasi **belajar dari
-  koreksi manual** kamu untuk pemetaan yang makin akurat ke depannya.
+  koreksi manual** kamu untuk pemetaan yang makin akurat ke depannya — memori yang sama
+  ini dibagi dua arah dengan bot WhatsApp/Telegram (`meta/scan_hints`), jadi koreksi di
+  web membuat bot lebih pintar dan sebaliknya.
 - Mode ulasan sekaligus (satu transaksi gabungan) atau per-item (itemized).
 - Jika AI gagal membaca, foto tetap tersimpan — tinggal isi manual atau coba lagi tanpa
   foto ulang.
@@ -91,38 +93,63 @@ milikmu sendiri, bukan di server pihak ketiga mana pun.
   dibuang) dan skor keyakinan AI.
 
 ### Bot WhatsApp & Telegram
-- Tautkan akun sekali dari Pengaturan (kode 6 karakter, berlaku 15 menit), lalu jalankan
-  hampir seluruh aplikasi langsung dari chat — gratis, tanpa biaya tambahan.
-- Kirim teks bahasa natural ("makan siang 35rb", "gaji masuk 5jt") — nominal, jenis
-  (pemasukan/pengeluaran), dan kategori terdeteksi otomatis; kalau ragu, bot menawarkan
-  pilihan kategori (tombol tap di Telegram, balas angka di WhatsApp) untuk dikonfirmasi.
-- **Kirim foto struk** — dibaca dengan mesin AI yang sama dengan Scan Struk di web, lalu
-  otomatis tersimpan ke folder Drive `FinTrack/Receipts` kalau akun Google Drive-mu
-  sudah tertaut (kalau belum, transaksi tetap tercatat, hanya tanpa lampiran foto).
-- **14 command** mencakup hampir semua domain aplikasi, bukan cuma catat transaksi:
-  `/ringkasan`, `/saldo`, `/riwayat`, `/tahunan` (Anggaran &amp; Riwayat), `/target`,
-  `/setor` (Target Tabungan — dua langkah: pilih target, lalu ketik nominal),
-  `/kekayaan` (Kekayaan Bersih, dihitung dari aset &amp; liabilitas terkini — bukan
-  snapshot basi), `/rutin` (Transaksi Rutin, dengan tombol "lewati bulan ini"),
-  `/wishlist` (kelayakan beli lewat mesin yang sama dengan web), `/kategori`, `/batal`,
-  `/putuskan`, `/help`. Setiap command murni memakai ulang logika/perhitungan yang sama
-  dengan halaman web-nya (`buildMonthlySummary`, `buildYearSummary`, `calculateAffordability`,
-  `pendingOccurrences`, dst.) — bukan disalin ulang, jadi tidak pernah menyimpang dari
-  angka yang tampil di web.
-- **Telegram**: menu command lengkap (ketik `/` untuk melihatnya), pesan terformat
-  (tebal/kode/emoji status), dan tombol interaktif (inline keyboard) untuk konfirmasi
-  kategori, target setoran, dan aksi "lewati" — tanpa perlu mengetik angka manual.
+- Tautkan akun sekali dari Pengaturan (kode 6 karakter CSPRNG, berlaku 15 menit,
+  dikonsumsi di satu transaksi Firestore), lalu jalankan hampir seluruh aplikasi
+  langsung dari chat — gratis, tanpa biaya tambahan. Bot bekerja **hanya di chat
+  1-lawan-1**; pesan dari grup diabaikan.
+- **Satu pesan bisa jadi banyak transaksi** — pengeluaran, pemasukan, **dan transfer**:
+  `makan 35rb, bensin 50rb, gaji masuk 5jt` → tiga transaksi. Nominal selalu diparse
+  deterministik (`parse-amount.ts`), tidak pernah diambil dari angka model.
+- **Kartu tinjauan yang bisa diedit** — apa pun yang lebih dari satu transaksi (dan
+  semua struk) muncul sebagai kartu bernomor yang **wajib dikonfirmasi sebelum
+  disimpan**. Balas untuk mengubah: `ok` (simpan), `kat 2 1` (kategori baris 2),
+  `nom 1 40rb`, `ket 1 kopi susu`, `tgl 1 kemarin`, `hapus 2`, `gabung`/`pisah`,
+  `batal`. Di Telegram semua ini juga tombol tap. `commit()` idempotent — tap "Simpan"
+  dua kali tidak menulis dobel.
+- **Kirim foto struk** — dibaca dengan mesin AI yang sama dengan Scan Struk di web,
+  jadi banyak baris item, lalu ditinjau dulu (bisa `gabung` jadi satu transaksi).
+  **Caption foto** ikut jadi konteks ("yang buram itu teh botol 2×12rb") untuk
+  memperjelas item yang OCR-nya meleset. Foto tersimpan ke folder Drive
+  `FinTrack/Receipts` kalau Google Drive-mu tertaut (kalau belum, transaksi tetap
+  tercatat, hanya tanpa lampiran).
+- **Belajar dari konfirmasimu** — setiap kategori yang kamu setujui di kartu tinjauan
+  ditulis ke `meta/scan_hints` (dokumen yang sama dengan yang dipelajari Scan Struk di
+  web, dua arah). Setelah beberapa hari, frasa seperti `kopi 20rb` tercatat **tanpa
+  satu pun panggilan model**, di bawah setengah detik.
+- **Command** mencakup hampir semua domain aplikasi, sebagian menerima argumen:
+  `/ringkasan [bulan]` (mis. `/ringkasan agustus`), `/saldo [pilar]`, `/kategori <nama>`
+  (rincian satu kategori: laju harian, proyeksi, transaksi terakhir), `/hariini`,
+  `/minggu`, `/tahunan`, `/statistik` (merchant teratas, metode bayar, konsistensi),
+  `/riwayat [jumlah] [kata]`, `/cari <kata>`, `/undo` (batalkan pencatatan terakhir),
+  `/export [bulan]` (kirim CSV), `/target`, `/setor`, `/kekayaan`, `/rutin`,
+  `/wishlist`, `/mode ringkas|detail`, `/atur` (ambang auto-simpan, selalu-tinjau,
+  baris insight), `/kategori`, `/batal`, `/putuskan`, `/help`. Setiap command memakai
+  ulang logika/perhitungan yang sama dengan halaman web-nya (`buildMonthlySummary`,
+  `buildYearSummary`, `calculateAffordability`, `buildInsights`, `financialHealthScore`,
+  `pendingOccurrences`, `transactionsToCsv`, dst.) — bukan disalin ulang.
+- **Respons hidup**: reaksi 👀 saat pesan masuk, indikator "mengetik…" selagi Gemini
+  bekerja, ✅ saat balasan keluar; foto struk dibalas placeholder "sedang dibaca…" yang
+  **diedit di tempat** jadi kartu tinjauan begitu selesai. Balasan terstruktur (judul →
+  isi → total → footer) dengan **stempel tanggal + waktu lengkap** di zona waktu
+  profilmu, styling `*tebal*`/`_miring_`/`` `kode` `` (WhatsApp) atau HTML (Telegram).
+- **Hemat kuota**: hasil model di-cache per hash konten (foto/kalimat yang sama tidak
+  dibayar dua kali); klasifikasi kategori dicoba lokal dulu (nol panggilan); parsing
+  teks dan pemetaan kategori pakai tier model murah (flash-lite, 500/hari), ekstraksi
+  gambar pakai tier vision — dipilih oleh **router sadar-kuota** yang memutar seluruh
+  roster model dan mundur otomatis saat satu model kena limit. Ada **batas 40 panggilan
+  AI/hari per pengguna** (jalur nol-model tidak dihitung).
 - Keyword baca polos lama (`ringkasan`, `sisa`, tanpa `/`) tetap didukung di kedua
-  platform — tidak ada yang berhenti bekerja.
+  platform.
 - Sengaja **tidak** membawa manajemen kategori/anggaran, tutup/buka bulan, reset data,
   atau apa pun yang butuh form/wizard/konfirmasi ketik-kata — itu tetap di web,
   by design (lihat §11 di `implementation_telegram_bot_pro.md`).
 - Aturan bisnis yang sama persis dengan web ditegakkan di jalur bot: pilar selalu ikut
   kategori (tidak pernah ditebak dari kata-kata di pesan), bulan yang sudah ditutup
-  menolak pencatatan baru, nominal nol/negatif ditolak.
+  menolak pencatatan **dan** penghapusan (`/undo`), nominal nol/negatif ditolak.
 - Setup lengkap (gratis, ~3 menit Telegram / ~15 menit WhatsApp): lihat langkah 7 di
   [Instalasi & Konfigurasi](#7-opsional-siapkan-bot-whatsapp--telegram) atau
-  `implementation_bot_integration.md` / `implementation_telegram_bot_pro.md`.
+  `implementation_bot_integration.md` / `implementation_telegram_bot_pro.md` /
+  `implementation_bot_multi_transaksi_ux.md`.
 
 ### Transaksi Rutin (Recurring)
 - Buat aturan tagihan/pemasukan berulang: harian, mingguan, bulanan, atau tahunan.
@@ -209,7 +236,8 @@ milikmu sendiri, bukan di server pihak ketiga mana pun.
 | Autentikasi | Firebase Auth (email/password + Google) |
 | Database | Firestore (real-time, per-user security rules) |
 | Penyimpanan file | Google Drive REST API (folder `FinTrack/Receipts` & `FinTrack/Exports` milik user) |
-| AI | Gemini Vision (`@google/genai`) untuk ekstraksi struk |
+| AI | Gemini (`@google/genai`) — vision untuk ekstraksi struk, flash-lite untuk parsing teks & pemetaan kategori; lewat router sadar-kuota (`src/shared/lib/gemini-router.ts`) yang memutar seluruh roster model & mundur otomatis saat kena limit |
+| Serverless | `@vercel/functions` (`waitUntil`) — webhook bot balas 200 seketika, pipeline berat lanjut di belakang |
 | Verifikasi token server | `jose` (verifikasi JWT langsung ke JWKS publik Google — **tanpa** Firebase Admin SDK/service account) |
 | Grafik | Recharts + primitif SVG kustom (gauge, jar, heatmap) |
 | PDF | `@react-pdf/renderer` |
@@ -236,7 +264,7 @@ src/
 │   ├── dashboard/ transactions/ receipt-scanner/ recurring/ goals/
 │   ├── wishlist/ net-worth/ history/ analytics/ reports/ master-data/ settings/
 ├── shared/
-│   ├── bot/                   # inti bot WhatsApp/Telegram: parser, orkestrator, adapter media
+│   ├── bot/                   # inti bot WhatsApp/Telegram: dispatcher, parser deterministik, resolver kategori lokal, alur tinjauan editable, cache hasil model, adapter media
 │   ├── components/            # UI generik (shadcn primitives, layout, komponen finance)
 │   ├── hooks/                 # mis. useGoogleDrive, useBotLink
 │   ├── lib/                   # helper murni: format, csv, month-lock, budget-math, dst.
@@ -249,10 +277,17 @@ src/
 
 Firestore disusun per-pengguna: semua koleksi berada di bawah `users/{uid}/...`, dan
 satu aturan keamanan (`request.auth.uid == userId`) mencakup seluruh pohon data —
-lihat `firestore.rules`. Dua koleksi root tambahan, `bot_links` dan `bot_link_codes`,
-menyimpan pemetaan chat bot ↔ pengguna (perlu dicari dari sisi chat, bukan dari sisi
-pengguna, jadi tidak muat di pola `users/{uid}/...`) — keduanya deny-all untuk client,
-hanya bisa diakses lewat Firebase Admin SDK di jalur bot.
+lihat `firestore.rules`. Koleksi root tambahan milik jalur bot (`bot_links`,
+`bot_link_codes`, `bot_meta`, `bot_processed_messages`) menyimpan state yang perlu
+dicari dari sisi chat, bukan dari sisi pengguna, jadi tidak muat di pola
+`users/{uid}/...` — semuanya deny-all untuk client, hanya bisa diakses lewat Firebase
+Admin SDK di jalur bot. Dokumen bot di bawah `users/{uid}/` yang ditulis Admin SDK
+(`meta/botLinks`, `meta/botPending`, `meta/botPrefs`, `meta/botLastBatch`,
+`meta/botModelDay`, `bot_receipt_cache/*`, `bot_parse_cache/*`) boleh **dibaca** client
+(Pengaturan menampilkan status tautan/preferensi) tapi **tidak boleh ditulis** client
+di `firestore.rules` — supaya skrip client yang bermasalah tidak bisa memalsukan state
+yang dipercaya bot. Satu pengecualian: `meta/scan_hints` sengaja tetap bisa ditulis
+client, karena Scan Struk di web menulisnya lewat client SDK.
 
 ---
 
@@ -333,7 +368,8 @@ cp .env.example .env.local
 | `NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET` | Ya | idem |
 | `NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID` | Ya | idem |
 | `NEXT_PUBLIC_FIREBASE_APP_ID` | Ya | idem |
-| `GEMINI_API_KEY` | Opsional | Tanpa ini, scan struk AI nonaktif |
+| `GEMINI_API_KEY` | Opsional | Tanpa ini, scan struk AI dan parsing teks bot nonaktif (semua fitur lain jalan normal) |
+| `GEMINI_MODELS_VISION`, `GEMINI_MODELS_TEXT` | Opsional | Override roster model bot (format `id:rpd:rpm`, dipisah koma) — pakai kalau id bawaan di `gemini-router.ts` tidak cocok dengan yang muncul dari `scripts/list-gemini-models.mjs` |
 | `NEXT_PUBLIC_GOOGLE_CLIENT_ID` | Opsional | Tanpa ini, semua fitur Google Drive nonaktif |
 | `GOOGLE_CLIENT_SECRET` | Opsional* | **Wajib** kalau `NEXT_PUBLIC_GOOGLE_CLIENT_ID` diisi — server-only, jangan pernah beri prefix `NEXT_PUBLIC_` |
 | `TOKEN_ENCRYPTION_KEY` | Opsional* | **Wajib** kalau pakai Google Drive — 64 karakter hex, generate dengan perintah di bawah |
@@ -417,6 +453,8 @@ pertama kali).
 | `npm run test` | Jalankan seluruh test sekali (Vitest) |
 | `npm run test:watch` | Test dalam mode watch |
 | `npm run format` | Rapikan format kode dengan Prettier |
+| `GEMINI_API_KEY=… node scripts/list-gemini-models.mjs` | Cetak id model Gemini yang benar-benar bisa dipanggil key-mu — jalankan sekali lalu koreksi `DEFAULT_ROSTER` di `src/shared/lib/gemini-router.ts` (bot) |
+| `TELEGRAM_BOT_TOKEN=… node scripts/register-telegram-commands.mjs` | Daftarkan menu command Telegram (tombol ☰) — jalankan sekali per perubahan daftar command (bot) |
 
 ## Testing
 
@@ -459,9 +497,14 @@ yang bentrok (Vercel otomatis mendeteksi & memakai pnpm), dan tidak ada pemakaia
    memanggil Gemini dua kali dengan satu retry) — paket/pengaturan Vercel-mu perlu
    benar-benar mengizinkan durasi itu, kalau tidak permintaan scan yang lambat bisa
    terpotong sebelum selesai di production walau lancar di lokal. `/api/bot/telegram`
-   dan `/api/bot/whatsapp` diset `maxDuration = 30` detik dengan alasan sama (foto struk
-   lewat bot juga memanggil Gemini, lalu mengunggah ke Drive) — kalau pakai fitur bot,
-   berlaku pertimbangan yang sama.
+   dan `/api/bot/whatsapp` diset `maxDuration = 180` detik: keduanya balas 200 dalam
+   hitungan milidetik, tapi pipeline-nya lanjut di `waitUntil` setelah respons (foto
+   struk memanggil Gemini vision lalu mengunggah ke Drive) — paket Vercel-mu perlu
+   mengizinkan durasi function selama itu (Hobby membatasi ~60 dtk; masih cukup untuk
+   vision, tapi sesuaikan angkanya kalau perlu). Kalau pakai fitur bot, pastikan juga
+   TTL policy Firestore aktif untuk field `expiresAt` di koleksi
+   `bot_processed_messages`, `users/{uid}/bot_receipt_cache`, dan
+   `users/{uid}/bot_parse_cache` (tidak ada kode yang membersihkan dokumen kedaluwarsa).
 
 `package.json` sudah menyertakan `"packageManager"` (pin versi pnpm persis) dan
 `"engines"` (rentang Node minimum) supaya instalasi di Vercel deterministik dan tidak
@@ -483,14 +526,20 @@ diam-diam memakai versi Node yang berbeda dari yang diuji.
   respons lewat `middleware.ts`.
 - Refresh token Google Drive dienkripsi (AES-256-GCM) sebelum disimpan — lihat
   `TOKEN_ENCRYPTION_KEY` di atas.
-- **Bot WhatsApp/Telegram:** kode tautan sekali pakai, kedaluwarsa 15 menit, dikonsumsi
-  di satu transaksi Firestore (tidak mungkin dipakai dua chat sekaligus). Setiap webhook
-  diverifikasi sebelum diproses — Telegram lewat header rahasia
-  (`X-Telegram-Bot-Api-Secret-Token`), WhatsApp lewat tanda tangan HMAC atas raw body
-  (`X-Hub-Signature-256`, dibandingkan dengan `crypto.timingSafeEqual`). Koleksi
-  `bot_links`/`bot_link_codes` dan dokumen internal (`meta/botLinks`, `meta/botPending`)
-  ditolak untuk ditulis client secara langsung di `firestore.rules` — hanya bisa diubah
-  lewat Firebase Admin SDK di jalur bot sendiri.
+- **Bot WhatsApp/Telegram:** kode tautan sekali pakai dari CSPRNG (`crypto.randomInt`),
+  ditulis dengan `.create()` (bukan `.set()`, jadi tabrakan kode tidak mungkin menimpa
+  kode milik pengguna lain), kedaluwarsa 15 menit, dikonsumsi di satu transaksi
+  Firestore. Setiap webhook diverifikasi sebelum diproses — Telegram lewat header
+  rahasia (`X-Telegram-Bot-Api-Secret-Token`, dibandingkan `crypto.timingSafeEqual`),
+  WhatsApp lewat tanda tangan HMAC atas raw body (`X-Hub-Signature-256`, juga
+  `timingSafeEqual`). Bot hanya melayani chat 1-lawan-1 — pesan grup diabaikan, jadi
+  anggota grup lain tidak bisa mengendalikan kartu tinjauan pengguna yang tertaut.
+  Koleksi root bot dan seluruh dokumen state internal di bawah `users/{uid}/` (kecuali
+  `meta/scan_hints`) ditolak untuk ditulis client di `firestore.rules` — hanya bisa
+  diubah lewat Firebase Admin SDK di jalur bot sendiri. Kuota Gemini gratis dijaga
+  batas 40 panggilan model/hari per pengguna, plus router yang menyebar beban ke
+  seluruh roster model, plus cache hasil per hash konten, plus jalur nol-model untuk
+  frasa yang sudah dikenal.
 
 ## SEO
 
