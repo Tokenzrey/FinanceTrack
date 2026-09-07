@@ -32,7 +32,7 @@ function txType(raw: string): BotTxType | null {
 }
 
 /** Keeps the clock from `now` so an edited line still carries a real time of day. */
-function withClockOf(now: Date, year: number, month: number, day: number): Date | null {
+export function withClockOf(now: Date, year: number, month: number, day: number): Date | null {
   const next = new Date(now.getTime())
   next.setUTCFullYear(year, month - 1, day)
   if (Number.isNaN(next.getTime())) return null
@@ -48,7 +48,7 @@ function shiftDays(now: Date, days: number): Date {
   return next
 }
 
-function parseDateWord(raw: string, now: Date): Date | null {
+export function parseDateWord(raw: string, now: Date): Date | null {
   const word = raw.trim().toLowerCase()
 
   if (/^hari ?ini$/.test(word)) return new Date(now.getTime())
