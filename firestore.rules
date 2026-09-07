@@ -25,6 +25,27 @@ service cloud.firestore {
                    && !(document[0] == 'bot_receipt_cache' || document[0] == 'bot_parse_cache');
     }
 
+    match /reminders/{reminderId} {
+      allow read: if request.auth.uid == userId;
+      allow create: if request.auth.uid == userId
+                    && request.resource.data.status == 'pending'
+                    && request.resource.data.attempts == 0
+                    && request.resource.data.ownerId == userId;
+      // client boleh ubah message / remindAt / recurrence / cancel; TIDAK boleh sentuh field mesin
+      allow update: if request.auth.uid == userId
+                    && !request.resource.data.diff(resource.data).affectedKeys()
+                         .hasAny(['attempts', 'nextAttemptAt', 'lastError', 'sentAt', 'ownerId'])
+                    && (request.resource.data.status == resource.data.status
+                        || request.resource.data.status == 'cancelled');
+      allow delete: if request.auth.uid == userId;
+    }
+    match /tasks/{taskId} {
+      allow read, write: if request.auth.uid == userId;
+    }
+    match /notes/{noteId} {
+      allow read, write: if request.auth.uid == userId;
+    }
+
     // Root collections used only by the bot's server-side (Admin SDK) code — never
     // read or written by the client. Admin SDK access bypasses these rules, so this
     // is a deny-all for every other caller.
@@ -38,6 +59,9 @@ service cloud.firestore {
       allow read, write: if false;
     }
     match /bot_processed_messages/{doc} {
+      allow read, write: if false;
+    }
+    match /cron_runs/{runId} {
       allow read, write: if false;
     }
   }
