@@ -8,6 +8,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import {
   AlertTriangle,
   Bell,
+  CalendarClock,
   Cloud,
   KeyRound,
   Link2,
@@ -23,6 +24,7 @@ import {
   Trash2,
   Unlink,
 } from 'lucide-react'
+import { doc, getDoc } from 'firebase/firestore'
 import { toast } from 'sonner'
 import { Button } from '@/shared/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui/card'
@@ -39,10 +41,18 @@ import {
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/components/ui/dialog'
 import { Input } from '@/shared/components/ui/input'
 import { Label } from '@/shared/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/shared/components/ui/select'
 import { Switch } from '@/shared/components/ui/switch'
 import { PageHeader } from '@/shared/components/layout/TopBar'
 import { PeriodSelector } from '@/modules/dashboard/components/DashboardHeader'
 import { cn } from '@/shared/lib/utils'
+import { getDb } from '@/shared/lib/firebase'
 import { formatMonthLong } from '@/shared/lib/format'
 import { fireConfetti } from '@/shared/lib/confetti'
 import { requestNotificationPermission } from '@/shared/lib/notifications'
@@ -58,9 +68,14 @@ import {
 } from '@/shared/lib/validation'
 import { repositories } from '@/shared/repositories'
 import { resetAllData, resetMonthData } from '@/shared/use-cases/data/ResetData.usecase'
+import {
+  updatePlannerPrefs,
+  type PlannerPrefsPayload,
+} from '@/shared/use-cases/planner/UpdatePlannerPrefs.usecase'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import { useBudgetStore } from '@/shared/stores/budget.store'
 import { DEFAULT_APP_SETTINGS, type AppSettings, type ResetSummary } from '@/shared/types/domain'
+import { DEFAULT_PLANNER_PREFS } from '@/shared/types/productivity'
 
 const RESET_CONFIRM_WORD = 'HAPUS'
 type ResetScope = 'current' | 'specific' | 'all'
@@ -69,6 +84,14 @@ const THEMES = [
   { value: 'light', label: 'Terang', icon: Sun },
   { value: 'dark', label: 'Gelap', icon: Moon },
   { value: 'system', label: 'Sistem', icon: Monitor },
+] as const
+
+/** Preset lead times (minutes before a task's due time) offered as toggle chips. */
+const LEAD_PRESETS = [
+  { value: 0, label: 'Tepat waktu' },
+  { value: 15, label: '15 menit' },
+  { value: 60, label: '1 jam' },
+  { value: 1440, label: '1 hari' },
 ] as const
 
 export function SettingsPage() {
@@ -127,6 +150,13 @@ export function SettingsPage() {
   const [closing, setClosing] = useState(false)
   const [confirmClose, setConfirmClose] = useState(false)
 
+  const [plannerPrefs, setPlannerPrefsForm] = useState<PlannerPrefsPayload>({
+    digestHour: DEFAULT_PLANNER_PREFS.digestHour,
+    digestEnabled: DEFAULT_PLANNER_PREFS.digestEnabled,
+    taskLeadsMinutes: DEFAULT_PLANNER_PREFS.taskLeadsMinutes,
+  })
+  const [savingPlanner, setSavingPlanner] = useState(false)
+
   const [resetDialogOpen, setResetDialogOpen] = useState(false)
   const [resetScope, setResetScope] = useState<ResetScope>('current')
   const [resetYear, setResetYear] = useState(year)
@@ -146,6 +176,33 @@ export function SettingsPage() {
     if (!userId || !isGoogleDriveConfigured) return
     void checkLinkStatus()
   }, [userId, checkLinkStatus])
+
+  // Current planner prefs are read straight from Firestore (broad `users/{uid}` read rule);
+  // writes go through `/api/planner/prefs` (Admin SDK), never the client.
+  useEffect(() => {
+    if (!userId) return
+    void getDoc(doc(getDb(), 'users', userId, 'meta', 'plannerPrefs'))
+      .then((snap) => {
+        const stored = snap.exists() ? (snap.data() as Partial<PlannerPrefsPayload>) : {}
+        setPlannerPrefsForm({
+          digestHour:
+            typeof stored.digestHour === 'number'
+              ? stored.digestHour
+              : DEFAULT_PLANNER_PREFS.digestHour,
+          digestEnabled:
+            typeof stored.digestEnabled === 'boolean'
+              ? stored.digestEnabled
+              : DEFAULT_PLANNER_PREFS.digestEnabled,
+          taskLeadsMinutes:
+            Array.isArray(stored.taskLeadsMinutes) && stored.taskLeadsMinutes.length > 0
+              ? stored.taskLeadsMinutes
+              : DEFAULT_PLANNER_PREFS.taskLeadsMinutes,
+        })
+      })
+      .catch(() => {
+        /* keep the defaults */
+      })
+  }, [userId])
 
   useEffect(() => {
     if (!botLinkCode) return
@@ -271,6 +328,28 @@ export function SettingsPage() {
       toast.error(error instanceof Error ? error.message : 'Gagal membuka bulan')
     } finally {
       setClosing(false)
+    }
+  }
+
+  const toggleLead = (value: number) => {
+    setPlannerPrefsForm((prev) => {
+      const next = prev.taskLeadsMinutes.includes(value)
+        ? prev.taskLeadsMinutes.filter((n) => n !== value)
+        : [...prev.taskLeadsMinutes, value].sort((a, b) => a - b)
+      // At least one lead must stay selected.
+      return { ...prev, taskLeadsMinutes: next.length ? next : prev.taskLeadsMinutes }
+    })
+  }
+
+  const savePlannerPrefs = async () => {
+    setSavingPlanner(true)
+    try {
+      await updatePlannerPrefs(plannerPrefs)
+      toast.success('Preferensi pengingat disimpan.')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Gagal menyimpan preferensi.')
+    } finally {
+      setSavingPlanner(false)
     }
   }
 
@@ -599,6 +678,86 @@ export function SettingsPage() {
             Notifikasi hanya muncul selama aplikasi terbuka di browser — tanpa server push,
             pengingat tidak berjalan saat tab tertutup.
           </p>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <CalendarClock className="size-4" aria-hidden />
+            Pengingat &amp; Produktivitas
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="min-w-0 pr-3">
+              <p className="text-sm font-medium">Rekap harian</p>
+              <p className="text-xs text-muted-foreground">
+                Ringkasan tugas &amp; pengingat lewat bot setiap pagi.
+              </p>
+            </div>
+            <Switch
+              checked={plannerPrefs.digestEnabled}
+              onCheckedChange={(value) =>
+                setPlannerPrefsForm((prev) => ({ ...prev, digestEnabled: value }))
+              }
+              aria-label="Rekap harian"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">Jam rekap</Label>
+            <Select
+              value={String(plannerPrefs.digestHour)}
+              onValueChange={(value) =>
+                setPlannerPrefsForm((prev) => ({ ...prev, digestHour: Number(value) }))
+              }
+            >
+              <SelectTrigger className="w-32" aria-label="Jam rekap">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {Array.from({ length: 24 }, (_, h) => (
+                  <SelectItem key={h} value={String(h)}>
+                    {String(h).padStart(2, '0')}:00
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <span className="text-xs font-medium">Ingatkan tugas</span>
+            <div className="flex flex-wrap gap-2">
+              {LEAD_PRESETS.map((preset) => {
+                const active = plannerPrefs.taskLeadsMinutes.includes(preset.value)
+                return (
+                  <button
+                    key={preset.value}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => toggleLead(preset.value)}
+                    className={cn(
+                      'rounded-xl border px-3 py-1.5 text-sm transition-colors',
+                      active
+                        ? 'border-primary bg-primary/10 text-primary'
+                        : 'hover:bg-muted',
+                    )}
+                  >
+                    {preset.label}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Dipakai untuk tugas yang punya jatuh tempo — pengingat dikirim sebelum waktunya.
+            </p>
+          </div>
+
+          <Button size="sm" disabled={savingPlanner} onClick={() => void savePlannerPrefs()}>
+            {savingPlanner && <Loader2 className="mr-2 size-4 animate-spin" />}
+            Simpan
+          </Button>
         </CardContent>
       </Card>
 

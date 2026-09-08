@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseReviewCommand, reviewToken } from './review-commands'
+import { parseReviewCommand, reviewToken, withClockOf, parseDateWord } from './review-commands'
 
 const NOW = new Date(Date.UTC(2026, 8, 6, 7, 32, 0))
 const cmd = (text: string) => parseReviewCommand(text, NOW)
@@ -149,5 +149,19 @@ describe('reviewToken', () => {
   it('returns null for commands that only exist as typed text', () => {
     expect(reviewToken({ kind: 'set_description', n: 1, text: 'x' })).toBeNull()
     expect(reviewToken({ kind: 'none' })).toBeNull()
+  })
+})
+
+describe('exported date helpers', () => {
+  const now = new Date('2026-09-08T10:30:00.000Z')
+
+  it('withClockOf rejects impossible dates', () => {
+    expect(withClockOf(now, 2026, 2, 31)).toBeNull() // 31 Feb
+    expect(withClockOf(now, 2026, 8, 8)).toBeInstanceOf(Date)
+  })
+
+  it('parseDateWord understands "kemarin"', () => {
+    const d = parseDateWord('kemarin', now)
+    expect(d?.getUTCDate()).toBe(7)
   })
 })

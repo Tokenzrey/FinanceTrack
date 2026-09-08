@@ -45,6 +45,26 @@ describe('findLinkByExternalId', () => {
   })
 })
 
+describe('getLinksForUser', () => {
+  it('queries bot_links by userId and maps each doc id to { platform, externalId }', async () => {
+    const get = vi.fn().mockResolvedValue({
+      docs: [{ id: 'telegram_555' }, { id: 'whatsapp_628xx' }],
+    })
+    const where = vi.fn().mockReturnValue({ get })
+    const collection = vi.fn().mockReturnValue({ where })
+    getAdminDb.mockReturnValue({ collection })
+
+    const links = await adminData.getLinksForUser('u1')
+
+    expect(collection).toHaveBeenCalledWith('bot_links')
+    expect(where).toHaveBeenCalledWith('userId', '==', 'u1')
+    expect(links).toEqual([
+      { platform: 'telegram', externalId: '555' },
+      { platform: 'whatsapp', externalId: '628xx' },
+    ])
+  })
+})
+
 describe('consumeLinkCode', () => {
   function mockTxDb(codeDoc: { exists: boolean; data?: () => unknown }) {
     const txGet = vi.fn().mockResolvedValue(codeDoc)

@@ -19,11 +19,19 @@ import type { BotPendingDraft } from './admin-data'
 import { parseCommandArgs, type CommandArgs } from './command-args'
 import { handlePhoto, handleTextTransaction } from './flow-write'
 import { handleReviewMessage } from './flow-review'
+import { handleProductivityCommand } from './flow-productivity'
 import { parseAmount } from './parse-amount'
 import { matchReadCommand } from './parse-intent'
 import { parsePrefsCommand } from './prefs-commands'
+import {
+  looksLikeProductivityCommand,
+  parseProductivityCommand,
+  parseProductivityToken,
+  PRODUCTIVITY_TOKEN_PREFIX,
+} from './productivity-commands'
 import { replies } from './replies'
-import type { BotIncoming, BotIntent, BotReply } from './types'
+import { reminderGone } from './replies-productivity'
+import type { BotIncoming, BotIntent, BotPlatform, BotReply } from './types'
 
 /**
  * The platform-agnostic heart of the bot. `handleIncoming` is the only export the
@@ -68,6 +76,11 @@ export async function handleIncoming(msg: BotIncoming): Promise<BotReply> {
     if (msg.text.startsWith('skip_recurring:')) {
       return handleSkipRecurring(userId, msg.text.slice('skip_recurring:'.length))
     }
+    if (msg.text.startsWith(PRODUCTIVITY_TOKEN_PREFIX)) {
+      const answer = await handleProductivityCommand(userId, parseProductivityToken(msg.text), msg.platform)
+      // An unparseable `pr:` token is a stale/garbled reminder button, not a review card.
+      return answer ?? reminderGone()
+    }
   }
 
   // A pending draft takes priority over everything else. A `transaction_batch` goes to
@@ -100,12 +113,16 @@ export async function handleIncoming(msg: BotIncoming): Promise<BotReply> {
   }
 
   if (msg.kind === 'image') return handlePhoto(userId, msg)
-  return dispatchText(userId, msg.text)
+  return dispatchText(userId, msg.text, msg.platform)
 }
 
 /** A plain text message with nothing pending: a read command, or a transaction to
  *  record. Also the landing spot when a fresh message abandons a stale pending draft. */
-async function dispatchText(userId: string, text: string): Promise<BotReply> {
+async function dispatchText(
+  userId: string,
+  text: string,
+  platform: BotPlatform,
+): Promise<BotReply> {
   const trimmed = text.trim()
   if (!trimmed) return replies.unknownMessage()
 
@@ -119,6 +136,21 @@ async function dispatchText(userId: string, text: string): Promise<BotReply> {
     if (prefsCommand.kind === 'invalid') return replies.prefsInvalid(prefsCommand.field)
     if (prefsCommand.kind === 'show') return replies.prefsCard(await adminData.getBotPrefs(userId))
     return replies.prefsUpdated(await adminData.saveBotPrefs(userId, prefsCommand.patch))
+  }
+
+  // Productivity commands (`/tugas`, `/agenda`, `/catat`, `/ingatkan`, …) parse before
+  // `parseCommandArgs` and `matchReadCommand`, so `/agenda` never reaches the finance
+  // read-command matcher. A non-productivity message returns `{ kind: 'none' }` and
+  // dispatch falls through unchanged. The verb pre-check keeps the timezone read (a
+  // Firestore round-trip) off the finance hot path, and the resolved `tz` is handed to
+  // the executor so it does not read the same doc again.
+  if (looksLikeProductivityCommand(trimmed)) {
+    const tz = await adminData.getUserTimezone(userId)
+    const planCmd = parseProductivityCommand(trimmed, new Date(), tz)
+    if (planCmd.kind !== 'none') {
+      const answer = await handleProductivityCommand(userId, planCmd, platform, tz)
+      if (answer) return answer
+    }
   }
 
   // Argument-taking commands (`/ringkasan agustus`, `/saldo kebutuhan`, `/kategori makan`,
@@ -153,13 +185,14 @@ async function handlePendingReply(
     return handlePhoto(userId, msg)
   }
 
-  return handleGoalContributionReply(userId, pending, msg.text)
+  return handleGoalContributionReply(userId, pending, msg.text, msg.platform)
 }
 
 async function handleGoalContributionReply(
   userId: string,
   pending: GoalContributionDraft,
   text: string,
+  platform: BotPlatform,
 ): Promise<BotReply> {
   const trimmed = text.trim()
   if (/^batal$/i.test(trimmed)) {
@@ -185,7 +218,7 @@ async function handleGoalContributionReply(
     }
     // Non-numeric, non-"batal" — treat as a fresh message abandoning this draft.
     await adminData.clearPending(userId)
-    return dispatchText(userId, text)
+    return dispatchText(userId, text, platform)
   }
 
   // step === 'enter_amount'

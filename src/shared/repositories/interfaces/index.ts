@@ -17,6 +17,15 @@ import type {
   UserProfile,
 } from '@/shared/types/domain'
 import type {
+  CreateNoteDTO,
+  CreateReminderDTO,
+  CreateTaskDTO,
+  Note,
+  Reminder,
+  Task,
+  UpdateTaskDTO,
+} from '@/shared/types/productivity'
+import type {
   AssetDTO,
   CreateCategoryDTO,
   CreateCategoryItemDTO,
@@ -153,6 +162,36 @@ export interface IDataResetRepository {
    * rules, assets/liabilities and wishlist are month-agnostic and left untouched.
    */
   resetMonth(userId: string, year: number, month: number): Promise<ResetSummary>
+}
+
+export interface ITaskRepository {
+  create(userId: string, dto: CreateTaskDTO): Promise<Task>
+  update(userId: string, id: string, patch: UpdateTaskDTO): Promise<void>
+  remove(userId: string, id: string): Promise<void>
+  /** `'open'` is filtered server-side; `'today'` and `'all'` return the full set (the page filters by day). */
+  list(userId: string, filter: 'today' | 'open' | 'all'): Promise<Task[]>
+  watch(userId: string, cb: (tasks: Task[]) => void): Unsubscribe
+}
+
+export interface INoteRepository {
+  create(userId: string, dto: CreateNoteDTO): Promise<Note>
+  update(
+    userId: string,
+    id: string,
+    patch: Partial<Pick<Note, 'title' | 'content' | 'tags'>>,
+  ): Promise<void>
+  remove(userId: string, id: string): Promise<void>
+  list(userId: string): Promise<Note[]>
+  watch(userId: string, cb: (notes: Note[]) => void): Unsubscribe
+}
+
+export interface IReminderRepository {
+  /** Web only ever creates `kind:'standalone'` reminders. */
+  create(userId: string, dto: CreateReminderDTO): Promise<Reminder>
+  listUpcoming(userId: string): Promise<Reminder[]>
+  /** Sets `status:'cancelled'` — the only status transition the client rules allow. */
+  cancel(userId: string, id: string): Promise<void>
+  watch(userId: string, cb: (reminders: Reminder[]) => void): Unsubscribe
 }
 
 export interface IUserRepository {

@@ -43,7 +43,7 @@ function linkDocId(platform: BotPlatform, externalId: string): string {
 /** Firestore rejects `undefined` field values — this app's client repositories strip
  *  them the same way (see `paths.ts`); duplicated here rather than imported so this
  *  module stays fully independent of the client Firestore SDK. */
-function stripUndefined<T extends Record<string, unknown>>(data: T): Partial<T> {
+export function stripUndefined<T extends Record<string, unknown>>(data: T): Partial<T> {
   return Object.fromEntries(Object.entries(data).filter(([, v]) => v !== undefined)) as Partial<T>
 }
 
@@ -63,6 +63,25 @@ export async function findLinkByExternalId(
 ): Promise<BotLink | null> {
   const snap = await getAdminDb().collection('bot_links').doc(linkDocId(platform, externalId)).get()
   return snap.exists ? (snap.data() as BotLink) : null
+}
+
+/**
+ * Reverse of `findLinkByExternalId`: which external chats a user is linked to. The
+ * cron send path (`outbound.ts`) needs this direction — user → link(s) — to push a
+ * reminder or digest. Doc ids are `${platform}_${externalId}`; split on the FIRST
+ * `_` only so an external id that itself contains `_` still round-trips.
+ */
+export async function getLinksForUser(
+  userId: string,
+): Promise<Array<{ platform: 'whatsapp' | 'telegram'; externalId: string }>> {
+  const snap = await getAdminDb().collection('bot_links').where('userId', '==', userId).get()
+  return snap.docs.map((d) => {
+    const i = d.id.indexOf('_')
+    return {
+      platform: d.id.slice(0, i) as 'whatsapp' | 'telegram',
+      externalId: d.id.slice(i + 1),
+    }
+  })
 }
 
 /** Random, URL-safe, human-typeable — excludes visually ambiguous characters
