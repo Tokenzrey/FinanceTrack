@@ -58,6 +58,18 @@ service cloud.firestore {
       allow delete: if request.auth != null && request.auth.uid == userId;
     }
 
+    // Board lists (users/{uid}/lists/{id}). Ordinary user-owned documents; already
+    // granted by the broad rule, but documented here explicitly.
+    match /users/{userId}/lists/{listId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Board labels (users/{uid}/labels/{id}). Ordinary user-owned documents; already
+    // granted by the broad rule, but documented here explicitly.
+    match /users/{userId}/labels/{labelId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
     // Root collections used only by the bot's server-side (Admin SDK) code — never
     // read or written by the client. Admin SDK access bypasses these rules, so this
     // is a deny-all for every other caller.

@@ -1,4 +1,5 @@
 import type { Timestamp } from 'firebase/firestore'
+import type { ChecklistItem, Attachment } from './board'
 
 export type TaskStatus = 'todo' | 'doing' | 'done'
 export type TaskPriority = 'low' | 'med' | 'high'
@@ -17,6 +18,16 @@ export interface Task {
   source: EntrySource
   createdAt: Timestamp
   updatedAt: Timestamp
+  // Board-related optional fields (all safe defaults)
+  listId?: string | null
+  order?: number
+  startAt?: Timestamp | null
+  labelIds?: string[]
+  storyPoints?: number | null
+  dependsOn?: string[]
+  checklist?: ChecklistItem[]
+  attachments?: Attachment[]
+  coverColor?: string | null
 }
 
 export interface Note {
@@ -61,6 +72,10 @@ export interface CreateTaskDTO {
   priority?: TaskPriority
   dueAt?: Date | null
   source: EntrySource
+  // Board fields for creation
+  listId?: string | null
+  order?: number
+  labelIds?: string[]
 }
 export interface UpdateTaskDTO {
   title?: string
@@ -68,6 +83,14 @@ export interface UpdateTaskDTO {
   status?: TaskStatus
   priority?: TaskPriority
   dueAt?: Date | null
+  // Board fields for update
+  listId?: string | null
+  order?: number
+  startAt?: Date | null
+  labelIds?: string[]
+  storyPoints?: number | null
+  dependsOn?: string[]
+  coverColor?: string | null
 }
 export interface CreateNoteDTO {
   title?: string
