@@ -1,4 +1,5 @@
 import type { Timestamp } from 'firebase/firestore'
+import type { TaskPriority } from './productivity'
 
 export interface ChecklistItem {
   id: string
@@ -35,6 +36,23 @@ export interface Label {
 }
 
 export type LabelColorKey = 'slate' | 'teal' | 'blue' | 'violet' | 'pink' | 'red' | 'orange' | 'green'
+
+/** Board view filter state. All arrays empty + `hasDue: null` + empty `search` = no filtering. */
+export interface BoardFilters {
+  labelIds: string[]
+  priorities: TaskPriority[]
+  listIds: string[]
+  hasDue: boolean | null // null = don't filter on due
+  search: string
+}
+
+export const EMPTY_BOARD_FILTERS: BoardFilters = {
+  labelIds: [],
+  priorities: [],
+  listIds: [],
+  hasDue: null,
+  search: '',
+}
 
 // Curated Tailwind color pairs (light/dark) for label strips/chips.
 // Chosen for AA-contrast text-on-fill in both themes; no free hex values.
