@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { Bold, CheckSquare, Code, Italic, Link, List } from 'lucide-react'
 import { toast } from 'sonner'
 
 import {
@@ -17,8 +18,11 @@ import {
   DrawerHeader,
   DrawerTitle,
 } from '@/shared/components/ui/drawer'
+import { Button } from '@/shared/components/ui/button'
 import { Textarea } from '@/shared/components/ui/textarea'
 import { useIsDesktop } from '@/shared/hooks/useMediaQuery'
+import { cn } from '@/shared/lib/utils'
+import { renderMarkdownLite } from '@/shared/lib/markdown-lite'
 import { DEFAULT_TZ } from '@/shared/lib/format'
 import { listForStatus } from '@/shared/lib/task-status-sync'
 import { repositories } from '@/shared/repositories'
@@ -28,6 +32,7 @@ import type { Task } from '@/shared/types/productivity'
 import { moveTask } from '@/shared/use-cases/board/MoveTask.usecase'
 import { Attachments } from './Attachments'
 import { Checklist } from './Checklist'
+import { insertLink, toggleLinePrefix, wrapInline, type EditResult } from './description-toolbar'
 import { MetadataRail } from './MetadataRail'
 import { ProgressNotes } from './ProgressNotes'
 
@@ -156,16 +161,33 @@ function RailSection({ children }: { children: ReactNode }) {
   return <div className="rounded-lg border border-border bg-card p-2">{children}</div>
 }
 
-/** Plain textarea, debounced-persist to `notes`. Markdown toolbar is Task 11. */
+/**
+ * Textarea + a selection-wrapping markdown toolbar (limited subset — see
+ * `markdown-lite`) and a Tulis/Pratinjau toggle. Persistence is the unchanged
+ * 600ms debounce + onBlur flush to `notes`.
+ */
 function Description({ task }: { task: Task }) {
   const uid = useAuthStore((s) => s.user?.uid)
   const [value, setValue] = useState(task.notes ?? '')
+  const [preview, setPreview] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const areaRef = useRef<HTMLTextAreaElement | null>(null)
+  // Selection to re-apply after the controlled textarea re-renders.
+  const pendingSel = useRef<{ start: number; end: number } | null>(null)
 
   // Re-sync when a different task opens in the same mounted panel.
   useEffect(() => {
     setValue(task.notes ?? '')
   }, [task.id, task.notes])
+
+  useEffect(() => {
+    const sel = pendingSel.current
+    if (!sel || !areaRef.current) return
+    pendingSel.current = null
+    const el = areaRef.current
+    el.focus()
+    el.setSelectionRange(sel.start, sel.end)
+  }, [value])
 
   const persist = (next: string) => {
     if (!uid) return
@@ -176,26 +198,127 @@ function Description({ task }: { task: Task }) {
     })
   }
 
+  const schedulePersist = (next: string) => {
+    if (timer.current) clearTimeout(timer.current)
+    timer.current = setTimeout(() => persist(next), 600)
+  }
+
+  const applyEdit = (fn: (v: string, s: number, e: number) => EditResult) => {
+    const el = areaRef.current
+    if (!el) return
+    const r = fn(value, el.selectionStart, el.selectionEnd)
+    pendingSel.current = { start: r.selectionStart, end: r.selectionEnd }
+    setValue(r.value)
+    schedulePersist(r.value)
+  }
+
   return (
     <section className="space-y-2">
       <h3 className="font-display text-sm font-semibold">Deskripsi</h3>
-      {/* Task 11: markdown toolbar + preview toggle mounts here */}
-      <Textarea
-        value={value}
-        rows={4}
-        placeholder="Tambahkan deskripsi…"
-        aria-label="Deskripsi tugas"
-        onChange={(e) => {
-          const next = e.target.value
-          setValue(next)
-          if (timer.current) clearTimeout(timer.current)
-          timer.current = setTimeout(() => persist(next), 600)
-        }}
-        onBlur={() => {
-          if (timer.current) clearTimeout(timer.current)
-          persist(value)
-        }}
-      />
+
+      <div className="flex items-center gap-1">
+        <ToolbarButton label="Tebal" onClick={() => applyEdit((v, s, e) => wrapInline(v, s, e, '**'))} disabled={preview}>
+          <Bold aria-hidden />
+        </ToolbarButton>
+        <ToolbarButton label="Miring" onClick={() => applyEdit((v, s, e) => wrapInline(v, s, e, '*'))} disabled={preview}>
+          <Italic aria-hidden />
+        </ToolbarButton>
+        <ToolbarButton label="Kode" onClick={() => applyEdit((v, s, e) => wrapInline(v, s, e, '`'))} disabled={preview}>
+          <Code aria-hidden />
+        </ToolbarButton>
+        <ToolbarButton label="Tautan" onClick={() => applyEdit(insertLink)} disabled={preview}>
+          <Link aria-hidden />
+        </ToolbarButton>
+        <ToolbarButton label="Daftar" onClick={() => applyEdit((v, s, e) => toggleLinePrefix(v, s, e, '- '))} disabled={preview}>
+          <List aria-hidden />
+        </ToolbarButton>
+        <ToolbarButton
+          label="Kotak centang"
+          onClick={() => applyEdit((v, s, e) => toggleLinePrefix(v, s, e, '- [ ] '))}
+          disabled={preview}
+        >
+          <CheckSquare aria-hidden />
+        </ToolbarButton>
+
+        <div className="ml-auto flex overflow-hidden rounded-md border border-input">
+          <button
+            type="button"
+            aria-pressed={!preview}
+            onClick={() => setPreview(false)}
+            className={cn(
+              'px-2 py-1 text-xs',
+              !preview ? 'bg-accent text-accent-foreground' : 'text-muted-foreground',
+            )}
+          >
+            Tulis
+          </button>
+          <button
+            type="button"
+            aria-pressed={preview}
+            onClick={() => setPreview(true)}
+            className={cn(
+              'px-2 py-1 text-xs',
+              preview ? 'bg-accent text-accent-foreground' : 'text-muted-foreground',
+            )}
+          >
+            Pratinjau
+          </button>
+        </div>
+      </div>
+
+      {preview ? (
+        <div className="space-y-2 text-sm" data-testid="description-preview">
+          {value.trim() === '' ? (
+            <p className="text-muted-foreground">Tidak ada deskripsi.</p>
+          ) : (
+            renderMarkdownLite(value)
+          )}
+        </div>
+      ) : (
+        <Textarea
+          ref={areaRef}
+          value={value}
+          rows={6}
+          placeholder="Tambahkan deskripsi…"
+          aria-label="Deskripsi tugas"
+          onChange={(e) => {
+            const next = e.target.value
+            setValue(next)
+            schedulePersist(next)
+          }}
+          onBlur={() => {
+            if (timer.current) clearTimeout(timer.current)
+            persist(value)
+          }}
+        />
+      )}
     </section>
+  )
+}
+
+function ToolbarButton({
+  label,
+  onClick,
+  disabled,
+  children,
+}: {
+  label: string
+  onClick: () => void
+  disabled?: boolean
+  children: ReactNode
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      className="size-7"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+    >
+      {children}
+    </Button>
   )
 }
