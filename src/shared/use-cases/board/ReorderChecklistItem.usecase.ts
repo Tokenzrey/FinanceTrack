@@ -30,9 +30,7 @@ export async function reorderChecklistItem(
 
   const before = sorted[clamped - 1]?.order ?? null
   const after = sorted[clamped + 1]?.order ?? null
-  const reordered = moved.id === sorted[clamped].id
-    ? { ...moved, order: rankBetween(before, after) }
-    : moved
+  const reordered = { ...moved, order: rankBetween(before, after) }
   const next = sorted.map((c) => (c.id === reordered.id ? reordered : c))
 
   await repositories.tasks.update(userId, task.id, { checklist: next })

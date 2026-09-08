@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Plus } from 'lucide-react'
 import { toast } from 'sonner'
 
@@ -35,6 +35,12 @@ export function Checklist({ task, onMarkTaskDone }: { task: Task; onMarkTaskDone
   const [draft, setDraft] = useState('')
   const [offerDone, setOfferDone] = useState(false)
   const [offerConsumed, setOfferConsumed] = useState(false)
+
+  // Each task gets its own single offer — reset when a different task opens in the same mounted panel.
+  useEffect(() => {
+    setOfferDone(false)
+    setOfferConsumed(false)
+  }, [task.id])
 
   const onDrop = (r: DragSortResult) => {
     if (!uid || r.fromIndex === r.toIndex) return

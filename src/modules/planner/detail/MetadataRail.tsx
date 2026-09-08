@@ -30,6 +30,16 @@ const PRIORITY_LABELS: Record<TaskPriority, string> = {
   high: 'Tinggi',
 }
 
+const STATUS_LABELS: Record<TaskStatus, string> = {
+  todo: 'Belum',
+  doing: 'Proses',
+  done: 'Selesai',
+}
+
+/** Shared styling for a click-to-edit display button in a rail Row. */
+const DISPLAY_BUTTON_CLASS =
+  'rounded-md px-1 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+
 const SOURCE_LABELS: Record<Task['source'], string> = {
   web: 'Web',
   whatsapp: 'WhatsApp',
@@ -194,6 +204,9 @@ export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
   const [editLabels, setEditLabels] = useState(false)
   const [editPoints, setEditPoints] = useState(false)
   const [editDeps, setEditDeps] = useState(false)
+  const [editList, setEditList] = useState(false)
+  const [editStatus, setEditStatus] = useState(false)
+  const [editPriority, setEditPriority] = useState(false)
 
   const sortedLists = [...lists].sort((a, b) => a.order - b.order)
   const currentListId = task.listId ?? null
@@ -217,48 +230,78 @@ export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
     <div className="space-y-0.5">
       {/* Status / Kolom — moving the column keeps `status` in sync via moveTask. */}
       <Row label="Kolom">
-        <Select
-          value={currentListId ?? ''}
-          onValueChange={(v) => {
-            if (!uid) return
-            const cards = usePlannerStore
-              .getState()
-              .tasks.filter((t) => t.listId === v && t.id !== task.id)
-              .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-            const last = cards[cards.length - 1]?.order ?? null
-            void moveTask(uid, task.id, v, (last ?? 0) + 1000, lists).catch(() =>
-              toast.error('Gagal memindahkan tugas.'),
-            )
-          }}
-        >
-          <SelectTrigger className="h-8 w-[160px]" aria-label="Kolom tugas">
-            <SelectValue placeholder="Pilih kolom" />
-          </SelectTrigger>
-          <SelectContent>
-            {sortedLists.map((l) => (
-              <SelectItem key={l.id} value={l.id}>
-                {l.title}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {editList ? (
+          <Select
+            value={currentListId ?? ''}
+            onValueChange={(v) => {
+              setEditList(false)
+              if (!uid) return
+              const cards = usePlannerStore
+                .getState()
+                .tasks.filter((t) => t.listId === v && t.id !== task.id)
+                .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+              const last = cards[cards.length - 1]?.order ?? null
+              void moveTask(uid, task.id, v, (last ?? 0) + 1000, lists).catch(() =>
+                toast.error('Gagal memindahkan tugas.'),
+              )
+            }}
+            onOpenChange={(o) => {
+              if (!o) setEditList(false)
+            }}
+          >
+            <SelectTrigger className="h-8 w-[160px]" aria-label="Kolom tugas">
+              <SelectValue placeholder="Pilih kolom" />
+            </SelectTrigger>
+            <SelectContent>
+              {sortedLists.map((l) => (
+                <SelectItem key={l.id} value={l.id}>
+                  {l.title}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : currentListId == null ? (
+          <AddAction label="Pilih kolom" onClick={() => setEditList(true)} />
+        ) : (
+          <button type="button" onClick={() => setEditList(true)} className={DISPLAY_BUTTON_CLASS}>
+            {sortedLists.find((l) => l.id === currentListId)?.title ?? 'Pilih kolom'}
+          </button>
+        )}
       </Row>
 
-      {/* Status axis (bot-visible), editable independently for a list-less task. */}
-      <Row label="Status">
-        <Select value={task.status} onValueChange={(v) => void setStatus(task.id, v as TaskStatus)}>
-          <SelectTrigger className="h-8 w-[160px]" aria-label="Status tugas">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {(['todo', 'doing', 'done'] as TaskStatus[]).map((s) => (
-              <SelectItem key={s} value={s}>
-                {s === 'todo' ? 'Belum' : s === 'doing' ? 'Proses' : 'Selesai'}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </Row>
+      {/* Status axis (bot-visible), editable independently — only for a list-less task.
+          For a column-bound task the Kolom row owns the status axis and keeps it synced. */}
+      {task.listId == null && (
+        <Row label="Status">
+          {editStatus ? (
+            <Select
+              value={task.status}
+              onValueChange={(v) => {
+                setEditStatus(false)
+                void setStatus(task.id, v as TaskStatus)
+              }}
+              onOpenChange={(o) => {
+                if (!o) setEditStatus(false)
+              }}
+            >
+              <SelectTrigger className="h-8 w-[160px]" aria-label="Status tugas">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {(['todo', 'doing', 'done'] as TaskStatus[]).map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {STATUS_LABELS[s]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <button type="button" onClick={() => setEditStatus(true)} className={DISPLAY_BUTTON_CLASS}>
+              {STATUS_LABELS[task.status]}
+            </button>
+          )}
+        </Row>
+      )}
 
       <Row label="Tanggal mulai">
         <ScheduleField
@@ -289,21 +332,41 @@ export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
       </Row>
 
       <Row label="Prioritas">
-        <Select value={task.priority} onValueChange={(v) => void patch({ priority: v as TaskPriority })}>
-          <SelectTrigger className="h-8 w-[140px]" aria-label="Prioritas tugas">
-            <span className="flex items-center gap-1.5">
-              <PriorityDot priority={task.priority} />
-              {PRIORITY_LABELS[task.priority]}
-            </span>
-          </SelectTrigger>
-          <SelectContent>
-            {(['low', 'med', 'high'] as TaskPriority[]).map((p) => (
-              <SelectItem key={p} value={p}>
-                {PRIORITY_LABELS[p]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        {editPriority ? (
+          <Select
+            value={task.priority}
+            onValueChange={(v) => {
+              setEditPriority(false)
+              void patch({ priority: v as TaskPriority })
+            }}
+            onOpenChange={(o) => {
+              if (!o) setEditPriority(false)
+            }}
+          >
+            <SelectTrigger className="h-8 w-[140px]" aria-label="Prioritas tugas">
+              <span className="flex items-center gap-1.5">
+                <PriorityDot priority={task.priority} />
+                {PRIORITY_LABELS[task.priority]}
+              </span>
+            </SelectTrigger>
+            <SelectContent>
+              {(['low', 'med', 'high'] as TaskPriority[]).map((p) => (
+                <SelectItem key={p} value={p}>
+                  {PRIORITY_LABELS[p]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setEditPriority(true)}
+            className={cn(DISPLAY_BUTTON_CLASS, 'inline-flex items-center gap-1.5')}
+          >
+            <PriorityDot priority={task.priority} />
+            {PRIORITY_LABELS[task.priority]}
+          </button>
+        )}
       </Row>
 
       <Row label="Label">

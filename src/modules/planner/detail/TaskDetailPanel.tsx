@@ -20,10 +20,12 @@ import {
 import { Textarea } from '@/shared/components/ui/textarea'
 import { useIsDesktop } from '@/shared/hooks/useMediaQuery'
 import { DEFAULT_TZ } from '@/shared/lib/format'
+import { listForStatus } from '@/shared/lib/task-status-sync'
 import { repositories } from '@/shared/repositories'
 import { usePlannerStore } from '@/shared/stores/planner.store'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import type { Task } from '@/shared/types/productivity'
+import { moveTask } from '@/shared/use-cases/board/MoveTask.usecase'
 import { Attachments } from './Attachments'
 import { Checklist } from './Checklist'
 import { MetadataRail } from './MetadataRail'
@@ -41,6 +43,7 @@ export function TaskDetailPanel() {
   const lists = usePlannerStore((s) => s.lists)
   const labels = usePlannerStore((s) => s.labels)
   const setStatus = usePlannerStore((s) => s.setStatus)
+  const uid = useAuthStore((s) => s.user?.uid)
   const tz = useAuthStore((s) => s.profile?.timezone) ?? DEFAULT_TZ
   const isDesktop = useIsDesktop()
 
@@ -59,6 +62,20 @@ export function TaskDetailPanel() {
       tz={tz}
       isDesktop={isDesktop}
       onMarkTaskDone={() => {
+        // Keep listId in sync: if a "done" column exists, route through moveTask
+        // (writes listId + status) so the card doesn't strand in its old column.
+        const doneListId = listForStatus('done', lists)
+        if (doneListId && uid) {
+          const cards = usePlannerStore
+            .getState()
+            .tasks.filter((t) => t.listId === doneListId && t.id !== task.id)
+            .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+          const last = cards[cards.length - 1]?.order ?? null
+          void moveTask(uid, task.id, doneListId, (last ?? 0) + 1000, lists).catch(() =>
+            toast.error('Gagal menandai selesai.'),
+          )
+          return
+        }
         void setStatus(task.id, 'done').catch(() => toast.error('Gagal menandai selesai.'))
       }}
     />
