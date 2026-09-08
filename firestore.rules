@@ -1,67 +1,61 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{userId} {
-      match /{document=**} {
-        // These docs are written ONLY by the bot's Admin SDK path (which bypasses these
-        // rules entirely). The client may READ them (Settings shows link status, prefs,
-        // last batch), but must never WRITE them, or a buggy/malicious client script
-        // could fake state the bot trusts:
-        //   meta/botLinks       — a forged "linked" state
-        //   meta/botPending     — a forged pending transaction/goal draft
-        //   meta/botLastBatch   — a forged /undo target (delete arbitrary transactions)
-        //   meta/botPrefs       — flip alwaysReview / autoAcceptConfidence out of band
-        //   meta/botModelDay    — zero out the per-user daily AI-call counter
-        //   bot_receipt_cache/* — plant a receipt read (merchant, Drive link) the bot stamps on a tx
-        //   bot_parse_cache/*   — plant parsed transaction lines returned on the next matching message
-        // `meta/scan_hints` is intentionally NOT in this list — the web receipt scanner
-        // writes it via the client SDK.
-        // `reminders/*` is excluded here so the narrower `match /reminders/{reminderId}`
-        // block below is the sole authority for that subtree (rules v2 OR every matching
-        // allow, so a broad grant here would override the field-lock).
-        allow read: if request.auth != null && request.auth.uid == userId;
-        allow write: if request.auth != null
-                     && request.auth.uid == userId
-                     && !(document.size() == 2 && document[0] == 'meta'
-                          && (document[1] == 'botLinks' || document[1] == 'botPending'
-                              || document[1] == 'botLastBatch' || document[1] == 'botPrefs'
-                              || document[1] == 'botModelDay'))
-                     && !(document[0] == 'bot_receipt_cache' || document[0] == 'bot_parse_cache')
-                     && !(document[0] == 'reminders')
-                     // The cron reads reminders with collectionGroup('reminders'), which matches
-                     // at ANY depth — so a doc planted at users/U/tasks/x/reminders/y would be
-                     // delivered too. Reject a `reminders` collection anywhere, not just at the top.
-                     && !(document.size() >= 3 && document[document.size() - 2] == 'reminders');
-      }
 
-      // A reminder's user-facing fields (message, remindAt, recurrence) and a cancel are
-      // the client's to change; the machine fields (attempts, nextAttemptAt, lastError,
-      // sentAt, ownerId) and any status transition other than -> 'cancelled' belong to the
-      // Admin-SDK cron path only.
-      match /reminders/{reminderId} {
-        allow read: if request.auth != null && request.auth.uid == userId;
-        allow create: if request.auth != null && request.auth.uid == userId
-                      && request.resource.data.status == 'pending'
-                      && request.resource.data.attempts == 0
-                      && request.resource.data.ownerId == userId;
-        allow update: if request.auth != null && request.auth.uid == userId
-                      && !request.resource.data.diff(resource.data).affectedKeys()
-                           .hasAny(['attempts', 'nextAttemptAt', 'lastError', 'sentAt', 'ownerId'])
-                      && (request.resource.data.status == resource.data.status
-                          || request.resource.data.status == 'cancelled');
-        allow delete: if request.auth != null && request.auth.uid == userId;
-      }
+    // The broad user-owned tree. FLAT `match /users/{userId}/{document=**}` (not a
+    // nested `match /users/{userId} { match /{document=**} }`): the nested form makes
+    // the `document` wildcard a `path` instead of a `list<string>`, so `document[i]`
+    // / `document.size()` stop type-checking and every write under users/{uid} fails
+    // closed. Keep it flat.
+    match /users/{userId}/{document=**} {
+      // These docs are written ONLY by the bot's Admin SDK path (which bypasses these
+      // rules entirely). The client may READ them (Settings shows link status, prefs,
+      // last batch), but must never WRITE them, or a buggy/malicious client script
+      // could fake state the bot trusts:
+      //   meta/botLinks       — a forged "linked" state
+      //   meta/botPending     — a forged pending transaction/goal draft
+      //   meta/botLastBatch   — a forged /undo target (delete arbitrary transactions)
+      //   meta/botPrefs       — flip alwaysReview / autoAcceptConfidence out of band
+      //   meta/botModelDay    — zero out the per-user daily AI-call counter
+      //   bot_receipt_cache/* — plant a receipt read (merchant, Drive link) the bot stamps on a tx
+      //   bot_parse_cache/*   — plant parsed transaction lines returned on the next matching message
+      // `meta/scan_hints` is intentionally NOT in this list — the web receipt scanner
+      // writes it via the client SDK.
+      // `reminders/*` at the canonical depth is excluded here so the narrower
+      // `match /users/{userId}/reminders/{reminderId}` block below owns that subtree's
+      // field-lock (rules v2 OR every matching allow; a broad grant here would override it).
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null
+                   && request.auth.uid == userId
+                   && !(document.size() == 2 && document[0] == 'meta'
+                        && (document[1] == 'botLinks' || document[1] == 'botPending'
+                            || document[1] == 'botLastBatch' || document[1] == 'botPrefs'
+                            || document[1] == 'botModelDay'))
+                   && !(document[0] == 'bot_receipt_cache' || document[0] == 'bot_parse_cache')
+                   && !(document[0] == 'reminders');
+    }
 
-      // Notes are ordinary user-owned documents. Keep their access explicit so
-      // note writes do not depend on recursive path inspection above.
-      match /notes/{noteId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
-      }
-
-      // Tasks are ordinary user-owned documents managed by the planner UI.
-      match /tasks/{taskId} {
-        allow read, write: if request.auth != null && request.auth.uid == userId;
-      }
+    // Canonical reminders (users/{uid}/reminders/{id}). A reminder's user-facing fields
+    // (message, remindAt, recurrence) and a cancel are the client's to change; the
+    // machine fields (attempts, nextAttemptAt, lastError, sentAt, ownerId) and any
+    // status transition other than -> 'cancelled' belong to the Admin-SDK cron path.
+    //
+    // A reminder planted at a NON-canonical path (e.g. users/{uid}/tasks/x/reminders/y)
+    // is defended in code, not here: the cron's `dueRemindersPage` derives `ownerId`
+    // from the doc path `^users/<uid>/reminders/<id>$` (ignoring the stored field) and
+    // skips anything that doesn't match, so a nested reminders doc is never delivered.
+    match /users/{userId}/reminders/{reminderId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow create: if request.auth != null && request.auth.uid == userId
+                    && request.resource.data.status == 'pending'
+                    && request.resource.data.attempts == 0
+                    && request.resource.data.ownerId == userId;
+      allow update: if request.auth != null && request.auth.uid == userId
+                    && !request.resource.data.diff(resource.data).affectedKeys()
+                         .hasAny(['attempts', 'nextAttemptAt', 'lastError', 'sentAt', 'ownerId'])
+                    && (request.resource.data.status == resource.data.status
+                        || request.resource.data.status == 'cancelled');
+      allow delete: if request.auth != null && request.auth.uid == userId;
     }
 
     // Root collections used only by the bot's server-side (Admin SDK) code — never
