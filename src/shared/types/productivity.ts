@@ -28,6 +28,9 @@ export interface Task {
   checklist?: ChecklistItem[]
   attachments?: Attachment[]
   progressNotes?: ProgressNote[]
+  /** Manual row order on the Linimasa view. Independent of the board's `order`
+   *  so reordering one projection never disturbs the other. */
+  timelineOrder?: number
   coverColor?: string | null
 }
 
@@ -96,6 +99,7 @@ export interface UpdateTaskDTO {
   checklist?: ChecklistItem[]
   attachments?: Attachment[]
   progressNotes?: ProgressNote[]
+  timelineOrder?: number
 }
 export interface CreateNoteDTO {
   title?: string

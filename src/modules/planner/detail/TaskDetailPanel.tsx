@@ -37,7 +37,7 @@ import { MetadataRail } from './MetadataRail'
 import { ProgressNotes } from './ProgressNotes'
 
 /**
- * Task detail. `Dialog` at ≥ lg (two columns: content left, 280px metadata rail
+ * Task detail. `Dialog` at ≥ lg (two columns: content left, 300px metadata rail
  * right); `Drawer` from the bottom below lg. Self-managed: reads `detailTaskId`
  * + the task from the store, renders nothing when either is missing.
  */
@@ -143,9 +143,9 @@ function PanelBody({
 
   if (isDesktop) {
     return (
-      <div className="grid grid-cols-[1fr_280px] gap-6">
+      <div className="grid grid-cols-[1fr_300px] gap-6">
         <div className="min-w-0">{main}</div>
-        <aside className="border-l border-border pl-4">{rail}</aside>
+        <aside className="border-l border-border pl-5">{rail}</aside>
       </div>
     )
   }

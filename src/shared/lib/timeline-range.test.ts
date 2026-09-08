@@ -6,6 +6,7 @@ import {
   MAX_RANGE_DAYS,
   extendRange,
   initialRange,
+  stepZoom,
   type TimelineRange,
 } from './timeline-range'
 
@@ -62,5 +63,19 @@ describe('extendRange', () => {
   it('clamps a partial extension to land exactly on the cap', () => {
     const near: TimelineRange = { start: base.start, dayCount: MAX_RANGE_DAYS - 10 }
     expect(extendRange(near, 'end').dayCount).toBe(MAX_RANGE_DAYS)
+  })
+})
+
+describe('stepZoom', () => {
+  it('steps toward finer columns and clamps at day', () => {
+    expect(stepZoom('month', 1)).toBe('week')
+    expect(stepZoom('week', 1)).toBe('day')
+    expect(stepZoom('day', 1)).toBe('day')
+  })
+
+  it('steps toward coarser columns and clamps at month', () => {
+    expect(stepZoom('day', -1)).toBe('week')
+    expect(stepZoom('week', -1)).toBe('month')
+    expect(stepZoom('month', -1)).toBe('month')
   })
 })

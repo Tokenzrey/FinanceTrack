@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { Button } from '@/shared/components/ui/button'
 import { LoadingSkeleton } from '@/shared/components/finance/EmptyState'
 import type { DragSortResult } from '@/shared/hooks/useDragSort'
+import { useUndoStack } from '@/shared/hooks/useUndoStack'
 import { DEFAULT_TZ } from '@/shared/lib/format'
 import { rankBetween } from '@/shared/lib/rank'
 import { repositories } from '@/shared/repositories'
@@ -34,9 +35,13 @@ export function BoardView() {
   const filters = usePlannerStore((s) => s.filters)
   const draggingId = usePlannerStore((s) => s.draggingId)
   const setDraggingId = usePlannerStore((s) => s.setDraggingId)
+  const dragOverListId = usePlannerStore((s) => s.dragOverListId)
+  const setDragOverListId = usePlannerStore((s) => s.setDragOverListId)
   const clearFilters = usePlannerStore((s) => s.clearFilters)
   const addTask = usePlannerStore((s) => s.addTask)
   const openTask = usePlannerStore((s) => s.openTask)
+
+  const undo = useUndoStack((label) => toast.success(`Dibatalkan: ${label}`))
 
   const [seeding, setSeeding] = useState(false)
   const [compact, setCompact] = useState(true)
@@ -122,11 +127,20 @@ export function BoardView() {
 
       const newOrder = rankBetween(prev?.order ?? null, next?.order ?? null)
       const destTasks = (cardsByList.get(r.toContainerId) ?? []).filter((t) => t.id !== moved.id)
+
+      // Capture where it came from before the write, so Ctrl+Z can put it back.
+      const fromListId = moved.listId ?? r.fromContainerId
+      const fromOrder = moved.order ?? 0
+      undo.push({
+        label: 'pindah kartu',
+        undo: () => moveTask(uid, moved.id, fromListId, fromOrder, lists),
+      })
+
       void moveTask(uid, moved.id, r.toContainerId, newOrder, lists, destTasks).catch(() => {
         toast.error('Gagal memindahkan tugas.')
       })
     },
-    [uid, cardsByList, lists, setDraggingId],
+    [uid, cardsByList, lists, setDraggingId, undo],
   )
 
   // Mark drag start so empty columns reveal their drop zone. `useDragSort` has no
@@ -178,9 +192,14 @@ export function BoardView() {
       const before = dir === 1 ? sortedLists[j] : sortedLists[j - 1]
       const after = dir === 1 ? sortedLists[j + 1] : sortedLists[j]
       const newOrder = rankBetween(before?.order ?? null, after?.order ?? null)
+      const prevOrder = sortedLists[i].order
+      undo.push({
+        label: 'urutkan kolom',
+        undo: () => reorderList(uid, listId, prevOrder),
+      })
       void reorderList(uid, listId, newOrder).catch(() => toast.error('Gagal mengurutkan kolom.'))
     },
-    [uid, sortedLists],
+    [uid, sortedLists, undo],
   )
 
   const expandColumn = useCallback(
@@ -270,6 +289,8 @@ export function BoardView() {
               readySet={readySet}
               compact={compact}
               draggingId={draggingId}
+              dragOverListId={dragOverListId}
+              setDragOverListId={setDragOverListId}
               registerBody={registerBody}
               getContainerItems={getContainerItems}
               onCardDrop={onCardDrop}

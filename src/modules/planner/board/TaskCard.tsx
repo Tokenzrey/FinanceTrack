@@ -1,5 +1,6 @@
 'use client'
 
+import { useRef } from 'react'
 import type * as React from 'react'
 import { Lock, Paperclip } from 'lucide-react'
 
@@ -11,6 +12,9 @@ import { DueChip } from '../shared/DueChip'
 import { LabelStrip } from '../shared/LabelStrip'
 import { PriorityDot } from '../shared/PriorityDot'
 import { SourceGlyph } from '../shared/SourceGlyph'
+
+/** Pointer travel (px) past which a release counts as a drag, not a click. */
+const CLICK_SLOP = 6
 
 interface TaskCardProps {
   task: Task
@@ -49,10 +53,39 @@ export function TaskCard({
   const blocked = (task.dependsOn?.length ?? 0) > 0 && !ready
   const hasMeta = Boolean(task.dueAt) || total > 0 || attachments > 0
 
+  // A pointer release after a real drag still fires `click`, which would open the
+  // detail panel every time a card is dropped. Track travel from the press and
+  // swallow that one click — same guard `TimelineBar` uses for its bars.
+  const pressRef = useRef<{ x: number; y: number } | null>(null)
+  const draggedRef = useRef(false)
+
   return (
     <div
       {...dragProps}
-      onClick={onOpen ? () => onOpen(task) : undefined}
+      onPointerDown={(e) => {
+        pressRef.current = { x: e.clientX, y: e.clientY }
+        draggedRef.current = false
+        dragProps?.onPointerDown?.(e)
+      }}
+      onPointerUp={(e) => {
+        const p = pressRef.current
+        if (p && Math.hypot(e.clientX - p.x, e.clientY - p.y) > CLICK_SLOP) {
+          draggedRef.current = true
+        }
+        pressRef.current = null
+        dragProps?.onPointerUp?.(e)
+      }}
+      onClick={
+        onOpen
+          ? () => {
+              if (draggedRef.current) {
+                draggedRef.current = false
+                return
+              }
+              onOpen(task)
+            }
+          : undefined
+      }
       className={cn(
         'relative rounded-lg border border-border bg-card p-2.5 text-left',
         onOpen && 'cursor-pointer',

@@ -106,12 +106,16 @@ export function useDragSort(opts: UseDragSortOptions): {
   getItemProps: (index: number) => GetItemProps
   draggingIndex: number | null
   dragProxy: DragProxy | null
+  /** Container the pointer is currently over, or `null` when not dragging. Lets
+   *  a consumer highlight only the real drop target instead of every container. */
+  overContainerId: string | null
   announcement: string
 } {
   const { containerId, itemCount, onDrop, getContainerItems } = opts
 
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null)
   const [dragProxy, setDragProxy] = useState<DragProxy | null>(null)
+  const [overContainerId, setOverContainerId] = useState<string | null>(null)
   const [announcement, setAnnouncement] = useState('')
 
   // Live drag state kept in refs — pointer/key handlers read it without re-binding.
@@ -141,6 +145,7 @@ export function useDragSort(opts: UseDragSortOptions): {
     toContainerRef.current = containerId
     setDraggingIndex(null)
     setDragProxy(null)
+    setOverContainerId(null)
   }, [containerId])
 
   /** Own-container item rects, read live from the DOM at each pointermove. */
@@ -176,6 +181,7 @@ export function useDragSort(opts: UseDragSortOptions): {
           ? adjustSameContainerIndex(to, fromIndexRef.current)
           : to
       toContainerRef.current = toContainer
+      setOverContainerId(toContainer)
     },
     [containerId, ownRects],
   )
@@ -334,5 +340,5 @@ export function useDragSort(opts: UseDragSortOptions): {
     [draggingIndex, onPointerDown, onKeyDown],
   )
 
-  return { getItemProps, draggingIndex, dragProxy, announcement }
+  return { getItemProps, draggingIndex, dragProxy, overContainerId, announcement }
 }

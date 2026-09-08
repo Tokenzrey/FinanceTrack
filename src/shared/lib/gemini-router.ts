@@ -2,7 +2,11 @@
 // output, or override per environment with GEMINI_MODELS_VISION / GEMINI_MODELS_TEXT,
 // before production use.
 
-import { GoogleGenAI, type GenerateContentParameters, type GenerateContentResponse } from '@google/genai'
+import {
+  GoogleGenAI,
+  type GenerateContentParameters,
+  type GenerateContentResponse,
+} from '@google/genai'
 import { dayKeyInTz } from './format'
 import { isAiQuotaOrOverloadError } from './receipt-extraction'
 
@@ -59,6 +63,7 @@ export const DEFAULT_ROSTER: Record<GeminiTask, ModelSpec[]> = {
     { id: 'gemini-3.6-flash', rpd: 20, rpm: 5 },
     { id: 'gemini-3.5-flash', rpd: 20, rpm: 5 },
     { id: 'gemini-3.1-pro-preview', rpd: 20, rpm: 5 },
+    { id: 'gemini-3.1-pro-preview-customtools', rpd: 20, rpm: 5 },
     { id: 'gemini-3-flash-preview', rpd: 20, rpm: 5 },
     { id: 'gemini-2.5-pro', rpd: 20, rpm: 5 },
     { id: 'gemini-2.5-flash', rpd: 20, rpm: 5 },

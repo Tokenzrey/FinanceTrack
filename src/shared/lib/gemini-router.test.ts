@@ -40,17 +40,17 @@ describe('pickModel — spreading load', () => {
     expect(first).not.toBeNull()
 
     // After that model has been used a few times, a fresh sibling wins.
-    const after = pickModel('vision', health({ [first!.id]: { used: 5, lastUsedAt: NOW - 60_000 } }), NOW)
+    const after = pickModel(
+      'vision',
+      health({ [first!.id]: { used: 5, lastUsedAt: NOW - 60_000 } }),
+      NOW,
+    )
     expect(after!.id).not.toBe(first!.id)
   })
 
   it('breaks a usage tie with the oldest lastUsedAt', () => {
     const a = pickModel('text', health({}), NOW)!
-    const picked = pickModel(
-      'text',
-      health({ [a.id]: { used: 3, lastUsedAt: NOW - 1_000 } }),
-      NOW,
-    )!
+    const picked = pickModel('text', health({ [a.id]: { used: 3, lastUsedAt: NOW - 1_000 } }), NOW)!
     expect(picked.id).not.toBe(a.id)
   })
 
@@ -100,7 +100,9 @@ describe('pickModel — spreading load', () => {
 
 describe('DEFAULT_ROSTER shape', () => {
   it('every model id (both tiers) looks like a real Gemini id — fails loudly on a typo', () => {
-    const re = /^gemini-[0-9.]+-flash(-lite)?$|^gemini-flash(-lite)?-latest$/
+    // The API exposes flash, lite, pro, preview, customtools, and latest variants.
+    // Keep this as a shape check; availability is verified by list-gemini-models.mjs.
+    const re = /^gemini-(?:\d+(?:\.\d+)?|flash|pro)(?:-[a-z0-9]+)*$/
     for (const spec of [...DEFAULT_ROSTER.vision, ...DEFAULT_ROSTER.text]) {
       expect(spec.id, `bad roster id: ${spec.id}`).toMatch(re)
     }
@@ -127,7 +129,10 @@ describe('generateWithRouter — nothing available', () => {
     const cooling = Object.fromEntries(
       DEFAULT_ROSTER.text.map((s) => [s.id, { used: 0, lastUsedAt: 0, cooldownUntil: soon }]),
     )
-    configureRouterIO({ load: async () => ({ dayKey: today(), models: cooling }), save: async () => {} })
+    configureRouterIO({
+      load: async () => ({ dayKey: today(), models: cooling }),
+      save: async () => {},
+    })
 
     const err = await generateWithRouter('text', { contents: 'x' } as never).catch((e) => e)
     expect(isAiQuotaOrOverloadError(err)).toBe(true)

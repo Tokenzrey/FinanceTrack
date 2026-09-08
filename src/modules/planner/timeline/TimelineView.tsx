@@ -2,17 +2,21 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { addDays } from 'date-fns'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, GripVertical, Minus, Plus } from 'lucide-react'
 import type { Timestamp } from 'firebase/firestore'
 
 import { toast } from 'sonner'
 
 import { Button } from '@/shared/components/ui/button'
+import { useDragSort } from '@/shared/hooks/useDragSort'
+import { useUndoStack } from '@/shared/hooks/useUndoStack'
 import { DEFAULT_TZ } from '@/shared/lib/format'
 import {
   EXTEND_DAYS,
+  PERIOD_DAYS,
   extendRange,
   initialRange,
+  stepZoom,
   type TimelineRange,
 } from '@/shared/lib/timeline-range'
 import {
@@ -23,8 +27,10 @@ import {
 } from '@/shared/lib/timeline-scale'
 import { cn } from '@/shared/lib/utils'
 import { useAuthStore } from '@/shared/stores/auth.store'
+import { repositories } from '@/shared/repositories'
 import { usePlannerStore } from '@/shared/stores/planner.store'
 import type { Reminder, Task } from '@/shared/types/productivity'
+import { reorderTimelineRow } from '@/shared/use-cases/board/ReorderTimelineRow.usecase'
 import { setTaskSchedule } from '@/shared/use-cases/board/SetTaskSchedule.usecase'
 import { useTaskLeads } from '../list/ListView'
 import { applyBoardFilters, describeActiveFilters } from '../shared/FilterBar'
@@ -36,6 +42,9 @@ const ROW_HEIGHT = 40
 /** Left name gutter — `w-44` (176px) on mobile, `w-60` (240px) from `sm`.
  *  The px widths live in the `--tl-gutter` CSS var on the scroll region. */
 const GUTTER_CLASS = 'w-44 sm:w-60'
+
+/** `useDragSort` container id for the row-reorder handles in the name gutter. */
+const TIMELINE_ROWS_CONTAINER = 'timeline-rows'
 
 const ZOOM_TABS: { value: TimelineZoom; label: string }[] = [
   { value: 'day', label: 'Hari' },
@@ -68,6 +77,9 @@ export function TimelineView() {
 
   const [zoom, setZoom] = useState<TimelineZoom>('week')
   const [trayOpen, setTrayOpen] = useState(true)
+  const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null)
+
+  const undo = useUndoStack((label) => toast.success(`Dibatalkan: ${label}`))
 
   // Re-render the "now" line every minute so it creeps. No animation — just a
   // position recompute; honors prefers-reduced-motion for free.
@@ -86,8 +98,12 @@ export function TimelineView() {
       if (t.startAt || t.dueAt) s.push(t)
       else u.push(t)
     }
-    // Stable order: earliest span first, then title.
+    // Manual row order wins when the user has dragged rows; otherwise fall back
+    // to earliest-span-first so an untouched board still reads chronologically.
     s.sort((a, b) => {
+      if (a.timelineOrder != null || b.timelineOrder != null) {
+        return (a.timelineOrder ?? Number.MAX_SAFE_INTEGER) - (b.timelineOrder ?? Number.MAX_SAFE_INTEGER)
+      }
       const sa = taskSpan(a)
       const sb = taskSpan(b)
       const ta = sa ? sa.min.getTime() : 0
@@ -138,6 +154,64 @@ export function TimelineView() {
     pendingLeftShiftRef.current = 0
     scrollRef.current.scrollLeft += shift
   }, [range])
+
+  /** Scroll so a given day-column sits a little in from the left gutter. */
+  const scrollToDay = useCallback(
+    (date: Date, behavior: ScrollBehavior = 'smooth') => {
+      const el = scrollRef.current
+      if (!el) return
+      const col = columnForDate(date, rangeStart)
+      // Land the target a third of the way in, so there is visible context behind it.
+      const target = col * colWidth - el.clientWidth / 3
+      el.scrollTo({ left: Math.max(0, target), behavior })
+    },
+    [rangeStart, colWidth],
+  )
+
+  const scrollToToday = useCallback(() => scrollToDay(new Date()), [scrollToDay])
+
+  /** Jump one period left/right from wherever the viewport currently sits. */
+  const shiftView = useCallback(
+    (dir: -1 | 1) => {
+      const el = scrollRef.current
+      if (!el) return
+      el.scrollBy({ left: dir * PERIOD_DAYS[zoom] * colWidth, behavior: 'smooth' })
+    },
+    [zoom, colWidth],
+  )
+
+  /** Bring a task's bar into view and flash it, so the gutter name is a jump link. */
+  const focusTask = useCallback(
+    (task: Task) => {
+      const span = taskSpan(task)
+      if (!span) return
+      scrollToDay(span.min)
+      setFocusedTaskId(task.id)
+      window.setTimeout(() => setFocusedTaskId((cur) => (cur === task.id ? null : cur)), 1600)
+    },
+    [scrollToDay],
+  )
+
+  const rowDrag = useDragSort({
+    containerId: TIMELINE_ROWS_CONTAINER,
+    itemCount: scheduled.length,
+    onDrop: (r) => {
+      if (!uid || r.fromIndex === r.toIndex) return
+      const prevOrders = scheduled.map((t) => ({ id: t.id, order: t.timelineOrder }))
+      undo.push({
+        label: 'urutkan baris',
+        undo: () =>
+          Promise.all(
+            prevOrders.map((p) =>
+              repositories.tasks.update(uid, p.id, { timelineOrder: p.order }),
+            ),
+          ).then(() => undefined),
+      })
+      void reorderTimelineRow(uid, scheduled, r.fromIndex, r.toIndex).catch(() =>
+        toast.error('Gagal mengurutkan baris.'),
+      )
+    },
+  })
 
   const onScroll = useCallback(
     (e: React.UIEvent<HTMLDivElement>) => {
@@ -247,19 +321,66 @@ export function TimelineView() {
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Zoom toggle — matches the board's Rapat/Nyaman button-group style. */}
-      <div className="flex items-center justify-end gap-1">
-        {ZOOM_TABS.map((t) => (
+      {/* Navigation + zoom. Without these the grid is several thousand px wide
+          with no hint that anything exists past the first viewport. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-1">
           <Button
-            key={t.value}
             size="sm"
-            variant={zoom === t.value ? 'default' : 'outline'}
-            onClick={() => setZoom(t.value)}
-            aria-pressed={zoom === t.value}
+            variant="outline"
+            className="px-2"
+            aria-label="Geser ke periode sebelumnya"
+            onClick={() => shiftView(-1)}
           >
-            {t.label}
+            <ChevronLeft className="size-4" aria-hidden />
           </Button>
-        ))}
+          <Button size="sm" variant="outline" onClick={scrollToToday}>
+            Hari ini
+          </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            className="px-2"
+            aria-label="Geser ke periode berikutnya"
+            onClick={() => shiftView(1)}
+          >
+            <ChevronRight className="size-4" aria-hidden />
+          </Button>
+        </div>
+
+        <div className="ml-auto flex items-center gap-1">
+          <Button
+            size="sm"
+            variant="outline"
+            className="px-2"
+            aria-label="Perkecil"
+            disabled={zoom === 'month'}
+            onClick={() => setZoom((z) => stepZoom(z, -1))}
+          >
+            <Minus className="size-4" aria-hidden />
+          </Button>
+          {ZOOM_TABS.map((t) => (
+            <Button
+              key={t.value}
+              size="sm"
+              variant={zoom === t.value ? 'default' : 'outline'}
+              onClick={() => setZoom(t.value)}
+              aria-pressed={zoom === t.value}
+            >
+              {t.label}
+            </Button>
+          ))}
+          <Button
+            size="sm"
+            variant="outline"
+            className="px-2"
+            aria-label="Perbesar"
+            disabled={zoom === 'day'}
+            onClick={() => setZoom((z) => stepZoom(z, 1))}
+          >
+            <Plus className="size-4" aria-hidden />
+          </Button>
+        </div>
       </div>
 
       {/* Scroll region — bounded height so `sticky top-0` on the two-tier header
@@ -291,20 +412,39 @@ export function TimelineView() {
           </div>
 
           {/* Task rows */}
-          <div className="relative">
-            {scheduled.map((task) => (
-              <div key={task.id} className="flex" style={{ height: ROW_HEIGHT }}>
+          <div className="relative" data-dragsort-container={TIMELINE_ROWS_CONTAINER}>
+            {scheduled.map((task, rowIndex) => (
+              <div
+                key={task.id}
+                className="group/row flex"
+                data-timeline-row
+                style={{ height: ROW_HEIGHT }}
+              >
                 {/* Sticky name gutter */}
                 <div
                   className={cn(
-                    'sticky left-0 z-20 flex shrink-0 items-center border-b border-r border-border bg-background px-2',
+                    // `bg-background` alone let the grid show through where the
+                    // sticky layer met the scrolling track; an explicit opaque
+                    // base plus the row tint keeps the gutter solid.
+                    'sticky left-0 z-20 flex shrink-0 items-center gap-1 border-b border-r border-border px-2',
+                    'bg-background supports-[backdrop-filter]:backdrop-blur-sm',
+                    focusedTaskId === task.id && 'bg-primary/10',
                     GUTTER_CLASS,
                   )}
                 >
+                  <span
+                    {...rowDrag.getItemProps(rowIndex)}
+                    aria-label={`Ubah urutan baris ${task.title}`}
+                    className="shrink-0 cursor-grab rounded p-0.5 text-muted-foreground opacity-0 transition-opacity duration-200 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover/row:opacity-100 motion-reduce:transition-none"
+                  >
+                    <GripVertical className="size-3.5" aria-hidden />
+                  </span>
                   <button
                     type="button"
-                    onClick={() => openTask(task.id)}
-                    className="truncate rounded text-left text-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    onClick={() => focusTask(task)}
+                    onDoubleClick={() => openTask(task.id)}
+                    title="Klik untuk fokus ke bar; klik dua kali untuk membuka tugas"
+                    className="min-w-0 flex-1 truncate rounded text-left text-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {task.title}
                   </button>
@@ -312,7 +452,10 @@ export function TimelineView() {
 
                 {/* Grid track — day-cell background; Task 14 mounts the bar here. */}
                 <div
-                  className="relative flex border-b border-border"
+                  className={cn(
+                    'relative flex border-b border-border transition-colors duration-200 motion-reduce:transition-none',
+                    focusedTaskId === task.id && 'bg-primary/5',
+                  )}
                   style={{ width: gridWidth, height: ROW_HEIGHT }}
                 >
                   {dayCells.map((c, i) => (
@@ -337,11 +480,18 @@ export function TimelineView() {
                     reminders={remindersByTask.get(task.id) ?? []}
                     tz={tz}
                     onCommitSchedule={(patch) => {
-                      if (uid) {
-                        setTaskSchedule(uid, task, patch, leads).catch(() =>
-                          toast.error('Gagal menyimpan jadwal.'),
-                        )
+                      if (!uid) return
+                      const prev = {
+                        startAt: task.startAt?.toDate() ?? null,
+                        dueAt: task.dueAt?.toDate() ?? null,
                       }
+                      undo.push({
+                        label: 'ubah jadwal',
+                        undo: () => setTaskSchedule(uid, task, prev, leads),
+                      })
+                      setTaskSchedule(uid, task, patch, leads).catch(() =>
+                        toast.error('Gagal menyimpan jadwal.'),
+                      )
                     }}
                   />
                 </div>

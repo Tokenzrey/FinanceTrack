@@ -44,6 +44,7 @@ export function toTask(snap: DocumentSnapshot): Task {
     attachments: data.attachments ?? [],
     progressNotes: data.progressNotes ?? [],
     coverColor: data.coverColor ?? null,
+    timelineOrder: data.timelineOrder ?? undefined,
   }
 }
 

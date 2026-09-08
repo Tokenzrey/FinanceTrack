@@ -51,12 +51,16 @@ const SOURCE_LABELS: Record<Task['source'], string> = {
   telegram: 'Telegram',
 }
 
-/** One label→value row. Value is right-aligned on desktop, under the label below `sm`. */
+/**
+ * One label→value row. A fixed label column with a left-aligned value beats
+ * `justify-between` + `text-right`: long values ("+ Tambah tanggal mulai", a
+ * created-at stamp) used to rag against the panel edge and wrap mid-phrase.
+ */
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex flex-col gap-0.5 rounded-md px-1.5 py-1.5 text-sm sm:flex-row sm:items-start sm:justify-between sm:gap-3">
-      <span className="shrink-0 text-muted-foreground">{label}</span>
-      <div className="min-w-0 sm:text-right">{children}</div>
+    <div className="grid grid-cols-[6.5rem_1fr] items-start gap-x-3 gap-y-0.5 rounded-md px-2 py-1.5 text-sm transition-colors duration-200 hover:bg-muted/40 motion-reduce:transition-none">
+      <span className="pt-px text-muted-foreground">{label}</span>
+      <div className="min-w-0">{children}</div>
     </div>
   )
 }
@@ -163,7 +167,7 @@ function ScheduleField({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+    <div className="flex flex-wrap items-center gap-1.5">
       <Input
         type="date"
         value={date}
@@ -231,7 +235,7 @@ function ReminderAdder({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+    <div className="flex flex-wrap items-center gap-1.5">
       <Input
         type="date"
         value={date}
@@ -294,7 +298,7 @@ function DependencyPicker({
 
   if (editing) {
     return (
-      <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+      <div className="flex flex-wrap items-center gap-1.5">
         {eligible.length === 0 ? (
           <span className="text-xs text-muted-foreground">Tidak ada tugas lain.</span>
         ) : (
@@ -328,7 +332,7 @@ function DependencyPicker({
   }
 
   return (
-    <div className="flex flex-wrap gap-1 sm:justify-end">
+    <div className="flex flex-wrap gap-1">
       {blockerIds.map((id) => {
         const title = titleById.get(id)
         return (
@@ -550,7 +554,7 @@ export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
 
       <Row label="Label">
         {editLabels || taskLabels.length > 0 ? (
-          <div className="flex flex-wrap gap-1 sm:justify-end">
+          <div className="flex flex-wrap gap-1">
             {labels.map((l) => {
               const on = (task.labelIds ?? []).includes(l.id)
               return (
@@ -601,7 +605,7 @@ export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
               if (next !== task.storyPoints) void patch({ storyPoints: Number.isFinite(next as number) ? next : null })
               setEditPoints(false)
             }}
-            className="h-8 w-20 sm:ml-auto"
+            className="h-8 w-20"
             aria-label="Story points"
           />
         ) : (

@@ -79,3 +79,24 @@ export function extendRange(range: TimelineRange, edge: 'start' | 'end'): Timeli
     ? { start: range.start, dayCount: range.dayCount + grow }
     : { start: addDays(range.start, -grow), dayCount: range.dayCount + grow }
 }
+
+/** Zoom levels, coarse → fine, for the −/+ stepper. */
+export const ZOOM_ORDER: TimelineZoom[] = ['month', 'week', 'day']
+
+/**
+ * One step along `ZOOM_ORDER`. `+1` zooms in (wider columns, less calendar on
+ * screen); `-1` zooms out. Clamps at both ends so the buttons can simply
+ * disable rather than wrap around to the opposite extreme.
+ */
+export function stepZoom(zoom: TimelineZoom, dir: -1 | 1): TimelineZoom {
+  const i = ZOOM_ORDER.indexOf(zoom)
+  const next = Math.min(ZOOM_ORDER.length - 1, Math.max(0, i + dir))
+  return ZOOM_ORDER[next]
+}
+
+/** Days one "period" jump covers at each zoom — a screenful-ish shift. */
+export const PERIOD_DAYS: Record<TimelineZoom, number> = {
+  day: 14,
+  week: 28,
+  month: 90,
+}

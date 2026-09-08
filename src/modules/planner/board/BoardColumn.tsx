@@ -25,6 +25,9 @@ interface BoardColumnProps {
   compact: boolean
   /** Store `draggingId` — non-null means a card lift is in progress somewhere. */
   draggingId: string | null
+  /** Store `dragOverListId` — the single column the pointer is actually over. */
+  dragOverListId: string | null
+  setDragOverListId: (id: string | null) => void
   /** Registers/unregisters this column's scroll body so sibling columns can hit-test it. */
   registerBody: (listId: string, el: HTMLElement | null) => void
   /** Card rects for an arbitrary column id (cross-column drop resolution). */
@@ -47,6 +50,8 @@ export function BoardColumn({
   readySet,
   compact,
   draggingId,
+  dragOverListId,
+  setDragOverListId,
   registerBody,
   getContainerItems,
   onCardDrop,
@@ -63,7 +68,7 @@ export function BoardColumn({
     return () => registerBody(list.id, null)
   }, [list.id, registerBody])
 
-  const { getItemProps, draggingIndex, dragProxy } = useDragSort({
+  const { getItemProps, draggingIndex, dragProxy, overContainerId } = useDragSort({
     containerId: list.id,
     itemCount: cards.length,
     onDrop: onCardDrop,
@@ -82,9 +87,16 @@ export function BoardColumn({
     setAdding(false)
   }
 
+  // Only the column that owns the drag knows what the pointer is over; publish it
+  // so every other column can decide whether *it* is the drop target.
+  useEffect(() => {
+    if (draggingIndex == null) return
+    setDragOverListId(overContainerId)
+  }, [draggingIndex, overContainerId, setDragOverListId])
+
   const count = cards.length
   const overWip = list.wipLimit != null && count > list.wipLimit
-  const isDropTarget = draggingId != null
+  const isDropTarget = draggingId != null && dragOverListId === list.id
 
   if (list.isCollapsed) {
     // The whole bar is the expand affordance. Rendering `ColumnMenu` here instead
@@ -148,14 +160,16 @@ export function BoardColumn({
           // in a portal by `BoardView`) follows the pointer. Keeping the card
           // mounted-but-hidden preserves `ownRects()`'s indexing in `useDragSort`.
           return (
-            <div key={task.id} className="relative">
-              {lifted && dragProxy && (
+            <div key={task.id}>
+              {lifted && dragProxy ? (
+                // A real flow box, not an overlay: the column keeps its `gap-2`
+                // rhythm and the gap is exactly the height the card vacated.
                 <div
                   aria-hidden
-                  className="pointer-events-none absolute inset-0 animate-in fade-in rounded-lg border border-dashed border-border bg-muted/30 duration-200 motion-reduce:animate-none"
+                  className="animate-in fade-in rounded-lg border border-dashed border-border bg-muted/30 duration-200 motion-reduce:animate-none"
+                  style={{ height: dragProxy.height }}
                 />
-              )}
-              <div className={cn(lifted && 'invisible')}>
+              ) : (
                 <TaskCard
                   task={task}
                   tz={tz}
@@ -166,7 +180,7 @@ export function BoardColumn({
                   onOpen={onOpenTask}
                   dragProps={getItemProps(index)}
                 />
-              </div>
+              )}
             </div>
           )
         })}
