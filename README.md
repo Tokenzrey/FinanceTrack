@@ -151,6 +151,15 @@ milikmu sendiri, bukan di server pihak ketiga mana pun.
   `implementation_bot_integration.md` / `implementation_telegram_bot_pro.md` /
   `implementation_bot_multi_transaksi_ux.md`.
 
+### Productivity Suite (Tugas · Catatan · Pengingat)
+- **Tugas** (web + bot): kelola daftar tugas dengan prioritas (tinggi/sedang/rendah), batas waktu (due date), dan status (belum/sedang/selesai). Akses dari web penuh atau cepat via bot (`/tugas`, `/selesai <no>`). Bot mengingatkan tugas jatuh tempo langsung di chat.
+- **Catatan** (web + bot): simpan catatan cepat dengan judul, isi, dan tag. Cari di web atau bot (`/catat cari <kata>`). Simpan dari web atau bot (`/catat <teks>`).
+- **Pengingat berbasis waktu** (bot → chat): atur pengingat kapan saja dengan `/ingatkan <pesan> <waktu>` (mis. `/ingatkan minum obat jam 8 malam`). Sistem cron Go mendeteksi jatuh tempo, mengirim ke chat dengan tombol tindakan (✅ Selesai, 😴 +15 menit, 😴 +1 jam), dan dapat diulang/disnoozed via `/tunda <menit>`.
+- **Rekap pagi** (optional): sekali sehari pagi, bot mengirim digest ke pengguna yang opt-in — jumlah tugas & pengingat hari ini, plus daftar singkat kedua.
+- **Firestore collections**: `users/{uid}/tasks`, `users/{uid}/notes`, `users/{uid}/reminders` (per pengguna); preferensi di `users/{uid}/meta/plannerPrefs`; roster pengguna opt-in digest di `bot_meta/digestRoster` (root, hanya Admin SDK).
+- **Endpoint & cron**: `POST /api/cron/reminders` (nodejs, maxDuration=60) dan `POST /api/cron/daily-digest` (nodejs, maxDuration=60) — keduanya dilindungi header `Authorization: Bearer <PRODUCTIVITY_CRON_SECRET>` (constant-time compare). Bukan Vercel Cron; **heartbeat dijalankan oleh `go-whatsapp-web-multidevice`** proses yang selalu aktif, dengan `time.Ticker` yang `POST` ke kedua endpoint setiap ~60 detik (reminders) dan ~15 menit (digest). Env di sisi Go: `PRODUCTIVITY_CRON_URL` (base URL, mis. `https://<app>/api/cron`), `PRODUCTIVITY_CRON_SECRET` (harus sama dengan Finance-FE), `PRODUCTIVITY_CRON_INTERVAL` (default `60s`).
+- **Preferensi & opt-in**: `POST /api/planner/prefs` (Firebase-ID-token auth) untuk mengubah zona waktu user, bahasa digest, dan status opt-in digest. Tulis ke Firestore via client SDK, Admin SDK, atau server route.
+
 ### Transaksi Rutin (Recurring)
 - Buat aturan tagihan/pemasukan berulang: harian, mingguan, bulanan, atau tahunan.
 - Transaksi yang jatuh tempo dibuat otomatis (idempotent — tidak pernah dobel), dan
