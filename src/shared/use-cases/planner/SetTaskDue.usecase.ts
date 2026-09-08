@@ -8,9 +8,13 @@ import { repositories } from '@/shared/repositories'
  * The message matches the bot's `upsertTaskReminder` copy verbatim, so a reminder
  * created from the web reads the same in chat as one created from the bot.
  *
- * ponytail: no upsert — a re-set of dueAt stacks reminders; acceptable for MVP,
- * revisit if users complain. Clearing dueAt does not delete reminders already
- * created for the web path — reminder cleanup there is out of scope for MVP.
+ * Reminders carry `taskId` so `setTaskSchedule`'s cancel-then-recreate can reclaim
+ * them — otherwise a task scheduled here and later dragged on the timeline would
+ * keep these as orphans alongside the fresh task-tagged ones.
+ *
+ * ponytail: no upsert here — a re-set of dueAt from this path stacks reminders
+ * (the schedule path does upsert). Clearing dueAt does not delete reminders
+ * already created for the web path — reminder cleanup there is out of scope for MVP.
  * ponytail: the due label is formatted in DEFAULT_TZ, not the user's profile zone;
  * thread a tz param through the store if a non-WIB user ever reports it.
  */
@@ -36,6 +40,7 @@ export async function setTaskDue(
         message,
         remindAt: new Date(remindAtMs),
         source: 'web',
+        taskId,
       })
     }
   }
