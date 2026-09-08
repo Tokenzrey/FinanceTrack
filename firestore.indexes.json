@@ -3,11 +3,6 @@
     {
       "collectionGroup": "transactions",
       "queryScope": "COLLECTION",
-      "fields": [{ "fieldPath": "date", "order": "DESCENDING" }]
-    },
-    {
-      "collectionGroup": "transactions",
-      "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "categoryId", "order": "ASCENDING" },
         { "fieldPath": "date", "order": "DESCENDING" }
@@ -28,11 +23,6 @@
         { "fieldPath": "pillar", "order": "ASCENDING" },
         { "fieldPath": "order", "order": "ASCENDING" }
       ]
-    },
-    {
-      "collectionGroup": "receipt_scans",
-      "queryScope": "COLLECTION",
-      "fields": [{ "fieldPath": "createdAt", "order": "DESCENDING" }]
     },
     {
       "collectionGroup": "receipt_scans",
