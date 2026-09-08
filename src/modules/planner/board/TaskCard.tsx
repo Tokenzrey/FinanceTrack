@@ -1,8 +1,14 @@
 'use client'
 
 import type * as React from 'react'
-import { Paperclip } from 'lucide-react'
+import { Lock, Paperclip } from 'lucide-react'
 
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/shared/components/ui/tooltip'
 import { cn } from '@/shared/lib/utils'
 import type { Label } from '@/shared/types/board'
 import type { Task } from '@/shared/types/productivity'
@@ -19,6 +25,8 @@ interface TaskCardProps {
   dragging?: boolean
   /** Compact = the "Rapat" density; tightens the metadata row spacing. */
   compact?: boolean
+  /** False → task has an unfinished blocker; shows a quiet lock marker. Default true. */
+  ready?: boolean
   /** Task 10's `TaskDetailPanel` opener. Undefined until Task 10 lands → card is not clickable. */
   onOpen?: (task: Task) => void
   /** Drag props from the column's `useDragSort.getItemProps(index)`. */
@@ -29,11 +37,21 @@ interface TaskCardProps {
   }
 }
 
-export function TaskCard({ task, tz, labels, dragging, compact, onOpen, dragProps }: TaskCardProps) {
+export function TaskCard({
+  task,
+  tz,
+  labels,
+  dragging,
+  compact,
+  ready = true,
+  onOpen,
+  dragProps,
+}: TaskCardProps) {
   const checklist = task.checklist ?? []
   const doneCount = checklist.filter((c) => c.done).length
   const total = checklist.length
   const attachments = task.attachments?.length ?? 0
+  const blocked = (task.dependsOn?.length ?? 0) > 0 && !ready
   const hasMeta = Boolean(task.dueAt) || total > 0 || attachments > 0
 
   return (
@@ -58,45 +76,50 @@ export function TaskCard({ task, tz, labels, dragging, compact, onOpen, dragProp
         {task.title}
       </p>
 
-      {hasMeta && (
-        <div
-          className={cn(
-            'mt-1.5 flex flex-wrap items-center text-xs text-muted-foreground',
-            compact ? 'gap-1.5' : 'gap-2',
-          )}
-        >
-          <DueChip dueAt={task.dueAt} tz={tz} />
+      <div
+        className={cn(
+          'mt-1.5 flex flex-wrap items-center text-xs text-muted-foreground',
+          compact ? 'gap-1.5' : 'gap-2',
+        )}
+      >
+        {hasMeta && <DueChip dueAt={task.dueAt} tz={tz} />}
 
-          {total > 0 && (
-            <span className="inline-flex items-center gap-1">
-              <span className="font-mono tabular-nums">
-                {doneCount}/{total}
-              </span>
-              <span className="h-0.5 w-8 overflow-hidden rounded-full bg-muted">
-                <span
-                  className="block h-full bg-foreground/40"
-                  style={{ width: `${(doneCount / total) * 100}%` }}
-                />
-              </span>
+        {total > 0 && (
+          <span className="inline-flex items-center gap-1">
+            <span className="font-mono tabular-nums">
+              {doneCount}/{total}
             </span>
-          )}
-
-          {attachments > 0 && (
-            <span className="inline-flex items-center gap-0.5">
-              <Paperclip className="h-3 w-3" aria-hidden />
-              <span className="font-mono tabular-nums">{attachments}</span>
+            <span className="h-0.5 w-8 overflow-hidden rounded-full bg-muted">
+              <span
+                className="block h-full bg-foreground/40"
+                style={{ width: `${(doneCount / total) * 100}%` }}
+              />
             </span>
-          )}
+          </span>
+        )}
 
-          <SourceGlyph source={task.source} />
-        </div>
-      )}
+        {attachments > 0 && (
+          <span className="inline-flex items-center gap-0.5">
+            <Paperclip className="h-3 w-3" aria-hidden />
+            <span className="font-mono tabular-nums">{attachments}</span>
+          </span>
+        )}
 
-      {!hasMeta && (
-        <div className="mt-1.5">
-          <SourceGlyph source={task.source} />
-        </div>
-      )}
+        {blocked && (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="inline-flex" aria-label="Menunggu dependency">
+                  <Lock className="h-3 w-3 text-muted-foreground" aria-hidden />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Menunggu tugas lain selesai</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
+
+        <SourceGlyph source={task.source} />
+      </div>
     </div>
   )
 }

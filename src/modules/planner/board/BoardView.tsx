@@ -8,6 +8,7 @@ import { LoadingSkeleton } from '@/shared/components/finance/EmptyState'
 import type { DragSortResult } from '@/shared/hooks/useDragSort'
 import { DEFAULT_TZ } from '@/shared/lib/format'
 import { rankBetween } from '@/shared/lib/rank'
+import { readyTasks } from '@/shared/lib/task-graph'
 import { usePlannerStore } from '@/shared/stores/planner.store'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import { migrateLegacyTasks } from '@/shared/use-cases/board/MigrateLegacyTasks.usecase'
@@ -62,6 +63,10 @@ export function BoardView() {
   }, [])
 
   const labelsById = useMemo(() => new Map(labels.map((l) => [l.id, l])), [labels])
+
+  // "Ready" = every blocker done. Computed once over all tasks; a card is
+  // "blocked" (quiet marker) when it has deps and isn't in this set.
+  const readySet = useMemo(() => readyTasks(tasks), [tasks])
 
   const sortedLists = useMemo(() => [...lists].sort((a, b) => a.order - b.order), [lists])
 
@@ -239,6 +244,7 @@ export function BoardView() {
               cards={cardsByList.get(list.id) ?? []}
               tz={tz}
               labelsById={labelsById}
+              readySet={readySet}
               compact={compact}
               draggingId={draggingId}
               registerBody={registerBody}

@@ -19,7 +19,9 @@ import { usePlannerStore } from '@/shared/stores/planner.store'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import type { BoardList, Label } from '@/shared/types/board'
 import type { Task, TaskPriority, TaskStatus } from '@/shared/types/productivity'
+import { addDependency } from '@/shared/use-cases/board/AddDependency.usecase'
 import { moveTask } from '@/shared/use-cases/board/MoveTask.usecase'
+import { removeDependency } from '@/shared/use-cases/board/RemoveDependency.usecase'
 import { setTaskSchedule } from '@/shared/use-cases/board/SetTaskSchedule.usecase'
 import { PriorityDot } from '../shared/PriorityDot'
 import { SourceGlyph } from '../shared/SourceGlyph'
@@ -187,6 +189,101 @@ function ScheduleField({
   )
 }
 
+/**
+ * Dependencies row: removable title chips for the current blockers plus a task
+ * picker in edit mode. Picking routes through `addDependency` (cycle/cap/self
+ * rejection surfaces as a toast). A blocker id with no matching task shows the
+ * raw id and a muted "(tidak ditemukan)".
+ */
+function DependencyPicker({
+  task,
+  allTasks,
+  editing,
+  setEditing,
+  onAdd,
+  onRemove,
+}: {
+  task: Task
+  allTasks: Task[]
+  editing: boolean
+  setEditing: (v: boolean) => void
+  onAdd: (pickedId: string) => void
+  onRemove: (blockerId: string) => void
+}) {
+  const blockerIds = task.dependsOn ?? []
+  const titleById = new Map(allTasks.map((t) => [t.id, t.title]))
+  const eligible = allTasks.filter((t) => t.id !== task.id && !blockerIds.includes(t.id))
+
+  if (editing) {
+    return (
+      <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+        {eligible.length === 0 ? (
+          <span className="text-xs text-muted-foreground">Tidak ada tugas lain.</span>
+        ) : (
+          <Select onValueChange={onAdd}>
+            <SelectTrigger className="h-8 w-[200px] max-w-full" aria-label="Pilih tugas blocker">
+              <SelectValue placeholder="Pilih tugas…" />
+            </SelectTrigger>
+            <SelectContent>
+              {eligible.map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  <span className="block max-w-[220px] truncate">{t.title}</span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-8 px-2 text-muted-foreground"
+          onClick={() => setEditing(false)}
+        >
+          Selesai
+        </Button>
+      </div>
+    )
+  }
+
+  if (blockerIds.length === 0) {
+    return <AddAction label="Tambah dependency" onClick={() => setEditing(true)} />
+  }
+
+  return (
+    <div className="flex flex-wrap gap-1 sm:justify-end">
+      {blockerIds.map((id) => {
+        const title = titleById.get(id)
+        return (
+          <span
+            key={id}
+            className="inline-flex max-w-full items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs"
+          >
+            <span className="max-w-[140px] truncate">
+              {title ?? id}
+              {title == null && <span className="text-muted-foreground"> (tidak ditemukan)</span>}
+            </span>
+            <button
+              type="button"
+              aria-label={`Hapus dependency ${title ?? id}`}
+              onClick={() => onRemove(id)}
+              className="shrink-0 rounded-full text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              ×
+            </button>
+          </span>
+        )
+      })}
+      <button
+        type="button"
+        onClick={() => setEditing(true)}
+        className="rounded-md px-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        + Tambah
+      </button>
+    </div>
+  )
+}
+
 interface MetadataRailProps {
   task: Task
   lists: BoardList[]
@@ -201,6 +298,7 @@ interface MetadataRailProps {
 export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
   const uid = useAuthStore((s) => s.user?.uid)
   const setStatus = usePlannerStore((s) => s.setStatus)
+  const allTasks = usePlannerStore((s) => s.tasks)
   const [editLabels, setEditLabels] = useState(false)
   const [editPoints, setEditPoints] = useState(false)
   const [editDeps, setEditDeps] = useState(false)
@@ -424,25 +522,24 @@ export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
       </Row>
 
       <Row label="Dependencies">
-        {editDeps || (task.dependsOn ?? []).length > 0 ? (
-          <Input
-            autoFocus={editDeps}
-            defaultValue={(task.dependsOn ?? []).join(', ')}
-            placeholder="ID tugas, pisahkan koma"
-            onBlur={(e) => {
-              const next = e.target.value
-                .split(',')
-                .map((s) => s.trim())
-                .filter(Boolean)
-              void patch({ dependsOn: next })
-              setEditDeps(false)
-            }}
-            className="h-8 w-[200px] max-w-full sm:ml-auto"
-            aria-label="Dependencies"
-          />
-        ) : (
-          <AddAction label="Tambah dependency" onClick={() => setEditDeps(true)} />
-        )}
+        <DependencyPicker
+          task={task}
+          allTasks={allTasks}
+          editing={editDeps}
+          setEditing={setEditDeps}
+          onAdd={(pickedId) => {
+            if (!uid) return
+            void addDependency(uid, task, pickedId, allTasks)
+              .catch((e) => toast.error(e instanceof Error ? e.message : 'Gagal menambah dependency.'))
+              .finally(() => setEditDeps(false))
+          }}
+          onRemove={(blockerId) => {
+            if (!uid) return
+            void removeDependency(uid, task, blockerId).catch(() =>
+              toast.error('Gagal menghapus dependency.'),
+            )
+          }}
+        />
       </Row>
 
       <Row label="Pengingat">

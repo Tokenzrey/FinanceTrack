@@ -19,6 +19,8 @@ interface BoardColumnProps {
   cards: Task[]
   tz: string
   labelsById: Map<string, Label>
+  /** Ids of tasks whose every blocker is done — cards not in it show a quiet marker. */
+  readySet?: Set<string>
   compact: boolean
   /** Store `draggingId` — non-null means a card lift is in progress somewhere. */
   draggingId: string | null
@@ -39,6 +41,7 @@ export function BoardColumn({
   cards,
   tz,
   labelsById,
+  readySet,
   compact,
   draggingId,
   registerBody,
@@ -128,6 +131,7 @@ export function BoardColumn({
               task={task}
               tz={tz}
               labels={labelsFor(task.labelIds)}
+              ready={readySet ? readySet.has(task.id) : true}
               compact={compact}
               dragging={draggingIndex === index}
               onOpen={onOpenTask}
