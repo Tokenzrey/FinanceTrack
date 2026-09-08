@@ -15,12 +15,15 @@ const addTask = vi.fn(async () => ({
 const setDue = vi.fn(async () => {})
 const plannerState = {
   tasks: [],
+  reminders: [],
   isLoading: false,
   subscribe: () => () => {},
+  subscribeReminders: () => () => {},
   addTask,
   setDue,
   setStatus: vi.fn(),
   removeTask: vi.fn(),
+  cancelReminderById: vi.fn(),
 }
 
 vi.mock('@/shared/stores/planner.store', () => ({

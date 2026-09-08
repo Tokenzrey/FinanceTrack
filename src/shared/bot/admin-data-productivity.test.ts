@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { Timestamp } from 'firebase-admin/firestore'
+import { FieldValue, Timestamp } from 'firebase-admin/firestore'
 import { DEFAULT_PLANNER_PREFS } from '@/shared/types/productivity'
 import type { Task } from '@/shared/types/productivity'
 
@@ -20,6 +20,8 @@ const {
   getPlannerPrefs,
   getPlannerLastPush,
   setPlannerLastPush,
+  setPlannerPrefs,
+  upsertDigestRoster,
   getReminderById,
   listRemindersForDay,
   deleteTask,
@@ -481,6 +483,56 @@ describe('setPlannerLastPush', () => {
     expect(doc).toHaveBeenCalledWith('users/u1/meta/plannerLastPush')
     const [payload, opts] = set.mock.calls[0]
     expect((payload as Record<string, unknown>).reminderId).toBe('rem-7')
+    expect(opts).toEqual({ merge: true })
+  })
+})
+
+// ─── setPlannerPrefs ─────────────────────────────────────────
+
+describe('setPlannerPrefs', () => {
+  it('merge-writes the prefs doc at users/{uid}/meta/plannerPrefs', async () => {
+    const set = vi.fn().mockResolvedValue(undefined)
+    const doc = vi.fn().mockReturnValue({ set })
+    getAdminDb.mockReturnValue({ doc })
+
+    await setPlannerPrefs('u1', { digestHour: 6, digestEnabled: true, taskLeadsMinutes: [0, 60] })
+
+    expect(doc).toHaveBeenCalledWith('users/u1/meta/plannerPrefs')
+    const [payload, opts] = set.mock.calls[0]
+    expect(payload).toMatchObject({
+      digestHour: 6,
+      digestEnabled: true,
+      taskLeadsMinutes: [0, 60],
+    })
+    expect(opts).toEqual({ merge: true })
+  })
+})
+
+// ─── upsertDigestRoster ──────────────────────────────────────
+
+describe('upsertDigestRoster', () => {
+  it('sets {[uid]: {tz, digestHour}} on the roster doc for a real entry', async () => {
+    const set = vi.fn().mockResolvedValue(undefined)
+    const doc = vi.fn().mockReturnValue({ set })
+    getAdminDb.mockReturnValue({ doc })
+
+    await upsertDigestRoster('u1', { tz: 'Asia/Jakarta', digestHour: 6 })
+
+    expect(doc).toHaveBeenCalledWith('bot_meta/digestRoster')
+    const [payload, opts] = set.mock.calls[0]
+    expect(payload).toEqual({ u1: { tz: 'Asia/Jakarta', digestHour: 6 } })
+    expect(opts).toEqual({ merge: true })
+  })
+
+  it('sets {[uid]: <FieldValue.delete sentinel>} when the entry is null', async () => {
+    const set = vi.fn().mockResolvedValue(undefined)
+    getAdminDb.mockReturnValue({ doc: vi.fn().mockReturnValue({ set }) })
+
+    await upsertDigestRoster('u1', null)
+
+    const [payload, opts] = set.mock.calls[0] as [Record<string, unknown>, unknown]
+    expect('u1' in payload).toBe(true)
+    expect(payload.u1).toBe(FieldValue.delete())
     expect(opts).toEqual({ merge: true })
   })
 })

@@ -505,3 +505,37 @@ export async function setPlannerLastPush(userId: string, reminderId: string): Pr
     .doc(`users/${userId}/meta/plannerLastPush`)
     .set(stripUndefined({ reminderId, at: FieldValue.serverTimestamp() }), { merge: true })
 }
+
+// ─── Planner prefs writes (web Settings → `/api/planner/prefs`) ─────
+
+export interface PlannerPrefsInput {
+  digestHour: number
+  digestEnabled: boolean
+  taskLeadsMinutes: number[]
+}
+
+/** Merge-write the planner prefs the cron endpoints (Tasks 10-11) read. Only the route
+ *  handler calls this — the client never writes `meta/plannerPrefs` directly. */
+export async function setPlannerPrefs(userId: string, prefs: PlannerPrefsInput): Promise<void> {
+  await getAdminDb()
+    .doc(`users/${userId}/meta/plannerPrefs`)
+    .set(stripUndefined({ ...prefs }), { merge: true })
+}
+
+/**
+ * Add/update or remove this user's line in the single `bot_meta/digestRoster` doc the
+ * daily-digest cron iterates (`{ [userId]: { tz, digestHour } }`).
+ *   - `entry === null` → drop the line (digest disabled).
+ *   - `entry !== null` → set/update the line.
+ */
+export async function upsertDigestRoster(
+  userId: string,
+  entry: { tz: string; digestHour: number } | null,
+): Promise<void> {
+  const ref = getAdminDb().doc('bot_meta/digestRoster')
+  if (entry === null) {
+    await ref.set({ [userId]: FieldValue.delete() }, { merge: true })
+  } else {
+    await ref.set({ [userId]: stripUndefined(entry) }, { merge: true })
+  }
+}

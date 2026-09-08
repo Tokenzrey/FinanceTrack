@@ -31,6 +31,7 @@ import { parseWhen, stripWhenTokens } from '@/shared/lib/parse-when'
 import { usePlannerStore } from '@/shared/stores/planner.store'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import type { Task, TaskPriority, TaskStatus } from '@/shared/types/productivity'
+import { RemindersPanel } from './RemindersPanel'
 
 /** Reminder lead times spawned with a due date: on time + 1h before. */
 const TASK_LEADS = [0, 60]
@@ -283,8 +284,16 @@ export function PlannerPage() {
   const tz = useAuthStore((s) => s.profile?.timezone) ?? DEFAULT_TZ
   const [filter, setFilter] = useState<TaskStatus | 'all'>('todo')
 
-  // `subscribe()` returns its own unsubscribe — hand it straight back to the effect.
-  useEffect(() => usePlannerStore.getState().subscribe(), [])
+  // Both watchers return their own unsubscribe.
+  useEffect(() => {
+    const store = usePlannerStore.getState()
+    const unsubTasks = store.subscribe()
+    const unsubReminders = store.subscribeReminders()
+    return () => {
+      unsubTasks()
+      unsubReminders()
+    }
+  }, [])
 
   const shown = filter === 'all' ? tasks : tasks.filter((task) => task.status === filter)
 
@@ -337,6 +346,8 @@ export function PlannerPage() {
           ))}
         </ul>
       )}
+
+      <RemindersPanel />
     </div>
   )
 }
