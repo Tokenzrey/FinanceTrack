@@ -45,24 +45,46 @@ export function safeUrl(raw: string): string | null {
 
 // ─── Inline ───────────────────────────────────────────────────────────────────
 
-// One left-to-right scan. Precedence is encoded by alternation order:
-// `code` first (its content is literal), then links, then bold, then italic.
-// Italic uses `\*(?!\*)…` so it never swallows a `**bold**` marker.
-const INLINE_RE =
-  /(`[^`]+`)|(\[[^\]\n]*\]\([^)\n]*\))|(\*\*[^\n]+?\*\*)|(\*(?!\*)[^*\n]+?\*)/g
+// Two-pass scan so emphasis can NEVER cross a code-span or link boundary.
+// Pass 1 tokenizes code spans and links only. Pass 2 runs bold/italic on each
+// residual plain-text run — a stray `*` in prose (`w*h`) can't reach a `*`
+// inside a later code span or link because that text is a separate run.
+const CODE_LINK_RE = /(`[^`\n]+`)|(\[[^\]\n]*\]\([^)\n]*\))/g
+const EMPHASIS_RE = /(\*\*[^\n]+?\*\*)|(\*(?!\*)[^*\n]+?\*)/g
 
 const LINK_RE = /^\[([^\]\n]*)\]\(([^)\n]*)\)$/
 
 function renderInline(text: string, keyPrefix: string): ReactNode[] {
   const out: ReactNode[] = []
+  let n = 0 // running counter — unique keys across both passes
   let last = 0
   let m: RegExpExecArray | null
-  INLINE_RE.lastIndex = 0
-  let i = 0
-  while ((m = INLINE_RE.exec(text)) !== null) {
-    if (m.index > last) out.push(text.slice(last, m.index))
+  CODE_LINK_RE.lastIndex = 0
+
+  // Pass 2 helper: bold/italic only, on a run that has no code/link in it.
+  const pushPlain = (run: string) => {
+    if (run === '') return
+    let plast = 0
+    let em: RegExpExecArray | null
+    EMPHASIS_RE.lastIndex = 0
+    while ((em = EMPHASIS_RE.exec(run)) !== null) {
+      if (em.index > plast) out.push(run.slice(plast, em.index))
+      const tok = em[0]
+      const key = `${keyPrefix}-${n++}`
+      if (em[1]) {
+        out.push(createElement('strong', { key }, tok.slice(2, -2)))
+      } else {
+        out.push(createElement('em', { key }, tok.slice(1, -1)))
+      }
+      plast = em.index + tok.length
+    }
+    if (plast < run.length) out.push(run.slice(plast))
+  }
+
+  while ((m = CODE_LINK_RE.exec(text)) !== null) {
+    if (m.index > last) pushPlain(text.slice(last, m.index))
     const token = m[0]
-    const key = `${keyPrefix}-${i++}`
+    const key = `${keyPrefix}-${n++}`
     if (m[1]) {
       // `code` — literal content, no further parsing.
       out.push(
@@ -72,7 +94,7 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
           token.slice(1, -1),
         ),
       )
-    } else if (m[2]) {
+    } else {
       const lm = LINK_RE.exec(token)
       const href = lm ? safeUrl(lm[2]) : null
       if (lm && href) {
@@ -93,14 +115,10 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
         // Blocked/malformed URL → emit the literal source, never a bare <a>.
         out.push(token)
       }
-    } else if (m[3]) {
-      out.push(createElement('strong', { key }, token.slice(2, -2)))
-    } else if (m[4]) {
-      out.push(createElement('em', { key }, token.slice(1, -1)))
     }
     last = m.index + token.length
   }
-  if (last < text.length) out.push(text.slice(last))
+  if (last < text.length) pushPlain(text.slice(last))
   return out
 }
 

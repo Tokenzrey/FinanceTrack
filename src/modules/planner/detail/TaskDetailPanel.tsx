@@ -246,7 +246,7 @@ function Description({ task }: { task: Task }) {
             aria-pressed={!preview}
             onClick={() => setPreview(false)}
             className={cn(
-              'px-2 py-1 text-xs',
+              'px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
               !preview ? 'bg-accent text-accent-foreground' : 'text-muted-foreground',
             )}
           >
@@ -257,7 +257,7 @@ function Description({ task }: { task: Task }) {
             aria-pressed={preview}
             onClick={() => setPreview(true)}
             className={cn(
-              'px-2 py-1 text-xs',
+              'px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset',
               preview ? 'bg-accent text-accent-foreground' : 'text-muted-foreground',
             )}
           >
@@ -279,6 +279,7 @@ function Description({ task }: { task: Task }) {
           ref={areaRef}
           value={value}
           rows={6}
+          maxLength={20000}
           placeholder="Tambahkan deskripsi…"
           aria-label="Deskripsi tugas"
           onChange={(e) => {

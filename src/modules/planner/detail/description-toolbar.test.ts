@@ -43,6 +43,33 @@ describe('toggleLinePrefix', () => {
     const r = toggleLinePrefix('task', 0, 0, '- [ ] ')
     expect(r.value).toBe('- [ ] task')
   })
+
+  it('checkbox button toggles off an existing - [x] line (strips the checked variant)', () => {
+    const r = toggleLinePrefix('- [x] done', 6, 6, '- [ ] ')
+    expect(r.value).toBe('done')
+  })
+
+  it('list button on a - [x] line converts checkbox → bullet', () => {
+    const r = toggleLinePrefix('- [x] done', 6, 6, '- ')
+    expect(r.value).toBe('- done')
+  })
+
+  it('checkbox button on a bullet line converts bullet → checkbox (no stacking)', () => {
+    const r = toggleLinePrefix('- item', 2, 2, '- [ ] ')
+    expect(r.value).toBe('- [ ] item')
+  })
+
+  it('multi-line all-checkbox selection + checkbox button → all off', () => {
+    const src = '- [ ] a\n- [ ] b'
+    const r = toggleLinePrefix(src, 0, src.length, '- [ ] ')
+    expect(r.value).toBe('a\nb')
+  })
+
+  it('a selection ending exactly at a line start does not drag in the next line', () => {
+    // 6 = start of "beta", 11 = start of "gamma"
+    const r = toggleLinePrefix('alpha\nbeta\ngamma', 6, 11, '- ')
+    expect(r.value).toBe('alpha\n- beta\ngamma')
+  })
 })
 
 describe('insertLink', () => {

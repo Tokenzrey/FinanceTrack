@@ -92,6 +92,27 @@ describe('renderMarkdownLite — subset element types', () => {
     expect(c.querySelector('strong')).toBeNull()
   })
 
+  it('a stray * in prose does not swallow a later code span', () => {
+    const c = html('area = w*h and `w*h` again')
+    expect(c.querySelector('code')?.textContent).toBe('w*h')
+    expect(c.querySelector('em')).toBeNull()
+    // Both backtick-delimited pieces survive as code text.
+    expect(c.textContent).toContain('area = w*h and w*h again')
+  })
+
+  it('a stray * before a link does not eat the ] / )', () => {
+    const c = html('one * two [link](https://a.test) three')
+    const a = c.querySelector('a')
+    expect(a?.getAttribute('href')).toBe('https://a.test/')
+    expect(a?.textContent).toBe('link')
+    expect(c.querySelector('em')).toBeNull()
+  })
+
+  it('a genuine *italic* in a run with no code/link still renders', () => {
+    const c = html('a *real italic* here')
+    expect(c.querySelector('em')?.textContent).toBe('real italic')
+  })
+
   it('plain line → p.whitespace-pre-wrap', () => {
     const c = html('just text')
     const p = c.querySelector('p')

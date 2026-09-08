@@ -32,9 +32,20 @@ export function wrapInline(
   }
 }
 
-/** Toggle a line prefix (`- ` or `- [ ] `) on every line touched by the
- *  selection. If a line already starts with the prefix, strip it; else add it.
- *  Never stacks `- - `. Selection is expanded to cover the affected lines. */
+/** Remove a leading list marker (`- [ ] ` / `- [x] ` / `- `, longest first). */
+function stripListMarker(line: string): string {
+  const m = /^- (\[[ xX]\] )?/.exec(line)
+  return m ? line.slice(m[0].length) : line
+}
+
+/** Toggle a line prefix on every line touched by the selection.
+ *
+ *  For the two list markers the toolbar uses (`- ` Daftar, `- [ ] ` Checkbox)
+ *  this is marker-aware: it converts between bullet and checkbox instead of
+ *  stacking a second marker, and treats `- [ ] ` / `- [x] ` as the same
+ *  "checkbox" state. For any other prefix it falls back to the plain
+ *  add-if-absent / strip-if-present behaviour. Selection is expanded to cover
+ *  the affected lines. */
 export function toggleLinePrefix(
   value: string,
   start: number,
@@ -44,17 +55,32 @@ export function toggleLinePrefix(
   const lineStart = value.lastIndexOf('\n', start - 1) + 1
   let lineEnd = value.indexOf('\n', end)
   if (lineEnd === -1) lineEnd = value.length
-  // A caret exactly on a line boundary shouldn't drag in the following line.
-  if (end > start && end === lineStart && lineEnd > lineStart) {
-    lineEnd = end
+  // A selection whose end sits exactly at a line start doesn't really include
+  // that trailing line — stop at the newline before it, not past it.
+  if (end > start && end > 0 && value[end - 1] === '\n' && lineEnd >= end) {
+    lineEnd = end - 1
   }
 
   const block = value.slice(lineStart, lineEnd)
   const lines = block.split('\n')
-  const allPrefixed = lines.every((l) => l.startsWith(prefix))
-  const next = lines
-    .map((l) => (allPrefixed ? l.slice(prefix.length) : prefix + l))
-    .join('\n')
+  const isListMarker = prefix === '- ' || prefix === '- [ ] '
+
+  let next: string
+  if (isListMarker) {
+    const hasTarget =
+      prefix === '- '
+        ? (l: string) => /^- (?!\[[ xX]\] )/.test(l)
+        : (l: string) => /^- \[[ xX]\] /.test(l)
+    const allTarget = lines.every(hasTarget)
+    next = lines
+      .map((l) => (allTarget ? stripListMarker(l) : prefix + stripListMarker(l)))
+      .join('\n')
+  } else {
+    const allPrefixed = lines.every((l) => l.startsWith(prefix))
+    next = lines
+      .map((l) => (allPrefixed ? l.slice(prefix.length) : prefix + l))
+      .join('\n')
+  }
 
   return {
     value: value.slice(0, lineStart) + next + value.slice(lineEnd),
