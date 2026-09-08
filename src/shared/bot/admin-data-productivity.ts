@@ -14,6 +14,8 @@ import type {
   Task,
   UpdateTaskDTO,
 } from '@/shared/types/productivity'
+import type { BoardList, Label } from '@/shared/types/board'
+import { listForStatus, statusForList } from '@/shared/lib/task-status-sync'
 
 /**
  * Firestore Admin SDK data layer for the productivity modules (tasks, notes,
@@ -64,12 +66,58 @@ function localDayStart(date: Date, timeZone: string): Date {
   return new Date(Date.UTC(y, m - 1, d) - tzOffsetMs(date, timeZone))
 }
 
+// ─── Board lists (Admin SDK reader) ───────────────────────────
+
+/** The board's columns for a user, ordered by `order` asc. Empty (no board yet) → `[]`.
+ *  Mirrors `toBoardList` in FirestoreBoardListRepository — same `?? default` fallbacks. */
+export async function getBoardLists(userId: string): Promise<BoardList[]> {
+  const snap = await getAdminDb()
+    .collection(`users/${userId}/lists`)
+    .orderBy('order', 'asc')
+    .get()
+  return snap.docs.map((d) => {
+    const data = d.data()
+    return {
+      id: d.id,
+      title: data.title ?? '',
+      order: data.order ?? 0,
+      mapsToStatus: data.mapsToStatus ?? 'todo',
+      wipLimit: data.wipLimit ?? null,
+      isCollapsed: data.isCollapsed ?? false,
+      createdAt: data.createdAt ?? Timestamp.now(),
+      updatedAt: data.updatedAt ?? Timestamp.now(),
+    } as BoardList
+  })
+}
+
+/** The board's labels for a user, ordered by `order` asc. Empty (no board yet) → `[]`.
+ *  Mirrors `getBoardLists` — same Admin SDK shape, same `?? default` fallbacks. */
+export async function getBoardLabels(userId: string): Promise<Label[]> {
+  const snap = await getAdminDb()
+    .collection(`users/${userId}/labels`)
+    .orderBy('order', 'asc')
+    .get()
+  return snap.docs.map((d) => {
+    const data = d.data()
+    return {
+      id: d.id,
+      name: data.name ?? '',
+      colorKey: data.colorKey ?? 'slate',
+      order: data.order ?? 0,
+      createdAt: data.createdAt ?? Timestamp.now(),
+    } as Label
+  })
+}
+
 // ─── Tasks ────────────────────────────────────────────────────
 
 export async function createTask(userId: string, dto: CreateTaskDTO): Promise<Task> {
   const ref = getAdminDb().collection(`users/${userId}/tasks`).doc()
   const now = Timestamp.now()
   const dueAt = dto.dueAt ? Timestamp.fromDate(dto.dueAt) : null
+  // The bot always creates as status:'todo' → put the card in the first todo column
+  // (or null if the user has no board yet — Task 4's migration backfills it).
+  const listId = listForStatus('todo', await getBoardLists(userId))
   const doc = {
     title: dto.title,
     notes: dto.notes ?? null,
@@ -77,6 +125,8 @@ export async function createTask(userId: string, dto: CreateTaskDTO): Promise<Ta
     priority: dto.priority ?? 'med',
     dueAt,
     doneAt: null,
+    listId,
+    order: Date.now(), // ponytail: monotonic append value, board/migration re-ranks properly
     source: dto.source,
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
@@ -99,8 +149,23 @@ export async function updateTask(
   if (patch.title !== undefined) update.title = patch.title
   if (patch.notes !== undefined) update.notes = patch.notes
   if (patch.priority !== undefined) update.priority = patch.priority
-  if (patch.status !== undefined) update.status = patch.status
   if (patch.dueAt !== undefined) update.dueAt = patch.dueAt ? Timestamp.fromDate(patch.dueAt) : null
+
+  // Directional status ↔ listId sync: whichever field the caller explicitly set wins,
+  // the other follows it. (Not `reconcile` — that's list-wins, for the board-drag path
+  // only. Here an explicit `/selesai` must force `status:'done'`, not be snapped back
+  // by a stale `todo` listId.) Only pay the lists read when one of them moves.
+  if (patch.status !== undefined || patch.listId !== undefined) {
+    const lists = await getBoardLists(userId)
+    if (patch.status !== undefined) {
+      update.status = patch.status
+      update.listId = listForStatus(patch.status, lists)
+    } else if (patch.listId !== undefined) {
+      update.listId = patch.listId
+      update.status = statusForList(patch.listId, lists)
+    }
+  }
+
   if (patch.status === 'done' && prev.status !== 'done')
     update.doneAt = FieldValue.serverTimestamp()
 
@@ -237,14 +302,19 @@ export async function createReminder(
 }
 
 /** Rebuild a task's automatic reminders: drop the still-pending ones, then re-create
- *  one per lead time whose fire moment is still in the future. No-op if the task has
- *  no due date. */
+ *  one per lead time whose fire moment is still in the future — for `dueAt` ("jatuh
+ *  tempo") and `startAt` ("waktunya mulai", plan §0 #10) alike. No-op if the task has
+ *  neither instant.
+ *
+ *  The bot has no start-date command yet, so the `startAt` loop only fires for a task
+ *  whose start was set from the web and that the bot later touches. The mechanism is
+ *  what §0 #10 asks for; a `/mulai` command is out of scope. */
 export async function upsertTaskReminder(
   userId: string,
   task: Task,
   leadsMinutes: number[],
 ): Promise<void> {
-  if (!task.dueAt) return
+  if (!task.dueAt && !task.startAt) return
 
   const db = getAdminDb()
   const col = db.collection(`users/${userId}/reminders`)
@@ -257,33 +327,42 @@ export async function upsertTaskReminder(
   const batch = db.batch()
   for (const d of existing.docs) batch.delete(d.ref)
 
-  const dueMs = task.dueAt.toDate().getTime()
   const tz = await getUserTimezone(userId)
-  const dueLabel = formatDateTime(task.dueAt.toDate(), tz)
   const nowMs = Date.now()
 
-  for (const lead of leadsMinutes) {
-    const remindMs = dueMs - lead * 60_000
-    if (remindMs <= nowMs) continue
-    batch.set(
-      col.doc(),
-      stripUndefined({
-        ownerId: userId,
-        kind: 'task',
-        taskId: task.id,
-        message: `⏰ Tugas: ${task.title} — jatuh tempo ${dueLabel}`,
-        remindAt: Timestamp.fromDate(new Date(remindMs)),
-        status: 'pending',
-        attempts: 0,
-        nextAttemptAt: null,
-        lastError: null,
-        sentAt: null,
-        recurrence: null,
-        source: 'auto',
-        createdAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-      }),
-    )
+  const queue = (instant: Date, message: string) => {
+    for (const lead of leadsMinutes) {
+      const remindMs = instant.getTime() - lead * 60_000
+      if (remindMs <= nowMs) continue
+      batch.set(
+        col.doc(),
+        stripUndefined({
+          ownerId: userId,
+          kind: 'task',
+          taskId: task.id,
+          message,
+          remindAt: Timestamp.fromDate(new Date(remindMs)),
+          status: 'pending',
+          attempts: 0,
+          nextAttemptAt: null,
+          lastError: null,
+          sentAt: null,
+          recurrence: null,
+          source: 'auto',
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        }),
+      )
+    }
+  }
+
+  if (task.dueAt) {
+    const dueAt = task.dueAt.toDate()
+    queue(dueAt, `⏰ Tugas: ${task.title} — jatuh tempo ${formatDateTime(dueAt, tz)}`)
+  }
+  if (task.startAt) {
+    const startAt = task.startAt.toDate()
+    queue(startAt, `▶️ Tugas: ${task.title} — waktunya mulai ${formatDateTime(startAt, tz)}`)
   }
 
   await batch.commit()

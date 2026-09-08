@@ -1,9 +1,10 @@
 import { formatDayLong } from '@/shared/lib/format'
-import type { UpdateTaskDTO } from '@/shared/types/productivity'
+import type { Task, UpdateTaskDTO } from '@/shared/types/productivity'
 import { getUserTimezone } from './admin-data'
 import * as data from './admin-data-productivity'
 import type { ProductivityCommand } from './productivity-commands'
 import * as replies from './replies-productivity'
+import type { TaskCardContext } from './replies-productivity'
 import type { BotReply } from './types'
 
 /**
@@ -25,6 +26,37 @@ function firstFutureReminder(dueAt: Date, leadsMinutes: number[]): Date | null {
     .filter((ms) => ms > now)
     .sort((a, b) => a - b)
   return upcoming.length > 0 ? new Date(upcoming[0]) : null
+}
+
+/** Resolve each task's board column name (from `listId`) and label names (from `labelIds`)
+ *  so the reply cards can show a 📁 / 🏷 line. Two extra Firestore reads per command —
+ *  acceptable: the bot is single-user and `/tugas` / `/agenda` / task-add are infrequent.
+ *  A lists/labels read failure (rules, network) degrades to today's context-free card. */
+async function buildTaskCardContext(
+  userId: string,
+  tasks: Task[],
+): Promise<Map<string, TaskCardContext>> {
+  const out = new Map<string, TaskCardContext>()
+  if (tasks.every((t) => !t.listId && !t.labelIds?.length)) return out
+  try {
+    const [lists, labels] = await Promise.all([
+      data.getBoardLists(userId),
+      data.getBoardLabels(userId),
+    ])
+    const listNameById = new Map(lists.map((l) => [l.id, l.title]))
+    const labelNameById = new Map(labels.map((l) => [l.id, l.name]))
+    for (const t of tasks) {
+      out.set(t.id, {
+        columnName: t.listId ? (listNameById.get(t.listId) ?? null) : null,
+        labelNames: (t.labelIds ?? [])
+          .map((id) => labelNameById.get(id))
+          .filter((n): n is string => Boolean(n)),
+      })
+    }
+  } catch {
+    return new Map()
+  }
+  return out
 }
 
 /** First line of a note, trimmed to ~60 chars — used as the note title. */
@@ -59,12 +91,14 @@ export async function handleProductivityCommand(
         await data.upsertTaskReminder(userId, task, prefs.taskLeadsMinutes)
         firstReminderAt = firstFutureReminder(cmd.when.at, prefs.taskLeadsMinutes)
       }
-      return replies.taskCreated(task, tz, firstReminderAt)
+      const ctxById = await buildTaskCardContext(userId, [task])
+      return replies.taskCreated(task, tz, firstReminderAt, ctxById.get(task.id))
     }
 
     case 'task_list': {
       const items = await data.listTasks(userId, cmd.filter, tz)
-      return replies.taskList(items, cmd.filter, tz)
+      const ctxById = await buildTaskCardContext(userId, items)
+      return replies.taskList(items, cmd.filter, tz, ctxById)
     }
 
     case 'agenda': {
@@ -73,7 +107,8 @@ export async function handleProductivityCommand(
         data.listTasks(userId, 'today', tz),
         data.listRemindersForDay(userId, now, tz),
       ])
-      return replies.agenda(tasks, reminders, tz, formatDayLong(now, tz))
+      const ctxById = await buildTaskCardContext(userId, tasks)
+      return replies.agenda(tasks, reminders, tz, formatDayLong(now, tz), ctxById)
     }
 
     case 'task_done': {
@@ -106,7 +141,8 @@ export async function handleProductivityCommand(
         await data.upsertTaskReminder(userId, updated, prefs.taskLeadsMinutes)
         firstReminderAt = firstFutureReminder(cmd.patch.when.at, prefs.taskLeadsMinutes)
       }
-      return replies.taskCreated(updated, tz, firstReminderAt)
+      const ctxById = await buildTaskCardContext(userId, [updated])
+      return replies.taskCreated(updated, tz, firstReminderAt, ctxById.get(updated.id))
     }
 
     case 'note_add': {

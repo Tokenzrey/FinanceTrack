@@ -1,4 +1,5 @@
 import type { Unsubscribe } from 'firebase/firestore'
+import type { BoardList, Label } from '@/shared/types/board'
 import type {
   AppSettings,
   Asset,
@@ -186,12 +187,38 @@ export interface INoteRepository {
 }
 
 export interface IReminderRepository {
-  /** Web only ever creates `kind:'standalone'` reminders. */
+  /** `kind:'task'` + `taskId` when `dto.taskId` is set, else `kind:'standalone'`. */
   create(userId: string, dto: CreateReminderDTO): Promise<Reminder>
   listUpcoming(userId: string): Promise<Reminder[]>
   /** Sets `status:'cancelled'` — the only status transition the client rules allow. */
   cancel(userId: string, id: string): Promise<void>
   watch(userId: string, cb: (reminders: Reminder[]) => void): Unsubscribe
+}
+
+export interface IBoardListRepository {
+  create(userId: string, data: Omit<BoardList, 'id' | 'createdAt' | 'updatedAt'>): Promise<BoardList>
+  update(
+    userId: string,
+    id: string,
+    patch: Partial<Pick<BoardList, 'title' | 'order' | 'mapsToStatus' | 'wipLimit' | 'isCollapsed'>>,
+  ): Promise<void>
+  remove(userId: string, id: string): Promise<void>
+  /** Ordered by `order` ascending. */
+  list(userId: string): Promise<BoardList[]>
+  watch(userId: string, cb: (lists: BoardList[]) => void): Unsubscribe
+}
+
+export interface ILabelRepository {
+  create(userId: string, data: Omit<Label, 'id' | 'createdAt'>): Promise<Label>
+  update(
+    userId: string,
+    id: string,
+    patch: Partial<Pick<Label, 'name' | 'colorKey' | 'order'>>,
+  ): Promise<void>
+  remove(userId: string, id: string): Promise<void>
+  /** Ordered by `order` ascending. */
+  list(userId: string): Promise<Label[]>
+  watch(userId: string, cb: (labels: Label[]) => void): Unsubscribe
 }
 
 export interface IUserRepository {

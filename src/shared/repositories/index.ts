@@ -1,7 +1,9 @@
 import { FirestoreBudgetRepository } from './firestore/FirestoreBudgetRepository'
 import { FirestoreBudgetTemplateRepository } from './firestore/FirestoreBudgetTemplateRepository'
+import { FirestoreBoardListRepository } from './firestore/FirestoreBoardListRepository'
 import { FirestoreCategoryRepository } from './firestore/FirestoreCategoryRepository'
 import { FirestoreDataResetRepository } from './firestore/FirestoreDataResetRepository'
+import { FirestoreLabelRepository } from './firestore/FirestoreLabelRepository'
 import { FirestoreNetWorthRepository } from './firestore/FirestoreNetWorthRepository'
 import { FirestoreNoteRepository } from './firestore/FirestoreNoteRepository'
 import { FirestoreReceiptScanRepository } from './firestore/FirestoreReceiptScanRepository'
@@ -34,6 +36,8 @@ export const repositories = {
   tasks: new FirestoreTaskRepository(),
   notes: new FirestoreNoteRepository(),
   reminders: new FirestoreReminderRepository(),
+  boardLists: new FirestoreBoardListRepository(),
+  labels: new FirestoreLabelRepository(),
 } as const
 
 export type Repositories = typeof repositories

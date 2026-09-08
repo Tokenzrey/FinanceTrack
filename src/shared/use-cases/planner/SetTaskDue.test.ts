@@ -40,6 +40,7 @@ describe('setTaskDue', () => {
       message: `⏰ Tugas: Beli susu — jatuh tempo ${formatDateTime(dueAt, DEFAULT_TZ)}`,
       remindAt: new Date('2026-09-10T07:00:00Z'),
       source: 'web',
+      taskId: 't1',
     })
   })
 
@@ -52,6 +53,7 @@ describe('setTaskDue', () => {
       message: `⏰ Tugas: Beli susu — jatuh tempo ${formatDateTime(dueAt, DEFAULT_TZ)}`,
       remindAt: new Date('2026-09-08T00:15:00Z'),
       source: 'web',
+      taskId: 't1',
     })
   })
 })

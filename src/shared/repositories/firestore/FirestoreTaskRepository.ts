@@ -17,7 +17,8 @@ import { COLLECTIONS, col, colDoc, newDoc, stripUndefined } from './paths'
 
 const NAME = COLLECTIONS.tasks
 
-function toTask(snap: DocumentSnapshot): Task {
+/** Exported for tests — pure mapping, no Firestore access beyond the snapshot. */
+export function toTask(snap: DocumentSnapshot): Task {
   const data = snap.data()!
   return {
     id: snap.id,
@@ -30,6 +31,20 @@ function toTask(snap: DocumentSnapshot): Task {
     source: data.source ?? 'web',
     createdAt: data.createdAt ?? Timestamp.now(),
     updatedAt: data.updatedAt ?? Timestamp.now(),
+    // Board fields — optional on `Task`, so a bot-created doc without them stays
+    // valid. Defaults must be read-safe: `listId: null` matches no column (the
+    // migration's job), empty arrays keep every `?? []` consumer happy.
+    listId: data.listId ?? null,
+    order: data.order ?? 0,
+    startAt: data.startAt ?? null,
+    labelIds: data.labelIds ?? [],
+    storyPoints: data.storyPoints ?? null,
+    dependsOn: data.dependsOn ?? [],
+    checklist: data.checklist ?? [],
+    attachments: data.attachments ?? [],
+    progressNotes: data.progressNotes ?? [],
+    coverColor: data.coverColor ?? null,
+    timelineOrder: data.timelineOrder ?? undefined,
   }
 }
 
@@ -52,6 +67,11 @@ export class FirestoreTaskRepository implements ITaskRepository {
       dueAt: dto.dueAt ? Timestamp.fromDate(dto.dueAt) : null,
       doneAt: null,
       source: dto.source,
+      // `stripUndefined` drops these when the caller didn't set them, so a task
+      // created without a column writes no `listId` field at all.
+      listId: dto.listId ?? undefined,
+      order: dto.order ?? undefined,
+      labelIds: dto.labelIds ?? undefined,
     })
     await setDoc(ref, { ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp() })
     const now = Timestamp.now()
@@ -65,6 +85,12 @@ export class FirestoreTaskRepository implements ITaskRepository {
         patch.dueAt !== undefined
           ? patch.dueAt
             ? Timestamp.fromDate(patch.dueAt)
+            : null
+          : undefined,
+      startAt:
+        patch.startAt !== undefined
+          ? patch.startAt
+            ? Timestamp.fromDate(patch.startAt)
             : null
           : undefined,
       doneAt: patch.status === 'done' ? serverTimestamp() : undefined,

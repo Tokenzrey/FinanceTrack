@@ -15,6 +15,7 @@ vi.mock('@/shared/bot/admin-data-productivity', () => ({
     id: 'r1',
     ownerId: 'u1',
     message: 'hai',
+    remindAt: { toDate: () => new Date('2026-01-01T00:00:00Z') },
     attempts: 1,
     recurrence: null,
     kind: 'standalone',

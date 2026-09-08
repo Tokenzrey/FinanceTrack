@@ -34,6 +34,8 @@ export const COLLECTIONS = {
   tasks: 'tasks',
   notes: 'notes',
   reminders: 'reminders',
+  lists: 'lists',
+  labels: 'labels',
 } as const
 
 /** Firestore rejects `undefined`; optional DTO fields must be dropped, not sent as undefined. */

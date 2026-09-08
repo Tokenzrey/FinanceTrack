@@ -74,7 +74,18 @@ it('taskList numbers items and marks priority', () => {
 })
 
 it('reminderPush returns three action buttons with pr: tokens', () => {
-  const { buttons } = reminderPush({ id: 'x1', message: '⏰ bayar listrik' } as unknown as Reminder, TZ)
+  const { buttons } = reminderPush(
+    mkReminder({ id: 'x1', message: '⏰ bayar listrik' }),
+    TZ,
+  )
+  expect(buttons.map((b) => b.token)).toEqual(['pr:done:x1', 'pr:snooze:x1:15', 'pr:snooze:x1:60'])
+})
+
+it('reminderPush leads with a bold title line and shows its own time', () => {
+  const at = '2026-09-08T13:00:00Z'
+  const { text, buttons } = reminderPush(mkReminder({ id: 'x1', remindAt: ts(at) }), TZ)
+  expect(text.split('\n')[0]).toBe('⏰ <b>Pengingat</b>')
+  expect(text).toContain(`🗓 ${formatDateTime(new Date(at), TZ)}`)
   expect(buttons.map((b) => b.token)).toEqual(['pr:done:x1', 'pr:snooze:x1:15', 'pr:snooze:x1:60'])
 })
 
@@ -116,6 +127,36 @@ describe('replies-productivity', () => {
     const r = taskCreated(mkTask({ title: 'Bikin slide' }), TZ, at)
     expect(r.text).toContain('Bikin slide')
     expect(r.text).toContain(formatDateTime(at, TZ))
+  })
+
+  it('taskCreated names the column and labels when a context is given', () => {
+    const r = taskCreated(mkTask({ id: 't1', listId: 'l1', labelIds: ['a', 'b'] }), TZ, null, {
+      columnName: 'Dikerjakan',
+      labelNames: ['Urgent', 'Klien'],
+    })
+    expect(r.text).toContain('📁 Dikerjakan')
+    expect(r.text).toContain('🏷 Urgent, Klien')
+  })
+
+  it('taskCreated with no context / no listId renders no 📁 or 🏷 line', () => {
+    const r = taskCreated(mkTask({ title: 'Beli kopi' }), TZ, null)
+    expect(r.text).not.toContain('📁')
+    expect(r.text).not.toContain('🏷')
+  })
+
+  it('taskList shows the column name for a task with a listId + ctxById', () => {
+    const items = [mkTask({ id: 't1', title: 'Review PRD', listId: 'l1' })]
+    const ctxById = new Map([['t1', { columnName: 'Dikerjakan', labelNames: ['Urgent', 'Klien'] }]])
+    const r = taskList(items, 'open', TZ, ctxById)
+    expect(r.text).toContain('Dikerjakan')
+    expect(r.text).toContain('📁')
+    expect(r.text).toContain('Urgent, Klien')
+    expect(r.text).toContain('🏷')
+  })
+
+  it('taskList without ctxById is unchanged from today (no 📁 line)', () => {
+    const r = taskList([mkTask({ id: 't1', title: 'Review PRD' })], 'open', TZ)
+    expect(r.text).not.toContain('📁')
   })
 
   it('reminderSet shows the formatted remind time', () => {

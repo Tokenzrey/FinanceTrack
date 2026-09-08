@@ -10,6 +10,7 @@ vi.mock('@/shared/lib/firebase-admin', () => ({
 
 const {
   createTask,
+  updateTask,
   listTasks,
   createReminder,
   claimReminder,
@@ -103,10 +104,19 @@ function fakeQuery(docs: FakeDoc[]): FakeQuery {
 // ─── createTask ────────────────────────────────────────────────
 
 describe('createTask', () => {
+  // A db fake that serves `users/{uid}/tasks` (doc().set()) and `users/{uid}/lists`
+  // (orderBy('order').get(), via getBoardLists) off the same `collection(path)` call.
+  function dbWithLists(listDocs: FakeDoc[], set = vi.fn().mockResolvedValue(undefined), taskId = 'task-new') {
+    const collection = vi.fn((path: string) => {
+      if (path.endsWith('/lists')) return fakeQuery(listDocs)
+      return { doc: vi.fn().mockReturnValue({ id: taskId, set }) }
+    })
+    return { db: { collection }, set }
+  }
+
   it('defaults status=todo priority=med, preserves title, stamps timestamps, nulls notes/dueAt', async () => {
-    const set = vi.fn().mockResolvedValue(undefined)
-    const doc = vi.fn().mockReturnValue({ id: 'task-1', set })
-    getAdminDb.mockReturnValue({ collection: vi.fn().mockReturnValue({ doc }) })
+    const { db, set } = dbWithLists([], undefined, 'task-1')
+    getAdminDb.mockReturnValue(db)
 
     const t = await createTask('u1', { title: 'Review PRD', source: 'whatsapp' })
 
@@ -127,10 +137,8 @@ describe('createTask', () => {
   })
 
   it('converts a dto.dueAt Date to a Timestamp and honours an explicit priority', async () => {
-    const set = vi.fn().mockResolvedValue(undefined)
-    getAdminDb.mockReturnValue({
-      collection: vi.fn().mockReturnValue({ doc: vi.fn().mockReturnValue({ id: 'task-2', set }) }),
-    })
+    const { db, set } = dbWithLists([], undefined, 'task-2')
+    getAdminDb.mockReturnValue(db)
 
     const due = new Date('2026-09-20T09:00:00Z')
     const t = await createTask('u1', { title: 'x', source: 'web', priority: 'high', dueAt: due })
@@ -138,6 +146,113 @@ describe('createTask', () => {
     expect(t.priority).toBe('high')
     const written = set.mock.calls[0][0] as { dueAt: { toMillis: () => number } }
     expect(written.dueAt.toMillis()).toBe(due.getTime())
+  })
+
+  it('empty lists → task listId null, order a number, written doc has listId null', async () => {
+    const { db, set } = dbWithLists([])
+    getAdminDb.mockReturnValue(db)
+
+    const t = await createTask('u1', { title: 'Beli kopi', source: 'whatsapp' })
+
+    expect(t.listId).toBeNull()
+    expect(typeof t.order).toBe('number')
+
+    const written = set.mock.calls[0][0] as Record<string, unknown>
+    expect('listId' in written).toBe(true)
+    expect(written.listId).toBeNull()
+    expect(typeof written.order).toBe('number')
+  })
+
+  it('a todo column exists → task listId is that column id', async () => {
+    const { db } = dbWithLists([
+      mkDoc('list-todo', { title: 'Backlog', order: 1, mapsToStatus: 'todo' }),
+      mkDoc('list-done', { title: 'Done', order: 3, mapsToStatus: 'done' }),
+    ])
+    getAdminDb.mockReturnValue(db)
+
+    const t = await createTask('u1', { title: 'x', source: 'web' })
+
+    expect(t.listId).toBe('list-todo')
+  })
+})
+
+// ─── updateTask ────────────────────────────────────────────────
+
+describe('updateTask', () => {
+  // db fake: `doc(path)` serves the task read/update; `collection(path).orderBy().get()`
+  // serves the lists read.
+  function dbWithTaskAndLists(prev: Record<string, unknown>, listDocs: FakeDoc[]) {
+    const update = vi.fn().mockResolvedValue(undefined)
+    const get = vi.fn().mockResolvedValue({ exists: true, data: () => prev })
+    const collection = vi.fn().mockReturnValue(fakeQuery(listDocs))
+    return {
+      db: { doc: vi.fn().mockReturnValue({ get, update }), collection },
+      update,
+      collection,
+    }
+  }
+
+  it('{ status: done } with a done column → payload sets status done AND listId, doneAt set', async () => {
+    // A task the bot created before the board existed: prev has no listId.
+    const { db, update, collection } = dbWithTaskAndLists({ status: 'todo' }, [
+      mkDoc('list-todo', { title: 'Backlog', order: 1, mapsToStatus: 'todo' }),
+      mkDoc('list-done', { title: 'Done', order: 3, mapsToStatus: 'done' }),
+    ])
+    getAdminDb.mockReturnValue(db)
+
+    await updateTask('u1', 't1', { status: 'done' })
+
+    expect(collection).toHaveBeenCalledWith('users/u1/lists')
+    const written = update.mock.calls[0][0] as Record<string, unknown>
+    expect(written.status).toBe('done')
+    expect(written.listId).toBe('list-done')
+    expect(written.doneAt).toBeTruthy()
+  })
+
+  it('{ status: done } on a task whose listId points at a todo column → forces status done, moves listId to done column', async () => {
+    // The regression the old `reconcile` (list-wins) code would have failed:
+    // a live `todo` listId must NOT snap `/selesai` back to todo.
+    const { db, update } = dbWithTaskAndLists({ status: 'todo', listId: 'list-todo' }, [
+      mkDoc('list-todo', { title: 'Backlog', order: 1, mapsToStatus: 'todo' }),
+      mkDoc('list-done', { title: 'Done', order: 3, mapsToStatus: 'done' }),
+    ])
+    getAdminDb.mockReturnValue(db)
+
+    await updateTask('u1', 't1', { status: 'done' })
+
+    const written = update.mock.calls[0][0] as Record<string, unknown>
+    expect(written.status).toBe('done')
+    expect(written.listId).toBe('list-done')
+    expect(written.doneAt).toBeTruthy()
+  })
+
+  it('{ listId } only → column drives, status follows the column mapsToStatus', async () => {
+    const { db, update } = dbWithTaskAndLists({ status: 'todo', listId: 'list-todo' }, [
+      mkDoc('list-todo', { title: 'Backlog', order: 1, mapsToStatus: 'todo' }),
+      mkDoc('list-doing', { title: 'In progress', order: 2, mapsToStatus: 'doing' }),
+    ])
+    getAdminDb.mockReturnValue(db)
+
+    await updateTask('u1', 't1', { listId: 'list-doing' })
+
+    const written = update.mock.calls[0][0] as Record<string, unknown>
+    expect(written.listId).toBe('list-doing')
+    expect(written.status).toBe('doing')
+    expect('doneAt' in written).toBe(false)
+  })
+
+  it('{ title } only → getBoardLists not called, payload carries no listId', async () => {
+    const collection = vi.fn()
+    const update = vi.fn().mockResolvedValue(undefined)
+    const get = vi.fn().mockResolvedValue({ exists: true, data: () => ({ status: 'todo' }) })
+    getAdminDb.mockReturnValue({ doc: vi.fn().mockReturnValue({ get, update }), collection })
+
+    await updateTask('u1', 't1', { title: 'judul baru' })
+
+    expect(collection).not.toHaveBeenCalled()
+    const written = update.mock.calls[0][0] as Record<string, unknown>
+    expect(written.title).toBe('judul baru')
+    expect('listId' in written).toBe(false)
   })
 })
 
@@ -391,17 +506,69 @@ describe('dueRemindersPage', () => {
 // ─── upsertTaskReminder ───────────────────────────────────────
 
 describe('upsertTaskReminder', () => {
-  it('is a no-op when the task has no dueAt', async () => {
+  /** Wires a db whose batch records every `.set` payload. */
+  function mkBatchDb(existing: FakeDoc[] = []) {
+    const batchDelete = vi.fn()
+    const batchSet = vi.fn()
+    const batchCommit = vi.fn().mockResolvedValue(undefined)
+    const col = { ...fakeQuery(existing), doc: vi.fn().mockReturnValue({ id: 'new-rem' }) }
+    getAdminDb.mockReturnValue({
+      collection: vi.fn().mockReturnValue(col),
+      doc: vi.fn().mockReturnValue({ get: vi.fn().mockResolvedValue({ exists: false }) }),
+      batch: vi.fn().mockReturnValue({ delete: batchDelete, set: batchSet, commit: batchCommit }),
+    })
+    return { batchDelete, batchSet, batchCommit }
+  }
+
+  it('is a no-op when the task has neither dueAt nor startAt', async () => {
     const db = { collection: vi.fn() }
     getAdminDb.mockReturnValue(db)
 
     await upsertTaskReminder(
       'u1',
-      { id: 't1', title: 'x', dueAt: null } as unknown as Task,
+      { id: 't1', title: 'x', dueAt: null, startAt: null } as unknown as Task,
       [0, 60],
     )
 
     expect(db.collection).not.toHaveBeenCalled()
+  })
+
+  it('creates a "waktunya mulai" reminder from startAt when there is no dueAt', async () => {
+    const { batchSet } = mkBatchDb()
+    const startMs = Date.now() + 30 * 60_000
+    const startAt = { toDate: () => new Date(startMs) }
+
+    await upsertTaskReminder(
+      'u1',
+      { id: 't1', title: 'Tinjau', dueAt: null, startAt } as unknown as Task,
+      [0, 60], // lead 0 → future (kept); lead 60 → past (skipped)
+    )
+
+    expect(batchSet).toHaveBeenCalledTimes(1)
+    const written = batchSet.mock.calls[0][1] as Record<string, unknown>
+    expect(written.kind).toBe('task')
+    expect(written.taskId).toBe('t1')
+    expect(written.message).toContain('▶️ Tugas: Tinjau — waktunya mulai ')
+    expect((written.remindAt as { toDate(): Date }).toDate().getTime()).toBe(startMs)
+  })
+
+  it('emits both loops when the task has startAt AND dueAt', async () => {
+    const { batchSet } = mkBatchDb()
+    const startAt = { toDate: () => new Date(Date.now() + 30 * 60_000) }
+    const dueAt = { toDate: () => new Date(Date.now() + 90 * 60_000) }
+
+    await upsertTaskReminder(
+      'u1',
+      { id: 't1', title: 'Tinjau', dueAt, startAt } as unknown as Task,
+      [0],
+    )
+
+    expect(batchSet).toHaveBeenCalledTimes(2)
+    const messages = batchSet.mock.calls.map(
+      (c) => (c[1] as Record<string, unknown>).message as string,
+    )
+    expect(messages.some((m) => m.includes('jatuh tempo'))).toBe(true)
+    expect(messages.some((m) => m.includes('waktunya mulai'))).toBe(true)
   })
 
   it('deletes existing pending task reminders then creates one per future lead, skipping past leads', async () => {

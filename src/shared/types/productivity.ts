@@ -1,4 +1,5 @@
 import type { Timestamp } from 'firebase/firestore'
+import type { ChecklistItem, Attachment, ProgressNote } from './board'
 
 export type TaskStatus = 'todo' | 'doing' | 'done'
 export type TaskPriority = 'low' | 'med' | 'high'
@@ -17,6 +18,20 @@ export interface Task {
   source: EntrySource
   createdAt: Timestamp
   updatedAt: Timestamp
+  // Board-related optional fields (all safe defaults)
+  listId?: string | null
+  order?: number
+  startAt?: Timestamp | null
+  labelIds?: string[]
+  storyPoints?: number | null
+  dependsOn?: string[]
+  checklist?: ChecklistItem[]
+  attachments?: Attachment[]
+  progressNotes?: ProgressNote[]
+  /** Manual row order on the Linimasa view. Independent of the board's `order`
+   *  so reordering one projection never disturbs the other. */
+  timelineOrder?: number
+  coverColor?: string | null
 }
 
 export interface Note {
@@ -61,6 +76,10 @@ export interface CreateTaskDTO {
   priority?: TaskPriority
   dueAt?: Date | null
   source: EntrySource
+  // Board fields for creation
+  listId?: string | null
+  order?: number
+  labelIds?: string[]
 }
 export interface UpdateTaskDTO {
   title?: string
@@ -68,6 +87,19 @@ export interface UpdateTaskDTO {
   status?: TaskStatus
   priority?: TaskPriority
   dueAt?: Date | null
+  // Board fields for update
+  listId?: string | null
+  order?: number
+  startAt?: Date | null
+  labelIds?: string[]
+  storyPoints?: number | null
+  dependsOn?: string[]
+  coverColor?: string | null
+  // `Task` array fields from §2.1 — added here because Task 10 is the first mutator.
+  checklist?: ChecklistItem[]
+  attachments?: Attachment[]
+  progressNotes?: ProgressNote[]
+  timelineOrder?: number
 }
 export interface CreateNoteDTO {
   title?: string
@@ -81,6 +113,9 @@ export interface CreateReminderDTO {
   recurrence?: { freq: ReminderFreq; until?: Date | null } | null
   /** `'auto'` = system-generated (recurrence roll-forward, task lead reminders). */
   source: EntrySource | 'auto'
+  /** Pins the reminder to a task — stored as `kind:'task'` + `taskId`, matching the
+   *  bot's `upsertTaskReminder` shape. Omitted ⇒ `kind:'standalone'`. */
+  taskId?: string
 }
 
 /** Default lead time (minutes before dueAt) for a task's automatic reminder.
