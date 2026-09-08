@@ -193,6 +193,11 @@ function Description({ task }: { task: Task }) {
     if (!uid) return
     const clean = next.trim() === '' ? null : next
     if (clean === (task.notes ?? null)) return
+    // `maxLength` blocks typing past the cap, not a paste or a programmatic set.
+    if (clean != null && clean.length > 20000) {
+      toast.error('Deskripsi maksimal 20.000 karakter.')
+      return
+    }
     repositories.tasks.update(uid, task.id, { notes: clean }).catch(() => {
       toast.error('Gagal menyimpan deskripsi.')
     })

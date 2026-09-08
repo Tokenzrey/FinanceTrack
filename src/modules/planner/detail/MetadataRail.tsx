@@ -22,6 +22,7 @@ import type { Task, TaskPriority, TaskStatus } from '@/shared/types/productivity
 import { addDependency } from '@/shared/use-cases/board/AddDependency.usecase'
 import { moveTask } from '@/shared/use-cases/board/MoveTask.usecase'
 import { removeDependency } from '@/shared/use-cases/board/RemoveDependency.usecase'
+import { setTaskLabels } from '@/shared/use-cases/board/SetTaskLabels.usecase'
 import { setTaskSchedule } from '@/shared/use-cases/board/SetTaskSchedule.usecase'
 import { PriorityDot } from '../shared/PriorityDot'
 import { SourceGlyph } from '../shared/SourceGlyph'
@@ -480,7 +481,7 @@ export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
                     const next = on
                       ? (task.labelIds ?? []).filter((id) => id !== l.id)
                       : [...(task.labelIds ?? []), l.id]
-                    void patch({ labelIds: next })
+                    if (uid) void setTaskLabels(uid, task, next)
                   }}
                   className={cn(
                     'rounded-full border px-2 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',

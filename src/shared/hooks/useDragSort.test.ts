@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { createElement } from 'react'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { computeInsertIndex, useDragSort } from './useDragSort'
+import { adjustSameContainerIndex, computeInsertIndex, useDragSort } from './useDragSort'
 
 // --- 1. computeInsertIndex: pure, no DOM -------------------------------------
 
@@ -35,6 +35,24 @@ describe('computeInsertIndex', () => {
 
   it('returns 0 for an empty list', () => {
     expect(computeInsertIndex([], 123)).toBe(0)
+  })
+})
+
+// --- 1b. adjustSameContainerIndex: pre-removal -> post-removal --------------
+
+describe('adjustSameContainerIndex', () => {
+  it('shifts down when dropping below the item’s own slot', () => {
+    // [A,B,C], drag A into the B/C gap: raw 2 -> 1, so the neighbours are B and C.
+    expect(adjustSameContainerIndex(2, 0)).toBe(1)
+    expect(adjustSameContainerIndex(3, 1)).toBe(2)
+  })
+
+  it('leaves an upward drag alone', () => {
+    expect(adjustSameContainerIndex(0, 2)).toBe(0)
+  })
+
+  it('leaves a drop at the item’s own slot alone', () => {
+    expect(adjustSameContainerIndex(2, 2)).toBe(2)
   })
 })
 

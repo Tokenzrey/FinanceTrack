@@ -66,6 +66,17 @@ export function computeInsertIndex(itemRects: DOMRect[], pointerY: number): numb
   return index
 }
 
+/**
+ * `computeInsertIndex` counts the dragged item's own rect — it never leaves the
+ * DOM (no displacement placeholder), so the raw index is *pre-removal*. Both
+ * consumers splice the item out before indexing and expect a *post-removal*
+ * index, so a same-container drop past the item's own slot shifts down by one.
+ * Cross-container drops need no adjustment (foreign rects exclude the item).
+ */
+export function adjustSameContainerIndex(rawIndex: number, fromIndex: number): number {
+  return rawIndex > fromIndex ? rawIndex - 1 : rawIndex
+}
+
 interface PointerCandidate {
   index: number
   startX: number
@@ -140,7 +151,10 @@ export function useDragSort(opts: UseDragSortOptions): {
       }
 
       const to = computeInsertIndex(rects, clientY)
-      toIndexRef.current = to
+      toIndexRef.current =
+        toContainer === containerId && draggingRef.current
+          ? adjustSameContainerIndex(to, fromIndexRef.current)
+          : to
       toContainerRef.current = toContainer
     },
     [containerId, ownRects],
