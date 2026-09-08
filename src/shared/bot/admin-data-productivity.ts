@@ -12,8 +12,11 @@ import type {
   PlannerPrefs,
   Reminder,
   Task,
+  TaskStatus,
   UpdateTaskDTO,
 } from '@/shared/types/productivity'
+import type { BoardList } from '@/shared/types/board'
+import { listForStatus, reconcile } from '@/shared/lib/task-status-sync'
 
 /**
  * Firestore Admin SDK data layer for the productivity modules (tasks, notes,
@@ -64,12 +67,39 @@ function localDayStart(date: Date, timeZone: string): Date {
   return new Date(Date.UTC(y, m - 1, d) - tzOffsetMs(date, timeZone))
 }
 
+// ─── Board lists (Admin SDK reader) ───────────────────────────
+
+/** The board's columns for a user, ordered by `order` asc. Empty (no board yet) → `[]`.
+ *  Mirrors `toBoardList` in FirestoreBoardListRepository — same `?? default` fallbacks. */
+export async function getBoardLists(userId: string): Promise<BoardList[]> {
+  const snap = await getAdminDb()
+    .collection(`users/${userId}/lists`)
+    .orderBy('order', 'asc')
+    .get()
+  return snap.docs.map((d) => {
+    const data = d.data()
+    return {
+      id: d.id,
+      title: data.title ?? '',
+      order: data.order ?? 0,
+      mapsToStatus: data.mapsToStatus ?? 'todo',
+      wipLimit: data.wipLimit ?? null,
+      isCollapsed: data.isCollapsed ?? false,
+      createdAt: data.createdAt ?? Timestamp.now(),
+      updatedAt: data.updatedAt ?? Timestamp.now(),
+    } as BoardList
+  })
+}
+
 // ─── Tasks ────────────────────────────────────────────────────
 
 export async function createTask(userId: string, dto: CreateTaskDTO): Promise<Task> {
   const ref = getAdminDb().collection(`users/${userId}/tasks`).doc()
   const now = Timestamp.now()
   const dueAt = dto.dueAt ? Timestamp.fromDate(dto.dueAt) : null
+  // The bot always creates as status:'todo' → put the card in the first todo column
+  // (or null if the user has no board yet — Task 4's migration backfills it).
+  const listId = listForStatus('todo', await getBoardLists(userId))
   const doc = {
     title: dto.title,
     notes: dto.notes ?? null,
@@ -77,6 +107,8 @@ export async function createTask(userId: string, dto: CreateTaskDTO): Promise<Ta
     priority: dto.priority ?? 'med',
     dueAt,
     doneAt: null,
+    listId,
+    order: Date.now(), // ponytail: monotonic append value, board/migration re-ranks properly
     source: dto.source,
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
@@ -99,9 +131,22 @@ export async function updateTask(
   if (patch.title !== undefined) update.title = patch.title
   if (patch.notes !== undefined) update.notes = patch.notes
   if (patch.priority !== undefined) update.priority = patch.priority
-  if (patch.status !== undefined) update.status = patch.status
   if (patch.dueAt !== undefined) update.dueAt = patch.dueAt ? Timestamp.fromDate(patch.dueAt) : null
-  if (patch.status === 'done' && prev.status !== 'done')
+
+  // Keep status ↔ listId in sync. Only pay the lists read when one of them moves —
+  // the common `/edit title` path is untouched.
+  let nextStatus: TaskStatus = (prev.status as TaskStatus | undefined) ?? 'todo'
+  if (patch.status !== undefined || patch.listId !== undefined) {
+    const lists = await getBoardLists(userId)
+    const wantStatus = patch.status ?? (prev.status as TaskStatus | undefined) ?? 'todo'
+    const wantListId = patch.listId !== undefined ? patch.listId : (prev.listId ?? null)
+    const r = reconcile({ status: wantStatus, listId: wantListId }, lists)
+    nextStatus = r.status
+    update.status = r.status
+    update.listId = r.listId
+  }
+
+  if (nextStatus === 'done' && prev.status !== 'done')
     update.doneAt = FieldValue.serverTimestamp()
 
   await ref.update(stripUndefined(update))

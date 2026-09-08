@@ -10,6 +10,7 @@ vi.mock('@/shared/lib/firebase-admin', () => ({
 
 const {
   createTask,
+  updateTask,
   listTasks,
   createReminder,
   claimReminder,
@@ -103,10 +104,19 @@ function fakeQuery(docs: FakeDoc[]): FakeQuery {
 // ─── createTask ────────────────────────────────────────────────
 
 describe('createTask', () => {
+  // A db fake that serves `users/{uid}/tasks` (doc().set()) and `users/{uid}/lists`
+  // (orderBy('order').get(), via getBoardLists) off the same `collection(path)` call.
+  function dbWithLists(listDocs: FakeDoc[], set = vi.fn().mockResolvedValue(undefined), taskId = 'task-new') {
+    const collection = vi.fn((path: string) => {
+      if (path.endsWith('/lists')) return fakeQuery(listDocs)
+      return { doc: vi.fn().mockReturnValue({ id: taskId, set }) }
+    })
+    return { db: { collection }, set }
+  }
+
   it('defaults status=todo priority=med, preserves title, stamps timestamps, nulls notes/dueAt', async () => {
-    const set = vi.fn().mockResolvedValue(undefined)
-    const doc = vi.fn().mockReturnValue({ id: 'task-1', set })
-    getAdminDb.mockReturnValue({ collection: vi.fn().mockReturnValue({ doc }) })
+    const { db, set } = dbWithLists([], undefined, 'task-1')
+    getAdminDb.mockReturnValue(db)
 
     const t = await createTask('u1', { title: 'Review PRD', source: 'whatsapp' })
 
@@ -127,10 +137,8 @@ describe('createTask', () => {
   })
 
   it('converts a dto.dueAt Date to a Timestamp and honours an explicit priority', async () => {
-    const set = vi.fn().mockResolvedValue(undefined)
-    getAdminDb.mockReturnValue({
-      collection: vi.fn().mockReturnValue({ doc: vi.fn().mockReturnValue({ id: 'task-2', set }) }),
-    })
+    const { db, set } = dbWithLists([], undefined, 'task-2')
+    getAdminDb.mockReturnValue(db)
 
     const due = new Date('2026-09-20T09:00:00Z')
     const t = await createTask('u1', { title: 'x', source: 'web', priority: 'high', dueAt: due })
@@ -138,6 +146,81 @@ describe('createTask', () => {
     expect(t.priority).toBe('high')
     const written = set.mock.calls[0][0] as { dueAt: { toMillis: () => number } }
     expect(written.dueAt.toMillis()).toBe(due.getTime())
+  })
+
+  it('empty lists → task listId null, order a number, written doc has listId null', async () => {
+    const { db, set } = dbWithLists([])
+    getAdminDb.mockReturnValue(db)
+
+    const t = await createTask('u1', { title: 'Beli kopi', source: 'whatsapp' })
+
+    expect(t.listId).toBeNull()
+    expect(typeof t.order).toBe('number')
+
+    const written = set.mock.calls[0][0] as Record<string, unknown>
+    expect('listId' in written).toBe(true)
+    expect(written.listId).toBeNull()
+    expect(typeof written.order).toBe('number')
+  })
+
+  it('a todo column exists → task listId is that column id', async () => {
+    const { db } = dbWithLists([
+      mkDoc('list-todo', { title: 'Backlog', order: 1, mapsToStatus: 'todo' }),
+      mkDoc('list-done', { title: 'Done', order: 3, mapsToStatus: 'done' }),
+    ])
+    getAdminDb.mockReturnValue(db)
+
+    const t = await createTask('u1', { title: 'x', source: 'web' })
+
+    expect(t.listId).toBe('list-todo')
+  })
+})
+
+// ─── updateTask ────────────────────────────────────────────────
+
+describe('updateTask', () => {
+  // db fake: `doc(path)` serves the task read/update; `collection(path).orderBy().get()`
+  // serves the lists read.
+  function dbWithTaskAndLists(prev: Record<string, unknown>, listDocs: FakeDoc[]) {
+    const update = vi.fn().mockResolvedValue(undefined)
+    const get = vi.fn().mockResolvedValue({ exists: true, data: () => prev })
+    const collection = vi.fn().mockReturnValue(fakeQuery(listDocs))
+    return {
+      db: { doc: vi.fn().mockReturnValue({ get, update }), collection },
+      update,
+      collection,
+    }
+  }
+
+  it('{ status: done } with a done column → payload sets status done AND listId, doneAt set', async () => {
+    // A task the bot created before the board existed: prev has no listId.
+    const { db, update, collection } = dbWithTaskAndLists({ status: 'todo' }, [
+      mkDoc('list-todo', { title: 'Backlog', order: 1, mapsToStatus: 'todo' }),
+      mkDoc('list-done', { title: 'Done', order: 3, mapsToStatus: 'done' }),
+    ])
+    getAdminDb.mockReturnValue(db)
+
+    await updateTask('u1', 't1', { status: 'done' })
+
+    expect(collection).toHaveBeenCalledWith('users/u1/lists')
+    const written = update.mock.calls[0][0] as Record<string, unknown>
+    expect(written.status).toBe('done')
+    expect(written.listId).toBe('list-done')
+    expect(written.doneAt).toBeTruthy()
+  })
+
+  it('{ title } only → getBoardLists not called, payload carries no listId', async () => {
+    const collection = vi.fn()
+    const update = vi.fn().mockResolvedValue(undefined)
+    const get = vi.fn().mockResolvedValue({ exists: true, data: () => ({ status: 'todo' }) })
+    getAdminDb.mockReturnValue({ doc: vi.fn().mockReturnValue({ get, update }), collection })
+
+    await updateTask('u1', 't1', { title: 'judul baru' })
+
+    expect(collection).not.toHaveBeenCalled()
+    const written = update.mock.calls[0][0] as Record<string, unknown>
+    expect(written.title).toBe('judul baru')
+    expect('listId' in written).toBe(false)
   })
 })
 
