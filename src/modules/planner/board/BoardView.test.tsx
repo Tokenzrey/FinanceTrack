@@ -69,6 +69,9 @@ let storeState: {
   setDraggingId: ReturnType<typeof vi.fn>
   clearFilters: ReturnType<typeof vi.fn>
   addTask: ReturnType<typeof vi.fn>
+  createLabel: ReturnType<typeof vi.fn>
+  updateLabel: ReturnType<typeof vi.fn>
+  deleteLabel: ReturnType<typeof vi.fn>
 }
 
 vi.mock('@/shared/stores/planner.store', () => ({
@@ -100,6 +103,9 @@ beforeEach(() => {
     setDraggingId: vi.fn(),
     clearFilters: vi.fn(),
     addTask: vi.fn(async () => task({ id: 'new' })),
+    createLabel: vi.fn(async () => {}),
+    updateLabel: vi.fn(async () => {}),
+    deleteLabel: vi.fn(async () => {}),
   }
 })
 

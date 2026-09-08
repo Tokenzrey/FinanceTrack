@@ -67,7 +67,14 @@ service cloud.firestore {
     // Board labels (users/{uid}/labels/{id}). Ordinary user-owned documents; already
     // granted by the broad rule, but documented here explicitly.
     match /users/{userId}/labels/{labelId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null && request.auth.uid == userId
+                   && request.resource.data.name is string
+                   && request.resource.data.name.size() >= 1
+                   && request.resource.data.name.size() <= 24
+                   && request.resource.data.colorKey in
+                      ['slate', 'teal', 'blue', 'violet', 'pink', 'red', 'orange', 'green'];
+      allow delete: if request.auth != null && request.auth.uid == userId;
     }
 
     // Root collections used only by the bot's server-side (Admin SDK) code — never

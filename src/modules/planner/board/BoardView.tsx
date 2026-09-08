@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Tag } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/shared/components/ui/button'
@@ -16,6 +17,7 @@ import { moveTask } from '@/shared/use-cases/board/MoveTask.usecase'
 import { reorderList } from '@/shared/use-cases/board/ReorderList.usecase'
 import { seedDefaultBoard } from '@/shared/use-cases/board/SeedDefaultBoard.usecase'
 import type { Task } from '@/shared/types/productivity'
+import { LabelManagerDialog } from '../detail/LabelManagerDialog'
 import { applyBoardFilters, describeActiveFilters } from '../shared/FilterBar'
 import { BoardColumn } from './BoardColumn'
 
@@ -37,6 +39,7 @@ export function BoardView() {
 
   const [seeding, setSeeding] = useState(false)
   const [compact, setCompact] = useState(true)
+  const [labelMgrOpen, setLabelMgrOpen] = useState(false)
 
   useEffect(() => {
     if (!uid || seededUids.has(uid)) return
@@ -207,11 +210,17 @@ export function BoardView() {
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-end gap-2">
+        <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setLabelMgrOpen(true)}>
+          <Tag className="h-3.5 w-3.5" aria-hidden />
+          Label
+        </Button>
         <span className="text-xs text-muted-foreground">{compact ? 'Rapat' : 'Nyaman'}</span>
         <Button size="sm" variant="outline" onClick={() => setCompact((v) => !v)}>
           {compact ? 'Nyaman' : 'Rapat'}
         </Button>
       </div>
+
+      <LabelManagerDialog open={labelMgrOpen} onOpenChange={setLabelMgrOpen} />
 
       <div
         className="flex h-[calc(100vh-20rem)] gap-3 overflow-x-auto pb-2"

@@ -9,7 +9,8 @@ import { updateTaskStatus } from '@/shared/use-cases/planner/UpdateTaskStatus.us
 import { setTaskDue } from '@/shared/use-cases/planner/SetTaskDue.usecase'
 import { cancelReminder } from '@/shared/use-cases/planner/CancelReminder.usecase'
 import { createReminder } from '@/shared/use-cases/planner/CreateReminder.usecase'
-import type { BoardList, BoardFilters, Label } from '@/shared/types/board'
+import { rankBetween } from '@/shared/lib/rank'
+import type { BoardList, BoardFilters, Label, LabelColorKey } from '@/shared/types/board'
 import { EMPTY_BOARD_FILTERS } from '@/shared/types/board'
 import type {
   CreateReminderDTO,
@@ -69,6 +70,17 @@ interface PlannerStore {
   cancelReminderById: (id: string) => Promise<void>
   /** Creates a fresh standalone reminder (used by "Jadwalkan ulang" on a failed row). */
   createStandaloneReminder: (dto: CreateReminderDTO) => Promise<void>
+  /** Appends a board label. Name is trimmed; 1–24 chars or it throws. */
+  createLabel: (name: string, colorKey: LabelColorKey) => Promise<void>
+  updateLabel: (id: string, patch: { name?: string; colorKey?: LabelColorKey }) => Promise<void>
+  deleteLabel: (id: string) => Promise<void>
+}
+
+/** Shared 1–24 guard for label names. Returns the trimmed name. */
+function assertLabelName(raw: string): string {
+  const name = raw.trim()
+  if (name.length < 1 || name.length > 24) throw new Error('Nama label 1–24 karakter')
+  return name
 }
 
 /** Writes never re-fetch — `watch` pushes the new list. */
@@ -173,5 +185,38 @@ export const usePlannerStore = create<PlannerStore>((set, get) => ({
     const uid = currentUserId()
     if (!uid) throw new Error('Belum masuk')
     await createReminder(uid, dto)
+  },
+
+  createLabel: async (name, colorKey) => {
+    const uid = currentUserId()
+    if (!uid) throw new Error('Belum masuk')
+    const clean = assertLabelName(name)
+    // Append: rank past the current max so labels stay orderable without reindexing.
+    const maxOrder = get().labels.reduce<number | null>(
+      (max, l) => (max === null || l.order > max ? l.order : max),
+      null,
+    )
+    await repositories.labels.create(uid, {
+      name: clean,
+      colorKey,
+      order: rankBetween(maxOrder, null),
+    })
+  },
+
+  updateLabel: async (id, patch) => {
+    const uid = currentUserId()
+    if (!uid) throw new Error('Belum masuk')
+    await repositories.labels.update(uid, id, {
+      ...patch,
+      ...(patch.name !== undefined && { name: assertLabelName(patch.name) }),
+    })
+  },
+
+  deleteLabel: async (id) => {
+    const uid = currentUserId()
+    if (!uid) throw new Error('Belum masuk')
+    // No cascade: tasks keep the dangling id, but board/timeline/rail all resolve
+    // labels via `labels.find(...)` + a falsy filter, so an unknown id renders as nothing.
+    await repositories.labels.remove(uid, id)
   },
 }))

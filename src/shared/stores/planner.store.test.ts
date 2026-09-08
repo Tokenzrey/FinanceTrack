@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { RANK_GAP } from '@/shared/lib/rank'
 import { EMPTY_BOARD_FILTERS } from '@/shared/types/board'
+import type { Label } from '@/shared/types/board'
 import type { Task } from '@/shared/types/productivity'
 
 const noop = () => {}
@@ -7,13 +9,21 @@ const boardListsWatch = vi.fn(() => noop as () => void)
 const labelsWatch = vi.fn(() => noop as () => void)
 const tasksWatch = vi.fn(() => noop as () => void)
 const remindersWatch = vi.fn(() => noop as () => void)
+const labelsCreate = vi.fn(() => Promise.resolve())
+const labelsUpdate = vi.fn(() => Promise.resolve())
+const labelsRemove = vi.fn(() => Promise.resolve())
 
 vi.mock('@/shared/repositories', () => ({
   repositories: {
     tasks: { watch: tasksWatch },
     reminders: { watch: remindersWatch },
     boardLists: { watch: boardListsWatch },
-    labels: { watch: labelsWatch },
+    labels: {
+      watch: labelsWatch,
+      create: labelsCreate,
+      update: labelsUpdate,
+      remove: labelsRemove,
+    },
   },
 }))
 
@@ -100,6 +110,58 @@ describe('setFilters / clearFilters', () => {
 
     usePlannerStore.getState().clearFilters()
     expect(usePlannerStore.getState().filters).toEqual(EMPTY_BOARD_FILTERS)
+  })
+})
+
+describe('label writes', () => {
+  const label = (id: string, order: number): Label =>
+    ({ id, name: id, colorKey: 'slate', order }) as unknown as Label
+
+  it('trims the name and appends past the highest existing order', async () => {
+    usePlannerStore.setState({ labels: [label('a', 1000), label('b', 3000), label('c', 2000)] })
+
+    await usePlannerStore.getState().createLabel('  Urgent  ', 'red')
+
+    expect(labelsCreate).toHaveBeenCalledTimes(1)
+    const [uid, data] = labelsCreate.mock.calls[0] as unknown as [string, Label]
+    expect(uid).toBe('u1')
+    expect(data.name).toBe('Urgent')
+    expect(data.colorKey).toBe('red')
+    expect(data.order).toBeGreaterThan(3000)
+  })
+
+  it('uses the empty-board rank when there are no labels yet', async () => {
+    await usePlannerStore.getState().createLabel('Baru', 'teal')
+
+    const [, data] = labelsCreate.mock.calls[0] as unknown as [string, Label]
+    expect(data.order).toBe(RANK_GAP)
+  })
+
+  it.each([
+    ['an empty name', '   '],
+    ['a name over 24 chars', 'x'.repeat(25)],
+  ])('rejects %s without calling the repository', async (_why, name) => {
+    await expect(usePlannerStore.getState().createLabel(name, 'red')).rejects.toThrow(
+      'Nama label 1–24 karakter',
+    )
+    expect(labelsCreate).not.toHaveBeenCalled()
+  })
+
+  it('validates the name on update and passes the patch through', async () => {
+    await usePlannerStore.getState().updateLabel('l1', { name: '  Penting  ' })
+    expect(labelsUpdate).toHaveBeenCalledWith('u1', 'l1', { name: 'Penting' })
+
+    await expect(usePlannerStore.getState().updateLabel('l1', { name: '' })).rejects.toThrow()
+  })
+
+  it('recolours without a name in the patch', async () => {
+    await usePlannerStore.getState().updateLabel('l1', { colorKey: 'green' })
+    expect(labelsUpdate).toHaveBeenCalledWith('u1', 'l1', { colorKey: 'green' })
+  })
+
+  it('deletes without cascading to tasks', async () => {
+    await usePlannerStore.getState().deleteLabel('l1')
+    expect(labelsRemove).toHaveBeenCalledWith('u1', 'l1')
   })
 })
 

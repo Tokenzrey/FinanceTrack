@@ -26,6 +26,7 @@ import { setTaskLabels } from '@/shared/use-cases/board/SetTaskLabels.usecase'
 import { setTaskSchedule } from '@/shared/use-cases/board/SetTaskSchedule.usecase'
 import { PriorityDot } from '../shared/PriorityDot'
 import { SourceGlyph } from '../shared/SourceGlyph'
+import { LabelManagerDialog } from './LabelManagerDialog'
 
 const PRIORITY_LABELS: Record<TaskPriority, string> = {
   low: 'Rendah',
@@ -301,6 +302,7 @@ export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
   const setStatus = usePlannerStore((s) => s.setStatus)
   const allTasks = usePlannerStore((s) => s.tasks)
   const [editLabels, setEditLabels] = useState(false)
+  const [labelMgrOpen, setLabelMgrOpen] = useState(false)
   const [editPoints, setEditPoints] = useState(false)
   const [editDeps, setEditDeps] = useState(false)
   const [editList, setEditList] = useState(false)
@@ -495,6 +497,13 @@ export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
             {labels.length === 0 && (
               <span className="text-xs text-muted-foreground">Belum ada label di papan.</span>
             )}
+            <button
+              type="button"
+              onClick={() => setLabelMgrOpen(true)}
+              className="rounded-md px-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              Kelola label
+            </button>
           </div>
         ) : (
           <AddAction label="Tambah label" onClick={() => setEditLabels(true)} />
@@ -558,6 +567,8 @@ export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
           </span>
         </span>
       </Row>
+
+      <LabelManagerDialog open={labelMgrOpen} onOpenChange={setLabelMgrOpen} />
     </div>
   )
 }
