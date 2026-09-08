@@ -120,25 +120,19 @@ export function BoardColumn({
           isDropTarget && 'ring-2 ring-inset ring-ring',
         )}
       >
+        {/* ponytail: displaced-slot dashed placeholder needs useDragSort to surface a
+            separate insert index (distinct from draggingIndex) — follow-up. */}
         {cards.map((task, index) => (
           <div key={task.id} className="motion-reduce:transition-none">
-            {draggingIndex === index ? (
-              <div
-                className="rounded-lg border border-dashed border-border transition duration-200 motion-reduce:transition-none"
-                style={{ height: 0, minHeight: 56 }}
-                aria-hidden
-              />
-            ) : (
-              <TaskCard
-                task={task}
-                tz={tz}
-                labels={labelsFor(task.labelIds)}
-                compact={compact}
-                dragging={false}
-                onOpen={onOpenTask}
-                dragProps={getItemProps(index)}
-              />
-            )}
+            <TaskCard
+              task={task}
+              tz={tz}
+              labels={labelsFor(task.labelIds)}
+              compact={compact}
+              dragging={draggingIndex === index}
+              onOpen={onOpenTask}
+              dragProps={getItemProps(index)}
+            />
           </div>
         ))}
 
