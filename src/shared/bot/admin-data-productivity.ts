@@ -302,14 +302,19 @@ export async function createReminder(
 }
 
 /** Rebuild a task's automatic reminders: drop the still-pending ones, then re-create
- *  one per lead time whose fire moment is still in the future. No-op if the task has
- *  no due date. */
+ *  one per lead time whose fire moment is still in the future — for `dueAt` ("jatuh
+ *  tempo") and `startAt` ("waktunya mulai", plan §0 #10) alike. No-op if the task has
+ *  neither instant.
+ *
+ *  The bot has no start-date command yet, so the `startAt` loop only fires for a task
+ *  whose start was set from the web and that the bot later touches. The mechanism is
+ *  what §0 #10 asks for; a `/mulai` command is out of scope. */
 export async function upsertTaskReminder(
   userId: string,
   task: Task,
   leadsMinutes: number[],
 ): Promise<void> {
-  if (!task.dueAt) return
+  if (!task.dueAt && !task.startAt) return
 
   const db = getAdminDb()
   const col = db.collection(`users/${userId}/reminders`)
@@ -322,33 +327,42 @@ export async function upsertTaskReminder(
   const batch = db.batch()
   for (const d of existing.docs) batch.delete(d.ref)
 
-  const dueMs = task.dueAt.toDate().getTime()
   const tz = await getUserTimezone(userId)
-  const dueLabel = formatDateTime(task.dueAt.toDate(), tz)
   const nowMs = Date.now()
 
-  for (const lead of leadsMinutes) {
-    const remindMs = dueMs - lead * 60_000
-    if (remindMs <= nowMs) continue
-    batch.set(
-      col.doc(),
-      stripUndefined({
-        ownerId: userId,
-        kind: 'task',
-        taskId: task.id,
-        message: `⏰ Tugas: ${task.title} — jatuh tempo ${dueLabel}`,
-        remindAt: Timestamp.fromDate(new Date(remindMs)),
-        status: 'pending',
-        attempts: 0,
-        nextAttemptAt: null,
-        lastError: null,
-        sentAt: null,
-        recurrence: null,
-        source: 'auto',
-        createdAt: FieldValue.serverTimestamp(),
-        updatedAt: FieldValue.serverTimestamp(),
-      }),
-    )
+  const queue = (instant: Date, message: string) => {
+    for (const lead of leadsMinutes) {
+      const remindMs = instant.getTime() - lead * 60_000
+      if (remindMs <= nowMs) continue
+      batch.set(
+        col.doc(),
+        stripUndefined({
+          ownerId: userId,
+          kind: 'task',
+          taskId: task.id,
+          message,
+          remindAt: Timestamp.fromDate(new Date(remindMs)),
+          status: 'pending',
+          attempts: 0,
+          nextAttemptAt: null,
+          lastError: null,
+          sentAt: null,
+          recurrence: null,
+          source: 'auto',
+          createdAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+        }),
+      )
+    }
+  }
+
+  if (task.dueAt) {
+    const dueAt = task.dueAt.toDate()
+    queue(dueAt, `⏰ Tugas: ${task.title} — jatuh tempo ${formatDateTime(dueAt, tz)}`)
+  }
+  if (task.startAt) {
+    const startAt = task.startAt.toDate()
+    queue(startAt, `▶️ Tugas: ${task.title} — waktunya mulai ${formatDateTime(startAt, tz)}`)
   }
 
   await batch.commit()

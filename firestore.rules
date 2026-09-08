@@ -21,9 +21,9 @@ service cloud.firestore {
       //   bot_parse_cache/*   — plant parsed transaction lines returned on the next matching message
       // `meta/scan_hints` is intentionally NOT in this list — the web receipt scanner
       // writes it via the client SDK.
-      // `reminders/*` at the canonical depth is excluded here so the narrower
-      // `match /users/{userId}/reminders/{reminderId}` block below owns that subtree's
-      // field-lock (rules v2 OR every matching allow; a broad grant here would override it).
+      // `reminders/*`, `labels/*` and `lists/*` are excluded here so their narrower
+      // blocks below own those subtrees' field-locks (rules v2 ORs every matching
+      // allow; a broad grant here would override the narrow validation entirely).
       allow read: if request.auth != null && request.auth.uid == userId;
       allow write: if request.auth != null
                    && request.auth.uid == userId
@@ -32,7 +32,9 @@ service cloud.firestore {
                             || document[1] == 'botLastBatch' || document[1] == 'botPrefs'
                             || document[1] == 'botModelDay'))
                    && !(document[0] == 'bot_receipt_cache' || document[0] == 'bot_parse_cache')
-                   && !(document[0] == 'reminders');
+                   && !(document[0] == 'reminders')
+                   && !(document[0] == 'labels')
+                   && !(document[0] == 'lists');
     }
 
     // Canonical reminders (users/{uid}/reminders/{id}). A reminder's user-facing fields
@@ -58,14 +60,15 @@ service cloud.firestore {
       allow delete: if request.auth != null && request.auth.uid == userId;
     }
 
-    // Board lists (users/{uid}/lists/{id}). Ordinary user-owned documents; already
-    // granted by the broad rule, but documented here explicitly.
+    // Board lists (users/{uid}/lists/{id}). Ordinary user-owned documents, but this is
+    // now the ONLY write path — the broad rule excludes `lists`. No field validation:
+    // SeedDefaultBoard / ReorderList / ColumnMenu own the shape.
     match /users/{userId}/lists/{listId} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // Board labels (users/{uid}/labels/{id}). Ordinary user-owned documents; already
-    // granted by the broad rule, but documented here explicitly.
+    // Board labels (users/{uid}/labels/{id}). The broad rule excludes `labels`, so this
+    // name/colorKey validation is the only write path and actually enforces.
     match /users/{userId}/labels/{labelId} {
       allow read: if request.auth != null && request.auth.uid == userId;
       allow write: if request.auth != null && request.auth.uid == userId

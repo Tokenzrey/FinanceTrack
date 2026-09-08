@@ -24,6 +24,7 @@ import { moveTask } from '@/shared/use-cases/board/MoveTask.usecase'
 import { removeDependency } from '@/shared/use-cases/board/RemoveDependency.usecase'
 import { setTaskLabels } from '@/shared/use-cases/board/SetTaskLabels.usecase'
 import { setTaskSchedule } from '@/shared/use-cases/board/SetTaskSchedule.usecase'
+import { useTaskLeads } from '../list/ListView'
 import { PriorityDot } from '../shared/PriorityDot'
 import { SourceGlyph } from '../shared/SourceGlyph'
 import { LabelManagerDialog } from './LabelManagerDialog'
@@ -192,6 +193,81 @@ function ScheduleField({
 }
 
 /**
+ * Pengingat row editor: date + time + message, creating ONE reminder pinned to this
+ * task. Not a reminder manager (that's `RemindersPanel`) — just "add one here".
+ * `createReminder`'s validation (1–500 chars, must be future) surfaces as a toast.
+ */
+function ReminderAdder({
+  task,
+  tz,
+  onDone,
+}: {
+  task: Task
+  tz: string
+  onDone: () => void
+}) {
+  const create = usePlannerStore((s) => s.createStandaloneReminder)
+  const [date, setDate] = useState('')
+  const [time, setTime] = useState('')
+  const [message, setMessage] = useState(task.title)
+  const [busy, setBusy] = useState(false)
+
+  const submit = async () => {
+    const remindAt = partsToUtc(date, time, tz)
+    if (!remindAt) {
+      toast.error('Pilih tanggal pengingat.')
+      return
+    }
+    setBusy(true)
+    try {
+      await create({ message, remindAt, source: 'web', taskId: task.id })
+      toast.success('Pengingat ditambahkan.')
+      onDone()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Gagal menambah pengingat.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+      <Input
+        type="date"
+        value={date}
+        onChange={(e) => setDate(e.target.value)}
+        className="h-8 w-auto"
+        aria-label="Tanggal pengingat"
+      />
+      <Input
+        type="time"
+        value={time}
+        onChange={(e) => setTime(e.target.value)}
+        className="h-8 w-auto"
+        aria-label="Waktu pengingat"
+      />
+      <Input
+        value={message}
+        onChange={(e) => setMessage(e.target.value)}
+        className="h-8 w-[180px] max-w-full"
+        aria-label="Isi pengingat"
+      />
+      <Button size="sm" className="h-8 px-2" disabled={busy} onClick={() => void submit()}>
+        Tambah
+      </Button>
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-8 px-2 text-muted-foreground"
+        onClick={onDone}
+      >
+        Batal
+      </Button>
+    </div>
+  )
+}
+
+/**
  * Dependencies row: removable title chips for the current blockers plus a task
  * picker in edit mode. Picking routes through `addDependency` (cycle/cap/self
  * rejection surfaces as a toast). A blocker id with no matching task shows the
@@ -299,6 +375,7 @@ interface MetadataRailProps {
  */
 export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
   const uid = useAuthStore((s) => s.user?.uid)
+  const leads = useTaskLeads()
   const setStatus = usePlannerStore((s) => s.setStatus)
   const allTasks = usePlannerStore((s) => s.tasks)
   const [editLabels, setEditLabels] = useState(false)
@@ -308,6 +385,7 @@ export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
   const [editList, setEditList] = useState(false)
   const [editStatus, setEditStatus] = useState(false)
   const [editPriority, setEditPriority] = useState(false)
+  const [editReminder, setEditReminder] = useState(false)
 
   const sortedLists = [...lists].sort((a, b) => a.order - b.order)
   const currentListId = task.listId ?? null
@@ -411,7 +489,7 @@ export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
           tz={tz}
           onCommit={(next) => {
             if (!uid) return
-            void setTaskSchedule(uid, task.id, { startAt: next }).catch(() =>
+            void setTaskSchedule(uid, task, { startAt: next }, leads).catch(() =>
               toast.error('Gagal menyimpan tanggal.'),
             )
           }}
@@ -425,7 +503,7 @@ export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
           tz={tz}
           onCommit={(next) => {
             if (!uid) return
-            void setTaskSchedule(uid, task.id, { dueAt: next }).catch(() =>
+            void setTaskSchedule(uid, task, { dueAt: next }, leads).catch(() =>
               toast.error('Gagal menyimpan tanggal.'),
             )
           }}
@@ -553,9 +631,19 @@ export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
       </Row>
 
       <Row label="Pengingat">
-        <span className="font-mono text-xs tabular-nums text-muted-foreground">
-          {reminderCount > 0 ? `${reminderCount} aktif` : 'Tidak ada'}
-        </span>
+        {editReminder ? (
+          <ReminderAdder task={task} tz={tz} onDone={() => setEditReminder(false)} />
+        ) : reminderCount > 0 ? (
+          <button
+            type="button"
+            onClick={() => setEditReminder(true)}
+            className={cn(DISPLAY_BUTTON_CLASS, 'font-mono text-xs tabular-nums')}
+          >
+            {reminderCount} aktif
+          </button>
+        ) : (
+          <AddAction label="Tambah pengingat" onClick={() => setEditReminder(true)} />
+        )}
       </Row>
 
       <Row label="Asal">

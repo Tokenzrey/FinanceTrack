@@ -25,6 +25,7 @@ import { useAuthStore } from '@/shared/stores/auth.store'
 import { usePlannerStore } from '@/shared/stores/planner.store'
 import type { Reminder, Task } from '@/shared/types/productivity'
 import { setTaskSchedule } from '@/shared/use-cases/board/SetTaskSchedule.usecase'
+import { useTaskLeads } from '../list/ListView'
 import { applyBoardFilters, describeActiveFilters } from '../shared/FilterBar'
 import { DependencyArrow } from './DependencyArrow'
 import { TimelineBar } from './TimelineBar'
@@ -62,6 +63,7 @@ export function TimelineView() {
   // "now" line). `tz` is only for displayed date/time strings inside the bar.
   const tz = useAuthStore((s) => s.profile?.timezone) ?? DEFAULT_TZ
   const uid = useAuthStore((s) => s.user?.uid)
+  const leads = useTaskLeads()
 
   const [zoom, setZoom] = useState<TimelineZoom>('week')
   const [trayOpen, setTrayOpen] = useState(true)
@@ -289,7 +291,7 @@ export function TimelineView() {
                     tz={tz}
                     onCommitSchedule={(patch) => {
                       if (uid) {
-                        setTaskSchedule(uid, task.id, patch).catch(() =>
+                        setTaskSchedule(uid, task, patch, leads).catch(() =>
                           toast.error('Gagal menyimpan jadwal.'),
                         )
                       }

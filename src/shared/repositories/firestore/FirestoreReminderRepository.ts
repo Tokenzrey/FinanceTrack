@@ -55,8 +55,8 @@ export class FirestoreReminderRepository implements IReminderRepository {
     // firestore.rules (Task 1) enforces status:'pending', attempts:0, ownerId:userId on create.
     const payload = stripUndefined({
       ownerId: userId,
-      kind: 'standalone' as const,
-      taskId: null,
+      kind: dto.taskId ? ('task' as const) : ('standalone' as const),
+      taskId: dto.taskId ?? null,
       message: dto.message,
       remindAt: Timestamp.fromDate(dto.remindAt),
       status: 'pending' as const,

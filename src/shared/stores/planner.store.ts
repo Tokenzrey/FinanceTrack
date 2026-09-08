@@ -68,7 +68,8 @@ interface PlannerStore {
   setDue: (id: string, title: string, dueAt: Date | null, leads: number[]) => Promise<void>
   removeTask: (id: string) => Promise<void>
   cancelReminderById: (id: string) => Promise<void>
-  /** Creates a fresh standalone reminder (used by "Jadwalkan ulang" on a failed row). */
+  /** Creates a fresh reminder ("Jadwalkan ulang" on a failed row; the detail panel's
+   *  Pengingat row passes `taskId` to pin it to a task). */
   createStandaloneReminder: (dto: CreateReminderDTO) => Promise<void>
   /** Appends a board label. Name is trimmed; 1–24 chars or it throws. */
   createLabel: (name: string, colorKey: LabelColorKey) => Promise<void>

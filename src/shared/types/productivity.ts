@@ -109,6 +109,9 @@ export interface CreateReminderDTO {
   recurrence?: { freq: ReminderFreq; until?: Date | null } | null
   /** `'auto'` = system-generated (recurrence roll-forward, task lead reminders). */
   source: EntrySource | 'auto'
+  /** Pins the reminder to a task — stored as `kind:'task'` + `taskId`, matching the
+   *  bot's `upsertTaskReminder` shape. Omitted ⇒ `kind:'standalone'`. */
+  taskId?: string
 }
 
 /** Default lead time (minutes before dueAt) for a task's automatic reminder.

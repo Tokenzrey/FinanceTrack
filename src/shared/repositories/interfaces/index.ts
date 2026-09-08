@@ -187,7 +187,7 @@ export interface INoteRepository {
 }
 
 export interface IReminderRepository {
-  /** Web only ever creates `kind:'standalone'` reminders. */
+  /** `kind:'task'` + `taskId` when `dto.taskId` is set, else `kind:'standalone'`. */
   create(userId: string, dto: CreateReminderDTO): Promise<Reminder>
   listUpcoming(userId: string): Promise<Reminder[]>
   /** Sets `status:'cancelled'` — the only status transition the client rules allow. */

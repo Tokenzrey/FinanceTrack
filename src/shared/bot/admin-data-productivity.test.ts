@@ -506,17 +506,69 @@ describe('dueRemindersPage', () => {
 // ─── upsertTaskReminder ───────────────────────────────────────
 
 describe('upsertTaskReminder', () => {
-  it('is a no-op when the task has no dueAt', async () => {
+  /** Wires a db whose batch records every `.set` payload. */
+  function mkBatchDb(existing: FakeDoc[] = []) {
+    const batchDelete = vi.fn()
+    const batchSet = vi.fn()
+    const batchCommit = vi.fn().mockResolvedValue(undefined)
+    const col = { ...fakeQuery(existing), doc: vi.fn().mockReturnValue({ id: 'new-rem' }) }
+    getAdminDb.mockReturnValue({
+      collection: vi.fn().mockReturnValue(col),
+      doc: vi.fn().mockReturnValue({ get: vi.fn().mockResolvedValue({ exists: false }) }),
+      batch: vi.fn().mockReturnValue({ delete: batchDelete, set: batchSet, commit: batchCommit }),
+    })
+    return { batchDelete, batchSet, batchCommit }
+  }
+
+  it('is a no-op when the task has neither dueAt nor startAt', async () => {
     const db = { collection: vi.fn() }
     getAdminDb.mockReturnValue(db)
 
     await upsertTaskReminder(
       'u1',
-      { id: 't1', title: 'x', dueAt: null } as unknown as Task,
+      { id: 't1', title: 'x', dueAt: null, startAt: null } as unknown as Task,
       [0, 60],
     )
 
     expect(db.collection).not.toHaveBeenCalled()
+  })
+
+  it('creates a "waktunya mulai" reminder from startAt when there is no dueAt', async () => {
+    const { batchSet } = mkBatchDb()
+    const startMs = Date.now() + 30 * 60_000
+    const startAt = { toDate: () => new Date(startMs) }
+
+    await upsertTaskReminder(
+      'u1',
+      { id: 't1', title: 'Tinjau', dueAt: null, startAt } as unknown as Task,
+      [0, 60], // lead 0 → future (kept); lead 60 → past (skipped)
+    )
+
+    expect(batchSet).toHaveBeenCalledTimes(1)
+    const written = batchSet.mock.calls[0][1] as Record<string, unknown>
+    expect(written.kind).toBe('task')
+    expect(written.taskId).toBe('t1')
+    expect(written.message).toContain('▶️ Tugas: Tinjau — waktunya mulai ')
+    expect((written.remindAt as { toDate(): Date }).toDate().getTime()).toBe(startMs)
+  })
+
+  it('emits both loops when the task has startAt AND dueAt', async () => {
+    const { batchSet } = mkBatchDb()
+    const startAt = { toDate: () => new Date(Date.now() + 30 * 60_000) }
+    const dueAt = { toDate: () => new Date(Date.now() + 90 * 60_000) }
+
+    await upsertTaskReminder(
+      'u1',
+      { id: 't1', title: 'Tinjau', dueAt, startAt } as unknown as Task,
+      [0],
+    )
+
+    expect(batchSet).toHaveBeenCalledTimes(2)
+    const messages = batchSet.mock.calls.map(
+      (c) => (c[1] as Record<string, unknown>).message as string,
+    )
+    expect(messages.some((m) => m.includes('jatuh tempo'))).toBe(true)
+    expect(messages.some((m) => m.includes('waktunya mulai'))).toBe(true)
   })
 
   it('deletes existing pending task reminders then creates one per future lead, skipping past leads', async () => {

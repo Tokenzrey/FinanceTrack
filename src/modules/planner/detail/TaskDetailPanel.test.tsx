@@ -25,6 +25,8 @@ vi.mock('@/shared/repositories', () => ({
   repositories: { tasks: { update: vi.fn(async () => {}) } },
 }))
 vi.mock('sonner', () => ({ toast: { error: vi.fn(), success: vi.fn() } }))
+// MetadataRail pulls `useTaskLeads` from ListView, which reads plannerPrefs from Firestore.
+vi.mock('../list/ListView', () => ({ useTaskLeads: () => [0, 60] }))
 
 // The panel branches on this — the test flips it per-case.
 const isDesktop = { value: true }
@@ -76,6 +78,7 @@ let storeState: {
   filters: BoardFilters
   closeTask: ReturnType<typeof vi.fn>
   setStatus: ReturnType<typeof vi.fn>
+  createStandaloneReminder: ReturnType<typeof vi.fn>
 }
 
 vi.mock('@/shared/stores/planner.store', () => ({
@@ -108,6 +111,7 @@ beforeEach(() => {
     filters: EMPTY_BOARD_FILTERS,
     closeTask: vi.fn(),
     setStatus: vi.fn(async () => {}),
+    createStandaloneReminder: vi.fn(async () => {}),
   }
 })
 
@@ -119,6 +123,25 @@ describe('TaskDetailPanel', () => {
 
     expect(toggleChecklistItem).toHaveBeenCalledTimes(1)
     expect(toggleChecklistItem).toHaveBeenCalledWith('u1', expect.objectContaining({ id: 't1' }), 'i1')
+  })
+
+  it('the Pengingat row adds a task-pinned reminder from the rail', async () => {
+    render(<TaskDetailPanel />)
+
+    // No reminders yet → the ghost add affordance, not a bare count.
+    fireEvent.click(screen.getByRole('button', { name: '+ Tambah pengingat' }))
+
+    const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    const day = future.toISOString().slice(0, 10)
+    fireEvent.change(screen.getByLabelText('Tanggal pengingat'), { target: { value: day } })
+    fireEvent.change(screen.getByLabelText('Waktu pengingat'), { target: { value: '09:00' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Tambah' }))
+
+    await vi.waitFor(() => expect(storeState.createStandaloneReminder).toHaveBeenCalledTimes(1))
+    const dto = storeState.createStandaloneReminder.mock.calls[0][0]
+    expect(dto.taskId).toBe('t1')
+    expect(dto.source).toBe('web')
+    expect(dto.remindAt.getTime()).toBeGreaterThan(Date.now())
   })
 
   it('renders a Drawer, not a Dialog, below lg', () => {
