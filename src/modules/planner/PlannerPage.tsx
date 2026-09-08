@@ -85,14 +85,58 @@ function parsePriority(text: string): TaskPriority | undefined {
   return match ? (match[1].toLowerCase() as TaskPriority) : undefined
 }
 
-/** `Date` → `YYYY-MM-DDTHH:mm` in the browser's local zone for `<input type="datetime-local">`.
- *  ponytail: browser-local, not the profile timezone — a datetime-local input is local by
- *  definition; revisit only if users report a mismatch when travelling. */
-function toDatetimeLocal(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
-    date.getHours(),
-  )}:${pad(date.getMinutes())}`
+/** `Date` → `YYYY-MM-DDTHH:mm` as the wall-clock time in `tz` for `<input type="datetime-local">`.
+ *  Uses `Intl.DateTimeFormat` so a WITA/WIT user sees their own local time, not the browser's.
+ *  Exported for the round-trip test only. */
+export function toDatetimeLocal(date: Date, tz: string): string {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    })
+      .formatToParts(date)
+      .map((x) => [x.type, x.value]),
+  )
+  const hour = p.hour === '24' ? '00' : p.hour
+  return `${p.year}-${p.month}-${p.day}T${hour}:${p.minute}`
+}
+
+/** `YYYY-MM-DDTHH:mm` read as wall-clock in `tz` → the matching UTC instant.
+ *  Same shape as parse-when's `localWallToUtc`: guess UTC, measure the zone offset, subtract it.
+ *  Exported for the round-trip test only. */
+export function datetimeLocalToUtc(value: string, tz: string): Date {
+  const [d, t] = value.split('T')
+  const [y, mo, day] = d.split('-').map(Number)
+  const [h, mi] = t.split(':').map(Number)
+  const guess = new Date(Date.UTC(y, mo - 1, day, h, mi, 0))
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', {
+      timeZone: tz,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    })
+      .formatToParts(guess)
+      .map((x) => [x.type, x.value]),
+  )
+  const asUTC = Date.UTC(
+    +parts.year,
+    +parts.month - 1,
+    +parts.day,
+    +parts.hour === 24 ? 0 : +parts.hour,
+    +parts.minute,
+    +parts.second,
+  )
+  return new Date(guess.getTime() - (asUTC - guess.getTime()))
 }
 
 function QuickAddBar() {
@@ -160,7 +204,8 @@ function TaskDueDialog({
 }) {
   const setDue = usePlannerStore((s) => s.setDue)
   const leads = useTaskLeads()
-  const [value, setValue] = useState(task.dueAt ? toDatetimeLocal(task.dueAt.toDate()) : '')
+  const tz = useAuthStore((s) => s.profile?.timezone) ?? DEFAULT_TZ
+  const [value, setValue] = useState(task.dueAt ? toDatetimeLocal(task.dueAt.toDate(), tz) : '')
   const [saving, setSaving] = useState(false)
 
   const run = async (action: () => Promise<void>, done: string) => {
@@ -202,7 +247,7 @@ function TaskDueDialog({
               disabled={saving || !value}
               onClick={() =>
                 void run(
-                  () => setDue(task.id, task.title, new Date(value), leads),
+                  () => setDue(task.id, task.title, datetimeLocalToUtc(value, tz), leads),
                   'Jatuh tempo diatur',
                 )
               }
