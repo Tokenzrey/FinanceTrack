@@ -33,6 +33,8 @@ interface PlannerStore {
   activeView: BoardView
   filters: BoardFilters
   draggingId: string | null
+  /** Task id whose detail panel is open, or `null`. The panel reads the task from `tasks`. */
+  detailTaskId: string | null
   /** Wires `repositories.tasks.watch`; returns the unsubscribe. No-op when signed out. */
   subscribe: () => () => void
   /** Wires `repositories.reminders.watch`; returns the unsubscribe. No-op when signed out. */
@@ -48,6 +50,8 @@ interface PlannerStore {
   setFilters: (patch: Partial<BoardFilters>) => void
   clearFilters: () => void
   setDraggingId: (id: string | null) => void
+  openTask: (id: string) => void
+  closeTask: () => void
   /** Tasks in one column, sorted ascending by `order` (missing `order` treated as 0). */
   tasksInList: (listId: string) => Task[]
   /** Returns the created task so the caller can chain a `setDue` on its id. */
@@ -68,6 +72,7 @@ export const usePlannerStore = create<PlannerStore>((set, get) => ({
   activeView: 'board',
   filters: EMPTY_BOARD_FILTERS,
   draggingId: null,
+  detailTaskId: null,
 
   subscribe: () => {
     const uid = currentUserId()
@@ -115,6 +120,10 @@ export const usePlannerStore = create<PlannerStore>((set, get) => ({
   clearFilters: () => set({ filters: EMPTY_BOARD_FILTERS }),
 
   setDraggingId: (id) => set({ draggingId: id }),
+
+  openTask: (id) => set({ detailTaskId: id }),
+
+  closeTask: () => set({ detailTaskId: null }),
 
   tasksInList: (listId) =>
     get()

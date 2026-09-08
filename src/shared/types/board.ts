@@ -16,6 +16,12 @@ export interface Attachment {
   addedAt: Timestamp
 }
 
+export interface ProgressNote {
+  id: string
+  body: string // 1..2000
+  createdAt: Timestamp
+}
+
 export interface BoardList {
   id: string
   title: string // 1..40

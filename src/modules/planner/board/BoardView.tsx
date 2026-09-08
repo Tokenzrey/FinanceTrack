@@ -32,6 +32,7 @@ export function BoardView() {
   const setDraggingId = usePlannerStore((s) => s.setDraggingId)
   const clearFilters = usePlannerStore((s) => s.clearFilters)
   const addTask = usePlannerStore((s) => s.addTask)
+  const openTask = usePlannerStore((s) => s.openTask)
 
   const [seeding, setSeeding] = useState(false)
   const [compact, setCompact] = useState(true)
@@ -244,6 +245,7 @@ export function BoardView() {
               getContainerItems={getContainerItems}
               onCardDrop={onCardDrop}
               onInlineAdd={onInlineAdd}
+              onOpenTask={(task) => openTask(task.id)}
             />
           </div>
         ))}

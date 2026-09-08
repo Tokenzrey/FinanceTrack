@@ -1,5 +1,5 @@
 import type { Timestamp } from 'firebase/firestore'
-import type { ChecklistItem, Attachment } from './board'
+import type { ChecklistItem, Attachment, ProgressNote } from './board'
 
 export type TaskStatus = 'todo' | 'doing' | 'done'
 export type TaskPriority = 'low' | 'med' | 'high'
@@ -27,6 +27,7 @@ export interface Task {
   dependsOn?: string[]
   checklist?: ChecklistItem[]
   attachments?: Attachment[]
+  progressNotes?: ProgressNote[]
   coverColor?: string | null
 }
 
@@ -91,6 +92,10 @@ export interface UpdateTaskDTO {
   storyPoints?: number | null
   dependsOn?: string[]
   coverColor?: string | null
+  // `Task` array fields from §2.1 — added here because Task 10 is the first mutator.
+  checklist?: ChecklistItem[]
+  attachments?: Attachment[]
+  progressNotes?: ProgressNote[]
 }
 export interface CreateNoteDTO {
   title?: string

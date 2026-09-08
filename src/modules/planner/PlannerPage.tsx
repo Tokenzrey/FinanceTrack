@@ -8,6 +8,7 @@ import { BoardView } from './board/BoardView'
 import { QuickAddBar, ListView } from './list/ListView'
 import { FilterBar } from './shared/FilterBar'
 import { RemindersPanel } from './RemindersPanel'
+import { TaskDetailPanel } from './detail/TaskDetailPanel'
 
 // Re-exported for `TaskDueDialog.dates.test.ts`, which imports them from this module.
 export { toDatetimeLocal, datetimeLocalToUtc } from './list/ListView'
@@ -63,6 +64,8 @@ export function PlannerPage() {
       )}
 
       <RemindersPanel />
+
+      <TaskDetailPanel />
     </div>
   )
 }

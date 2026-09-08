@@ -67,6 +67,12 @@ export class FirestoreTaskRepository implements ITaskRepository {
             ? Timestamp.fromDate(patch.dueAt)
             : null
           : undefined,
+      startAt:
+        patch.startAt !== undefined
+          ? patch.startAt
+            ? Timestamp.fromDate(patch.startAt)
+            : null
+          : undefined,
       doneAt: patch.status === 'done' ? serverTimestamp() : undefined,
     })
     await updateDoc(colDoc(userId, NAME, id), { ...data, updatedAt: serverTimestamp() })
