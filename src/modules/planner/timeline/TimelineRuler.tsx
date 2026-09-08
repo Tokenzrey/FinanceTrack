@@ -31,12 +31,15 @@ function monthRuns(rangeStart: Date, dayCount: number) {
   return runs
 }
 
-/** Tier-2 label for one day cell — density depends on zoom. */
+/**
+ * Tier-2 inline cell label — `day` and `month` zoom only. Week labels are too
+ * wide for the 20px cell, so they render in a separate absolute layer instead.
+ */
 function dayLabel(day: Date, zoom: TimelineZoom): string {
   if (zoom === 'day') return format(day, 'EEE d', { locale: idLocale }) // "Sen 2"
-  if (zoom === 'week') return isMonday(day) ? format(day, 'd MMM', { locale: idLocale }) : ''
   // month: 1st is covered by tier 1; a faint weekly tick otherwise.
-  return day.getDate() === 1 ? format(day, 'd', { locale: idLocale }) : ''
+  if (zoom === 'month') return day.getDate() === 1 ? format(day, 'd', { locale: idLocale }) : ''
+  return ''
 }
 
 /**
@@ -92,6 +95,22 @@ export function TimelineRuler({
             </div>
           )
         })}
+
+        {/* Week labels — absolute layer, sibling of the cells so each "d MMM"
+            overflows its 20px column freely over the blank Tue–Sun. Mirrors the
+            tier-1 month technique. */}
+        {zoom === 'week' &&
+          days.map((day, i) =>
+            isMonday(day) ? (
+              <span
+                key={`wk-${i}`}
+                className="absolute top-1 font-mono text-[10px] tabular-nums text-muted-foreground whitespace-nowrap"
+                style={{ left: i * colWidth + 2 }}
+              >
+                {format(day, 'd MMM', { locale: idLocale })}
+              </span>
+            ) : null,
+          )}
 
         {/* "now" header label + tick */}
         {nowOffsetPx != null && (

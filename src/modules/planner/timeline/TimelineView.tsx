@@ -160,8 +160,9 @@ export function TimelineView() {
         ))}
       </div>
 
-      {/* Horizontal scroll region — the page body never scrolls sideways. */}
-      <div className="relative overflow-x-auto rounded-lg border border-border">
+      {/* Scroll region — bounded height so `sticky top-0` on the two-tier header
+          has a scrollport; the page body never scrolls sideways. */}
+      <div className="relative max-h-[calc(100dvh-16rem)] overflow-auto rounded-lg border border-border">
         <div className="w-max">
           {/* Header row: sticky gutter corner + sticky two-tier ruler. */}
           <div className="sticky top-0 z-30 flex bg-background">
