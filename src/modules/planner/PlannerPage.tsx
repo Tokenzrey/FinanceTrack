@@ -6,6 +6,7 @@ import { PageHeader } from '@/shared/components/layout/TopBar'
 import { usePlannerStore } from '@/shared/stores/planner.store'
 import { BoardView } from './board/BoardView'
 import { QuickAddBar, ListView } from './list/ListView'
+import { TimelineView } from './timeline/TimelineView'
 import { FilterBar } from './shared/FilterBar'
 import { RemindersPanel } from './RemindersPanel'
 import { TaskDetailPanel } from './detail/TaskDetailPanel'
@@ -57,11 +58,7 @@ export function PlannerPage() {
 
       {activeView === 'board' && <BoardView />}
       {activeView === 'list' && <ListView />}
-      {activeView === 'timeline' && (
-        <p className="rounded-lg border border-dashed bg-muted/40 px-6 py-12 text-center text-sm text-muted-foreground">
-          Linimasa akan segera hadir.
-        </p>
-      )}
+      {activeView === 'timeline' && <TimelineView />}
 
       <RemindersPanel />
 
