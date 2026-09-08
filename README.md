@@ -158,7 +158,7 @@ milikmu sendiri, bukan di server pihak ketiga mana pun.
 - **Rekap pagi** (optional): sekali sehari pagi, bot mengirim digest ke pengguna yang opt-in — jumlah tugas & pengingat hari ini, plus daftar singkat kedua.
 - **Firestore collections**: `users/{uid}/tasks`, `users/{uid}/notes`, `users/{uid}/reminders` (per pengguna); preferensi di `users/{uid}/meta/plannerPrefs`; roster pengguna opt-in digest di `bot_meta/digestRoster` (root, hanya Admin SDK).
 - **Endpoint & cron**: `POST /api/cron/reminders` (nodejs, maxDuration=60) dan `POST /api/cron/daily-digest` (nodejs, maxDuration=60) — keduanya dilindungi header `Authorization: Bearer <PRODUCTIVITY_CRON_SECRET>` (constant-time compare). Bukan Vercel Cron; **heartbeat dijalankan oleh `go-whatsapp-web-multidevice`** proses yang selalu aktif, dengan `time.Ticker` yang `POST` ke kedua endpoint setiap ~60 detik (reminders) dan ~15 menit (digest). Env di sisi Go: `PRODUCTIVITY_CRON_URL` (base URL, mis. `https://<app>/api/cron`), `PRODUCTIVITY_CRON_SECRET` (harus sama dengan Finance-FE), `PRODUCTIVITY_CRON_INTERVAL` (default `60s`).
-- **Preferensi & opt-in**: `POST /api/planner/prefs` (Firebase-ID-token auth) untuk mengubah zona waktu user, bahasa digest, dan status opt-in digest. Tulis ke Firestore via client SDK, Admin SDK, atau server route.
+- **Preferensi & opt-in**: `POST /api/planner/prefs` (auth Firebase ID token, Admin SDK) menyetel `digestHour`, `digestEnabled`, dan `taskLeadsMinutes`. Route ini satu-satunya jalur tulis untuk ketiganya — ia menulis `users/{uid}/meta/plannerPrefs` sekaligus baris user di `bot_meta/digestRoster`; klien hanya boleh membaca `plannerPrefs`.
 
 ### Transaksi Rutin (Recurring)
 - Buat aturan tagihan/pemasukan berulang: harian, mingguan, bulanan, atau tahunan.

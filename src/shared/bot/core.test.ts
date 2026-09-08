@@ -768,10 +768,13 @@ describe('handleIncoming — productivity dispatch', () => {
 
   it('routes a /tugas text message to handleProductivityCommand, not the transaction path', async () => {
     const reply = await handleIncoming(textMsg('/tugas', 'whatsapp'))
+    // The timezone is resolved once here and handed to the executor, which no longer
+    // re-reads it.
     expect(handleProductivityCommand).toHaveBeenCalledWith(
       'user-1',
       expect.objectContaining({ kind: 'task_list' }),
       'whatsapp',
+      'Asia/Jakarta',
     )
     expect(handleTextTransaction).not.toHaveBeenCalled()
     expect(reply.text).toBe('stub: productivity')
@@ -794,6 +797,12 @@ describe('handleIncoming — productivity dispatch', () => {
     expect(handleProductivityCommand).not.toHaveBeenCalled()
     expect(handleTextTransaction).toHaveBeenCalledWith('user-1', 'kopi 25rb')
     expect(reply.text).toBe('stub: text transaction')
+  })
+
+  it('a plain finance message costs no timezone read (the verb pre-check gates it)', async () => {
+    getUserTimezone.mockClear()
+    await handleIncoming(textMsg('kopi 25rb'))
+    expect(getUserTimezone).not.toHaveBeenCalled()
   })
 })
 

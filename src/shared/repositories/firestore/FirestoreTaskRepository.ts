@@ -88,6 +88,6 @@ export class FirestoreTaskRepository implements ITaskRepository {
   }
 
   watch(userId: string, cb: (tasks: Task[]) => void): Unsubscribe {
-    return onSnapshot(col(userId, NAME), (snap) => cb(snap.docs.map(toTask)))
+    return onSnapshot(col(userId, NAME), (snap) => cb(snap.docs.map(toTask).sort(compareTasks)))
   }
 }

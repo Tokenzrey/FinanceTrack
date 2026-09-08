@@ -24,7 +24,7 @@ interface PlannerStore {
   /** Returns the created task so the caller can chain a `setDue` on its id. */
   addTask: (dto: CreateTaskDTO) => Promise<Task>
   setStatus: (id: string, status: TaskStatus) => Promise<void>
-  setDue: (id: string, dueAt: Date | null, leads: number[]) => Promise<void>
+  setDue: (id: string, title: string, dueAt: Date | null, leads: number[]) => Promise<void>
   removeTask: (id: string) => Promise<void>
   cancelReminderById: (id: string) => Promise<void>
 }
@@ -60,10 +60,10 @@ export const usePlannerStore = create<PlannerStore>((set) => ({
     await updateTaskStatus(uid, id, status)
   },
 
-  setDue: async (id, dueAt, leads) => {
+  setDue: async (id, title, dueAt, leads) => {
     const uid = currentUserId()
     if (!uid) return
-    await setTaskDue(uid, id, dueAt, leads)
+    await setTaskDue(uid, id, title, dueAt, leads)
   },
 
   removeTask: async (id) => {

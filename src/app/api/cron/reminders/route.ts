@@ -45,32 +45,40 @@ export async function POST(req: Request) {
     const claimed = await claimReminder(ref)
     if (!claimed) continue
 
-    const push = reminderPush(claimed, DEFAULT_TZ)
     let res: { ok: boolean; sent: number; error?: string }
     try {
+      const push = reminderPush(claimed, DEFAULT_TZ)
       res = await sendToUser(claimed.ownerId, push.text, { buttons: push.buttons })
     } catch (err) {
-      // A thrown link lookup counts as a failed send.
+      // A thrown render or link lookup counts as a failed send, not a batch abort.
       res = { ok: false, sent: 0, error: String(err).slice(0, 200) }
     }
 
     if (res.ok) {
-      const next = rollRecurrence(claimed, now)
-      await markReminderSent(ref, { rolledAt: next })
-      if (next) {
-        await createReminder(
-          claimed.ownerId,
-          {
-            message: claimed.message,
-            remindAt: next,
-            recurrence: toDto(claimed.recurrence),
-            source: 'auto',
-          },
-          { kind: claimed.kind, taskId: claimed.taskId },
-        )
-      }
-      await setPlannerLastPush(claimed.ownerId, claimed.id)
       sent++
+      // The message is already out. Create the next occurrence BEFORE flipping this row
+      // to `sent`: the reaper only rescues `sending`, so a throw after `sent` would kill
+      // a recurring series for good. A throw here leaves the row `sending`, which the
+      // next run's reaper picks up and retries end to end.
+      try {
+        const next = rollRecurrence(claimed, now)
+        if (next) {
+          await createReminder(
+            claimed.ownerId,
+            {
+              message: claimed.message,
+              remindAt: next,
+              recurrence: toDto(claimed.recurrence),
+              source: 'auto',
+            },
+            { kind: claimed.kind, taskId: claimed.taskId },
+          )
+        }
+        await markReminderSent(ref, { rolledAt: next })
+        await setPlannerLastPush(claimed.ownerId, claimed.id)
+      } catch (err) {
+        console.error('cron/reminders post-send bookkeeping failed:', claimed.id, err)
+      }
     } else {
       const attempts = claimed.attempts
       const giveUp = attempts >= MAX_ATTEMPTS

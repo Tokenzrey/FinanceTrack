@@ -33,14 +33,17 @@ function deriveNoteTitle(text: string): string {
   return firstLine.length > 60 ? `${firstLine.slice(0, 59).trimEnd()}…` : firstLine
 }
 
+/** `tz` is passed in by `dispatchText`, which already resolved it to parse the command —
+ *  the token (`pr:*`) path has no parse step, so it falls back to a read here. */
 export async function handleProductivityCommand(
   userId: string,
   cmd: ProductivityCommand,
   source: 'whatsapp' | 'telegram' = 'telegram',
+  timeZone?: string,
 ): Promise<BotReply | null> {
   if (cmd.kind === 'none') return null
 
-  const tz = await getUserTimezone(userId)
+  const tz = timeZone ?? (await getUserTimezone(userId))
 
   switch (cmd.kind) {
     case 'task_add': {

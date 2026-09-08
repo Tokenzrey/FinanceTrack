@@ -46,8 +46,8 @@ interface FakeDoc {
   ref: { id: string; path: string }
 }
 
-function mkDoc(id: string, data: Record<string, unknown>): FakeDoc {
-  return { id, data: () => data, ref: { id, path: `reminders/${id}` } }
+function mkDoc(id: string, data: Record<string, unknown>, path?: string): FakeDoc {
+  return { id, data: () => data, ref: { id, path: path ?? `users/u1/reminders/${id}` } }
 }
 
 const asMillis = (v: unknown): unknown =>
@@ -320,6 +320,27 @@ describe('dueRemindersPage', () => {
 
     expect(page.map((p) => p.data.id)).toEqual(['r3', 'r1'])
     expect(page[0].ref.id).toBe('r3')
+  })
+
+  it('drops nested-path docs and derives ownerId from the path, never from the field', async () => {
+    const now = new Date('2026-09-08T12:00:00Z')
+    const due = Timestamp.fromDate(new Date('2026-09-08T11:00:00Z'))
+    const docs = [
+      // Planted by an authed attacker under their own tasks subtree, addressed at a victim.
+      mkDoc(
+        'evil',
+        { status: 'pending', remindAt: due, ownerId: 'victim' },
+        'users/attacker/tasks/t1/reminders/evil',
+      ),
+      // Canonical doc whose ownerId field lies about who owns it.
+      mkDoc('ok', { status: 'pending', remindAt: due, ownerId: 'victim' }),
+    ]
+    getAdminDb.mockReturnValue({ collectionGroup: vi.fn().mockReturnValue(fakeQuery(docs)) })
+
+    const page = await dueRemindersPage(now, 10)
+
+    expect(page.map((p) => p.data.id)).toEqual(['ok'])
+    expect(page[0].data.ownerId).toBe('u1')
   })
 })
 

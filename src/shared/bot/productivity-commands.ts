@@ -122,19 +122,34 @@ function handleReminder(rest: string, now: Date, timeZone: string): Productivity
   return { kind: 'reminder_add', message: stripWhenTokens(rest).trim(), when }
 }
 
+/** `"/tugas beli susu"` → `['task', 'beli susu']`; `verb` is `undefined` when the first
+ *  token is not one of ours. */
+function splitVerb(text: string): { verb: Verb | undefined; rest: string } {
+  const trimmed = text.trim().replace(/^\/+/, '')
+  if (!trimmed) return { verb: undefined, rest: '' }
+  const firstSpace = trimmed.search(/\s/)
+  const verbRaw = firstSpace === -1 ? trimmed : trimmed.slice(0, firstSpace)
+  return {
+    verb: VERB_ALIASES[verbRaw.toLowerCase()],
+    rest: firstSpace === -1 ? '' : trimmed.slice(firstSpace + 1).trim(),
+  }
+}
+
+/**
+ * Cheap, I/O-free pre-check on the first token. `dispatchText` gates the user's
+ * timezone read (a Firestore round-trip on the hot path) behind this, so a plain
+ * finance message never pays for it.
+ */
+export function looksLikeProductivityCommand(text: string): boolean {
+  return splitVerb(text).verb !== undefined
+}
+
 export function parseProductivityCommand(
   text: string,
   now: Date,
   timeZone: string,
 ): ProductivityCommand {
-  const trimmed = text.trim().replace(/^\/+/, '')
-  if (!trimmed) return NONE
-
-  const firstSpace = trimmed.search(/\s/)
-  const verbRaw = firstSpace === -1 ? trimmed : trimmed.slice(0, firstSpace)
-  const rest = firstSpace === -1 ? '' : trimmed.slice(firstSpace + 1).trim()
-
-  const verb = VERB_ALIASES[verbRaw.toLowerCase()]
+  const { verb, rest } = splitVerb(text)
   if (!verb) return NONE
 
   switch (verb) {

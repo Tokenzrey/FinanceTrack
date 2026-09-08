@@ -42,6 +42,13 @@ vi.mock('@/shared/stores/auth.store', () => {
   }
 })
 
+// The page reads `meta/plannerPrefs` for its lead times; no prefs doc → built-in default.
+vi.mock('@/shared/lib/firebase', () => ({ getDb: () => ({}) }))
+vi.mock('firebase/firestore', () => ({
+  doc: vi.fn(),
+  getDoc: vi.fn(async () => ({ exists: () => false, data: () => ({}) })),
+}))
+
 import { PlannerPage } from './PlannerPage'
 
 describe('PlannerPage quick-add', () => {
@@ -58,6 +65,8 @@ describe('PlannerPage quick-add', () => {
       ),
     )
     // "besok jam 3 sore" is a parseable due date, so the new task's id gets a due write.
-    await waitFor(() => expect(setDue).toHaveBeenCalledWith('t1', expect.any(Date), [0, 60]))
+    await waitFor(() =>
+      expect(setDue).toHaveBeenCalledWith('t1', 'Review PRD', expect.any(Date), [0, 60]),
+    )
   })
 })

@@ -88,7 +88,16 @@ export class FirestoreReminderRepository implements IReminderRepository {
     await updateDoc(colDoc(userId, NAME, id), { status: 'cancelled', updatedAt: serverTimestamp() })
   }
 
+  /** Same filter as `listUpcoming` — a daily recurring reminder leaves one `sent` doc per
+   *  day, and re-reading the whole history on every planner load is pure waste. */
   watch(userId: string, cb: (reminders: Reminder[]) => void): Unsubscribe {
-    return onSnapshot(col(userId, NAME), (snap) => cb(snap.docs.map(toReminder)))
+    return onSnapshot(
+      query(
+        col(userId, NAME),
+        where('status', 'in', ['pending', 'failed']),
+        orderBy('remindAt', 'asc'),
+      ),
+      (snap) => cb(snap.docs.map(toReminder)),
+    )
   }
 }

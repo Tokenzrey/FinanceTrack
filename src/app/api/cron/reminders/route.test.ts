@@ -89,6 +89,27 @@ describe('POST /api/cron/reminders', () => {
     )
   })
 
+  it('a throwing createReminder leaves the source row unsent so the reaper can retry it', async () => {
+    vi.mocked(data.claimReminder).mockResolvedValueOnce({
+      id: 'r2',
+      ownerId: 'u1',
+      message: 'standup',
+      attempts: 0,
+      kind: 'standalone',
+      taskId: null,
+      recurrence: { freq: 'daily', until: null },
+      remindAt: { toDate: () => new Date('2026-01-01T00:00:00Z') },
+    } as unknown as Reminder)
+    vi.mocked(data.createReminder).mockRejectedValueOnce(new Error('firestore down'))
+
+    const res = await POST(authed())
+
+    // The follow-up is created BEFORE the row flips to `sent` — otherwise a throw here
+    // would end the recurring series silently.
+    expect(data.markReminderSent).not.toHaveBeenCalled()
+    expect((await res.json()).sent).toBe(1)
+  })
+
   it('a failed send marks the reminder failed with a backoff', async () => {
     vi.mocked(sendToUser).mockResolvedValueOnce({ ok: false, sent: 0, error: 'gowa 500' })
     const res = await POST(authed())

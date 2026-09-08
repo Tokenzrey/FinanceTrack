@@ -107,9 +107,16 @@ export async function sendToUser(
   const results = await Promise.all(
     links.map((link) => {
       if (link.platform === 'whatsapp') {
+        // The copy is authored for Telegram's `parse_mode: 'HTML'`; WhatsApp has no HTML,
+        // so the tags would show up literally. Strip them rather than translate — there is
+        // no rich WA markup mapping here and the plain text reads fine.
+        // ponytail: regex strip, not a parser; the copy only ever emits <b>/<i>/<code>.
+        const plain = text.replace(/<\/?[a-z][^>]*>/gi, '')
+        // No inline buttons on GOWA's /send/message — the tokens go out as bare reply
+        // lines the `pr:` handler in core.ts matches verbatim.
         const waText = opts?.buttons?.length
-          ? text + '\n\n' + opts.buttons.map((b) => 'Balas: ' + b.token).join('\n')
-          : text
+          ? plain + '\n\nBalas salah satu:\n' + opts.buttons.map((b) => b.token).join('\n')
+          : plain
         return sendWhatsApp(link.externalId, waText)
       }
       return sendTelegram(link.externalId, text, opts)

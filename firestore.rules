@@ -27,7 +27,11 @@ service cloud.firestore {
                               || document[1] == 'botLastBatch' || document[1] == 'botPrefs'
                               || document[1] == 'botModelDay'))
                      && !(document[0] == 'bot_receipt_cache' || document[0] == 'bot_parse_cache')
-                     && !(document[0] == 'reminders');
+                     && !(document[0] == 'reminders')
+                     // The cron reads reminders with collectionGroup('reminders'), which matches
+                     // at ANY depth — so a doc planted at users/U/tasks/x/reminders/y would be
+                     // delivered too. Reject a `reminders` collection anywhere, not just at the top.
+                     && !(document.size() >= 3 && document[document.size() - 2] == 'reminders');
       }
 
       // A reminder's user-facing fields (message, remindAt, recurrence) and a cancel are

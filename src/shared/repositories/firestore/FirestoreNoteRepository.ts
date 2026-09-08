@@ -64,6 +64,8 @@ export class FirestoreNoteRepository implements INoteRepository {
   }
 
   watch(userId: string, cb: (notes: Note[]) => void): Unsubscribe {
-    return onSnapshot(col(userId, NAME), (snap) => cb(snap.docs.map(toNote)))
+    return onSnapshot(col(userId, NAME), (snap) =>
+      cb(snap.docs.map(toNote).sort((a, b) => b.updatedAt.toMillis() - a.updatedAt.toMillis())),
+    )
   }
 }

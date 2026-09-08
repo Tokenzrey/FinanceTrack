@@ -8,7 +8,11 @@ import crypto from 'node:crypto'
 export function authorizeCron(req: Request): boolean {
   const secret = process.env.PRODUCTIVITY_CRON_SECRET ?? ''
   const got = (req.headers.get('authorization') ?? '').replace(/^Bearer\s+/i, '')
-  // Length guard first: timingSafeEqual throws when the two buffers differ in length.
-  if (!secret || got.length !== secret.length) return false
-  return crypto.timingSafeEqual(Buffer.from(got), Buffer.from(secret))
+  // Length guard first: timingSafeEqual throws when the two buffers differ in length — and
+  // it is BYTES that must match, not JS chars (a multibyte header would slip past a
+  // `.length` check and throw inside the compare).
+  const a = Buffer.from(got)
+  const b = Buffer.from(secret)
+  if (!secret || a.length !== b.length) return false
+  return crypto.timingSafeEqual(a, b)
 }

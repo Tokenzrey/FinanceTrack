@@ -346,6 +346,11 @@ export async function reapStuckSending(cutoff: Date): Promise<number> {
   return snap.docs.length
 }
 
+/** The only path shape the cron will deliver from. `collectionGroup('reminders')` matches
+ *  at ANY depth, so a doc planted at e.g. `users/{uid}/tasks/{tid}/reminders/{rid}` would
+ *  otherwise be picked up — and its `ownerId` FIELD would decide whose chat gets the text. */
+const CANONICAL_REMINDER_PATH = /^users\/([^/]+)\/reminders\/[^/]+$/
+
 export async function dueRemindersPage(
   now: Date,
   limit: number,
@@ -357,10 +362,19 @@ export async function dueRemindersPage(
     .orderBy('remindAt', 'asc')
     .limit(limit)
     .get()
-  return snap.docs.map((d) => ({
-    ref: d.ref,
-    data: { id: d.id, ...d.data() } as unknown as Reminder,
-  }))
+
+  const out: Array<{ ref: DocumentReference; data: Reminder }> = []
+  for (const d of snap.docs) {
+    // Skip non-canonical paths outright, and take `ownerId` from the path rather than the
+    // field — a writer who controls the field must not be able to address another user.
+    const m = CANONICAL_REMINDER_PATH.exec(d.ref.path)
+    if (!m) continue
+    out.push({
+      ref: d.ref,
+      data: { ...(d.data() as Reminder), id: d.id, ownerId: m[1] } as unknown as Reminder,
+    })
+  }
+  return out
 }
 
 /**
@@ -414,8 +428,15 @@ export async function markReminderFailed(
 /**
  * Reads the single opt-in roster doc `bot_meta/digestRoster` (`{ [userId]: { tz,
  * digestHour } }`) rather than iterating `users`. Returns the users whose local time is
- * inside `[digestHour:00, digestHour:14]` right now and who have not already been sent
+ * inside `[digestHour:00, digestHour:29]` right now and who have not already been sent
  * today's digest.
+ *
+ * The window is twice the ~15-min digest tick, so a single dropped tick still lands
+ * inside it — at 15 min exactly one tick could fall in the window and a miss lost the day.
+ *
+ * `tz` comes from the live profile, not the roster line (which is a snapshot taken when
+ * prefs were last saved): a user who changes their timezone afterwards would otherwise be
+ * scheduled against the old zone forever. `digestHour` still comes from the roster.
  */
 export async function usersDueForDigest(
   now: Date,
@@ -429,23 +450,24 @@ export async function usersDueForDigest(
   for (const [userId, entry] of Object.entries(roster)) {
     if (!entry || typeof entry.tz !== 'string' || typeof entry.digestHour !== 'number') continue
 
+    const tz = await getUserTimezone(userId)
     const parts = new Intl.DateTimeFormat('en-US', {
-      timeZone: entry.tz,
+      timeZone: tz,
       hour: '2-digit',
       minute: '2-digit',
       hour12: false,
     }).formatToParts(now)
     const hour = Number(parts.find((p) => p.type === 'hour')?.value ?? -1) % 24
     const minute = Number(parts.find((p) => p.type === 'minute')?.value ?? -1)
-    if (hour !== entry.digestHour || minute > 14) continue
+    if (hour !== entry.digestHour || minute > 29) continue
 
     const digestSnap = await db.doc(`users/${userId}/meta/productivityDigest`).get()
     const lastSentDayKey = digestSnap.exists
       ? (digestSnap.data()?.lastSentDayKey as string | undefined)
       : undefined
-    if (lastSentDayKey === dayKeyInTz(now, entry.tz)) continue
+    if (lastSentDayKey === dayKeyInTz(now, tz)) continue
 
-    out.push({ userId, tz: entry.tz, digestHour: entry.digestHour })
+    out.push({ userId, tz, digestHour: entry.digestHour })
   }
   return out
 }

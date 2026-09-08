@@ -45,7 +45,7 @@ describe('sendToUser', () => {
     )
   })
 
-  it('appends "Balas: <token>" fallback lines to the WhatsApp message when buttons are passed', async () => {
+  it('appends bare reply tokens to the WhatsApp message when buttons are passed', async () => {
     mockedLinks.mockResolvedValue([{ platform: 'whatsapp', externalId: '628123' }])
     const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValue(okJson())
 
@@ -60,8 +60,17 @@ describe('sendToUser', () => {
     const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
     expect(body.phone).toBe('628123')
     expect(body.message).toContain('Ada tagihan jatuh tempo')
-    expect(body.message).toContain('Balas: paid_1')
-    expect(body.message).toContain('Balas: snooze_1')
+    expect(body.message).toContain('Balas salah satu:\npaid_1\nsnooze_1')
+  })
+
+  it('strips HTML tags from the WhatsApp message (the copy is authored for Telegram)', async () => {
+    mockedLinks.mockResolvedValue([{ platform: 'whatsapp', externalId: '628123' }])
+    const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValue(okJson())
+
+    await sendToUser('linked', '⏰ <i>Pengingat</i>\n\n<b>minum obat</b>')
+
+    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
+    expect(body.message).toBe('⏰ Pengingat\n\nminum obat')
   })
 
   it('returns send_failed when the only send gets a failed HTTP response', async () => {

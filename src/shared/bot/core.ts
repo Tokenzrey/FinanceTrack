@@ -24,11 +24,13 @@ import { parseAmount } from './parse-amount'
 import { matchReadCommand } from './parse-intent'
 import { parsePrefsCommand } from './prefs-commands'
 import {
+  looksLikeProductivityCommand,
   parseProductivityCommand,
   parseProductivityToken,
   PRODUCTIVITY_TOKEN_PREFIX,
 } from './productivity-commands'
 import { replies } from './replies'
+import { reminderGone } from './replies-productivity'
 import type { BotIncoming, BotIntent, BotPlatform, BotReply } from './types'
 
 /**
@@ -76,7 +78,8 @@ export async function handleIncoming(msg: BotIncoming): Promise<BotReply> {
     }
     if (msg.text.startsWith(PRODUCTIVITY_TOKEN_PREFIX)) {
       const answer = await handleProductivityCommand(userId, parseProductivityToken(msg.text), msg.platform)
-      return answer ?? replies.reviewExpired()
+      // An unparseable `pr:` token is a stale/garbled reminder button, not a review card.
+      return answer ?? reminderGone()
     }
   }
 
@@ -138,12 +141,16 @@ async function dispatchText(
   // Productivity commands (`/tugas`, `/agenda`, `/catat`, `/ingatkan`, …) parse before
   // `parseCommandArgs` and `matchReadCommand`, so `/agenda` never reaches the finance
   // read-command matcher. A non-productivity message returns `{ kind: 'none' }` and
-  // dispatch falls through unchanged.
-  const tz = await adminData.getUserTimezone(userId)
-  const planCmd = parseProductivityCommand(trimmed, new Date(), tz)
-  if (planCmd.kind !== 'none') {
-    const answer = await handleProductivityCommand(userId, planCmd, platform)
-    if (answer) return answer
+  // dispatch falls through unchanged. The verb pre-check keeps the timezone read (a
+  // Firestore round-trip) off the finance hot path, and the resolved `tz` is handed to
+  // the executor so it does not read the same doc again.
+  if (looksLikeProductivityCommand(trimmed)) {
+    const tz = await adminData.getUserTimezone(userId)
+    const planCmd = parseProductivityCommand(trimmed, new Date(), tz)
+    if (planCmd.kind !== 'none') {
+      const answer = await handleProductivityCommand(userId, planCmd, platform, tz)
+      if (answer) return answer
+    }
   }
 
   // Argument-taking commands (`/ringkasan agustus`, `/saldo kebutuhan`, `/kategori makan`,

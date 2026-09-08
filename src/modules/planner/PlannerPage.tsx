@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { doc, getDoc } from 'firebase/firestore'
 import { Loader2, ListChecks, MoreHorizontal, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/shared/components/ui/badge'
@@ -26,15 +27,38 @@ import {
 import { EmptyState, LoadingSkeleton } from '@/shared/components/finance/EmptyState'
 import { PageHeader } from '@/shared/components/layout/TopBar'
 import { cn } from '@/shared/lib/utils'
+import { getDb } from '@/shared/lib/firebase'
 import { DEFAULT_TZ, formatDateTime } from '@/shared/lib/format'
 import { parseWhen, stripWhenTokens } from '@/shared/lib/parse-when'
 import { usePlannerStore } from '@/shared/stores/planner.store'
 import { useAuthStore } from '@/shared/stores/auth.store'
-import type { Task, TaskPriority, TaskStatus } from '@/shared/types/productivity'
+import {
+  DEFAULT_PLANNER_PREFS,
+  type Task,
+  type TaskPriority,
+  type TaskStatus,
+} from '@/shared/types/productivity'
 import { RemindersPanel } from './RemindersPanel'
 
-/** Reminder lead times spawned with a due date: on time + 1h before. */
-const TASK_LEADS = [0, 60]
+/** Reminder lead times for a task's due date, from the same `meta/plannerPrefs` doc the
+ *  bot honours (Settings is the only writer, via `/api/planner/prefs`). Falls back to the
+ *  built-in default for a user who never opened Settings. */
+function useTaskLeads(): number[] {
+  const userId = useAuthStore((s) => s.user?.uid)
+  const [leads, setLeads] = useState<number[]>(DEFAULT_PLANNER_PREFS.taskLeadsMinutes)
+
+  useEffect(() => {
+    if (!userId) return
+    void getDoc(doc(getDb(), 'users', userId, 'meta', 'plannerPrefs')).then((snap) => {
+      const stored = snap.exists() ? (snap.data() as { taskLeadsMinutes?: unknown }) : {}
+      if (Array.isArray(stored.taskLeadsMinutes) && stored.taskLeadsMinutes.length > 0) {
+        setLeads(stored.taskLeadsMinutes as number[])
+      }
+    })
+  }, [userId])
+
+  return leads
+}
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
   todo: 'Belum',
@@ -74,6 +98,7 @@ function toDatetimeLocal(date: Date): string {
 function QuickAddBar() {
   const addTask = usePlannerStore((s) => s.addTask)
   const setDue = usePlannerStore((s) => s.setDue)
+  const leads = useTaskLeads()
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -97,7 +122,7 @@ function QuickAddBar() {
     setBusy(true)
     try {
       const task = await addTask({ title, priority, source: 'web' })
-      if (parsed) await setDue(task.id, parsed.at, TASK_LEADS)
+      if (parsed) await setDue(task.id, title, parsed.at, leads)
       setText('')
       toast.success('Tugas ditambahkan')
     } catch (error) {
@@ -134,6 +159,7 @@ function TaskDueDialog({
   onOpenChange: (open: boolean) => void
 }) {
   const setDue = usePlannerStore((s) => s.setDue)
+  const leads = useTaskLeads()
   const [value, setValue] = useState(task.dueAt ? toDatetimeLocal(task.dueAt.toDate()) : '')
   const [saving, setSaving] = useState(false)
 
@@ -176,7 +202,7 @@ function TaskDueDialog({
               disabled={saving || !value}
               onClick={() =>
                 void run(
-                  () => setDue(task.id, new Date(value), TASK_LEADS),
+                  () => setDue(task.id, task.title, new Date(value), leads),
                   'Jatuh tempo diatur',
                 )
               }
@@ -188,7 +214,9 @@ function TaskDueDialog({
               <Button
                 variant="outline"
                 disabled={saving}
-                onClick={() => void run(() => setDue(task.id, null, []), 'Jatuh tempo dihapus')}
+                onClick={() =>
+                  void run(() => setDue(task.id, task.title, null, []), 'Jatuh tempo dihapus')
+                }
               >
                 Hapus jatuh tempo
               </Button>
@@ -261,8 +289,14 @@ function TaskRow({ task, tz }: { task: Task; tz: string }) {
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onClick={() => {
-                void removeTask(task.id)
-                toast.success('Tugas dihapus')
+                void (async () => {
+                  try {
+                    await removeTask(task.id)
+                    toast.success('Tugas dihapus')
+                  } catch {
+                    toast.error('Gagal menghapus tugas.')
+                  }
+                })()
               }}
               className="text-destructive focus:text-destructive"
             >
