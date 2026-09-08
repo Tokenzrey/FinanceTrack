@@ -51,6 +51,17 @@ service cloud.firestore {
                           || request.resource.data.status == 'cancelled');
         allow delete: if request.auth != null && request.auth.uid == userId;
       }
+
+      // Notes are ordinary user-owned documents. Keep their access explicit so
+      // note writes do not depend on recursive path inspection above.
+      match /notes/{noteId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
+
+      // Tasks are ordinary user-owned documents managed by the planner UI.
+      match /tasks/{taskId} {
+        allow read, write: if request.auth != null && request.auth.uid == userId;
+      }
     }
 
     // Root collections used only by the bot's server-side (Admin SDK) code — never

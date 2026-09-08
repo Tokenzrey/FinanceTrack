@@ -101,7 +101,8 @@ export async function updateTask(
   if (patch.priority !== undefined) update.priority = patch.priority
   if (patch.status !== undefined) update.status = patch.status
   if (patch.dueAt !== undefined) update.dueAt = patch.dueAt ? Timestamp.fromDate(patch.dueAt) : null
-  if (patch.status === 'done' && prev.status !== 'done') update.doneAt = FieldValue.serverTimestamp()
+  if (patch.status === 'done' && prev.status !== 'done')
+    update.doneAt = FieldValue.serverTimestamp()
 
   await ref.update(stripUndefined(update))
 
@@ -131,7 +132,9 @@ export async function listTasks(
   } else if (filter === 'today') {
     const from = localDayStart(new Date(), tz)
     const to = new Date(from.getTime() + DAY_MS)
-    q = col.where('dueAt', '>=', Timestamp.fromDate(from)).where('dueAt', '<', Timestamp.fromDate(to))
+    q = col
+      .where('dueAt', '>=', Timestamp.fromDate(from))
+      .where('dueAt', '<', Timestamp.fromDate(to))
   }
   const snap = await q.get()
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as unknown as Task).sort(compareTasks)
@@ -288,7 +291,10 @@ export async function upsertTaskReminder(
 
 /** One reminder by id, or `null` if it no longer exists. Used by the button-tap paths
  *  (`mark_done_token`, `snooze` with an explicit id). */
-export async function getReminderById(userId: string, reminderId: string): Promise<Reminder | null> {
+export async function getReminderById(
+  userId: string,
+  reminderId: string,
+): Promise<Reminder | null> {
   const snap = await getAdminDb().doc(`users/${userId}/reminders/${reminderId}`).get()
   return snap.exists ? ({ id: snap.id, ...snap.data() } as unknown as Reminder) : null
 }
@@ -340,7 +346,10 @@ export async function reapStuckSending(cutoff: Date): Promise<number> {
   if (snap.docs.length === 0) return 0
   const batch = db.batch()
   for (const d of snap.docs) {
-    batch.update(d.ref, stripUndefined({ status: 'pending', updatedAt: FieldValue.serverTimestamp() }))
+    batch.update(
+      d.ref,
+      stripUndefined({ status: 'pending', updatedAt: FieldValue.serverTimestamp() }),
+    )
   }
   await batch.commit()
   return snap.docs.length
@@ -388,9 +397,13 @@ export async function claimReminder(ref: DocumentReference): Promise<Reminder | 
     if (!snap.exists) return null
     const r = snap.data() as Reminder
     if (r.status !== 'pending' && r.status !== 'failed') return null
-    if (r.status === 'failed' && r.nextAttemptAt && r.nextAttemptAt.toMillis() > Date.now()) return null
-    tx.update(ref, stripUndefined({ status: 'sending', attempts: r.attempts + 1, updatedAt: Timestamp.now() }))
-    return { ...r, status: 'sending', attempts: r.attempts + 1 } as Reminder
+    if (r.status === 'failed' && r.nextAttemptAt && r.nextAttemptAt.toMillis() > Date.now())
+      return null
+    tx.update(
+      ref,
+      stripUndefined({ status: 'sending', attempts: r.attempts + 1, updatedAt: Timestamp.now() }),
+    )
+    return { ...r, id: ref.id, status: 'sending', attempts: r.attempts + 1 } as Reminder
   })
 }
 

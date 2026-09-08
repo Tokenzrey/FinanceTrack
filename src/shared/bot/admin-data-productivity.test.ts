@@ -147,8 +147,16 @@ describe('listTasks', () => {
   it("'open' filters to todo/doing and orders by dueAt asc then createdAt asc (nulls last)", async () => {
     const docs = [
       mkDoc('a', { status: 'todo', dueAt: null, createdAt: { toMillis: () => 100 } }),
-      mkDoc('b', { status: 'doing', dueAt: { toMillis: () => 5_000 }, createdAt: { toMillis: () => 1 } }),
-      mkDoc('c', { status: 'todo', dueAt: { toMillis: () => 1_000 }, createdAt: { toMillis: () => 1 } }),
+      mkDoc('b', {
+        status: 'doing',
+        dueAt: { toMillis: () => 5_000 },
+        createdAt: { toMillis: () => 1 },
+      }),
+      mkDoc('c', {
+        status: 'todo',
+        dueAt: { toMillis: () => 1_000 },
+        createdAt: { toMillis: () => 1 },
+      }),
     ]
     const where = vi.fn().mockReturnValue(fakeQuery(docs))
     getAdminDb.mockReturnValue({ collection: vi.fn().mockReturnValue({ where }) })
@@ -167,11 +175,31 @@ describe('listTasks', () => {
 
     const ts = (iso: string) => Timestamp.fromDate(new Date(iso))
     const docs = [
-      mkDoc('before', { status: 'todo', dueAt: ts('2026-09-07T16:59:00Z'), createdAt: { toMillis: () => 1 } }),
-      mkDoc('at-open', { status: 'todo', dueAt: ts('2026-09-07T17:00:00Z'), createdAt: { toMillis: () => 1 } }),
-      mkDoc('midday', { status: 'done', dueAt: ts('2026-09-08T10:00:00Z'), createdAt: { toMillis: () => 1 } }),
-      mkDoc('at-close', { status: 'todo', dueAt: ts('2026-09-08T17:00:00Z'), createdAt: { toMillis: () => 1 } }),
-      mkDoc('after', { status: 'todo', dueAt: ts('2026-09-08T20:00:00Z'), createdAt: { toMillis: () => 1 } }),
+      mkDoc('before', {
+        status: 'todo',
+        dueAt: ts('2026-09-07T16:59:00Z'),
+        createdAt: { toMillis: () => 1 },
+      }),
+      mkDoc('at-open', {
+        status: 'todo',
+        dueAt: ts('2026-09-07T17:00:00Z'),
+        createdAt: { toMillis: () => 1 },
+      }),
+      mkDoc('midday', {
+        status: 'done',
+        dueAt: ts('2026-09-08T10:00:00Z'),
+        createdAt: { toMillis: () => 1 },
+      }),
+      mkDoc('at-close', {
+        status: 'todo',
+        dueAt: ts('2026-09-08T17:00:00Z'),
+        createdAt: { toMillis: () => 1 },
+      }),
+      mkDoc('after', {
+        status: 'todo',
+        dueAt: ts('2026-09-08T20:00:00Z'),
+        createdAt: { toMillis: () => 1 },
+      }),
     ]
     const base = fakeQuery(docs)
     const where = vi.fn((f: string, op: string, v: unknown) => base.where(f, op, v))
@@ -263,7 +291,10 @@ describe('createReminder', () => {
 
 describe('claimReminder', () => {
   function txDb(initial: Record<string, unknown>) {
-    const state: { data: Record<string, unknown>; exists: boolean } = { data: { ...initial }, exists: true }
+    const state: { data: Record<string, unknown>; exists: boolean } = {
+      data: { ...initial },
+      exists: true,
+    }
     const txGet = vi.fn(async () => ({ exists: state.exists, data: () => state.data }))
     const txUpdate = vi.fn((_ref: unknown, patch: Record<string, unknown>) => {
       state.data = { ...state.data, ...patch }
@@ -286,6 +317,7 @@ describe('claimReminder', () => {
 
     expect(first?.status).toBe('sending')
     expect(first?.attempts).toBe(3)
+    expect(first?.id).toBe('rem-1')
     expect(second).toBeNull()
     expect(txUpdate).toHaveBeenCalledTimes(1)
   })
@@ -309,10 +341,22 @@ describe('dueRemindersPage', () => {
   it('returns pending/failed reminders due by `now`, oldest first, with their refs', async () => {
     const now = new Date('2026-09-08T12:00:00Z')
     const docs = [
-      mkDoc('r1', { status: 'pending', remindAt: Timestamp.fromDate(new Date('2026-09-08T11:00:00Z')) }),
-      mkDoc('r2', { status: 'sent', remindAt: Timestamp.fromDate(new Date('2026-09-08T10:00:00Z')) }),
-      mkDoc('r3', { status: 'failed', remindAt: Timestamp.fromDate(new Date('2026-09-08T09:00:00Z')) }),
-      mkDoc('r4', { status: 'pending', remindAt: Timestamp.fromDate(new Date('2026-09-08T13:00:00Z')) }),
+      mkDoc('r1', {
+        status: 'pending',
+        remindAt: Timestamp.fromDate(new Date('2026-09-08T11:00:00Z')),
+      }),
+      mkDoc('r2', {
+        status: 'sent',
+        remindAt: Timestamp.fromDate(new Date('2026-09-08T10:00:00Z')),
+      }),
+      mkDoc('r3', {
+        status: 'failed',
+        remindAt: Timestamp.fromDate(new Date('2026-09-08T09:00:00Z')),
+      }),
+      mkDoc('r4', {
+        status: 'pending',
+        remindAt: Timestamp.fromDate(new Date('2026-09-08T13:00:00Z')),
+      }),
     ]
     getAdminDb.mockReturnValue({ collectionGroup: vi.fn().mockReturnValue(fakeQuery(docs)) })
 
@@ -351,7 +395,11 @@ describe('upsertTaskReminder', () => {
     const db = { collection: vi.fn() }
     getAdminDb.mockReturnValue(db)
 
-    await upsertTaskReminder('u1', { id: 't1', title: 'x', dueAt: null } as unknown as Task, [0, 60])
+    await upsertTaskReminder(
+      'u1',
+      { id: 't1', title: 'x', dueAt: null } as unknown as Task,
+      [0, 60],
+    )
 
     expect(db.collection).not.toHaveBeenCalled()
   })
@@ -393,7 +441,12 @@ describe('searchNotes', () => {
     const docs = [
       mkDoc('n1', { title: 'Meeting NOTES', content: 'discuss roadmap', tags: [], source: 'web' }),
       mkDoc('n2', { title: 'Groceries', content: 'Milk and EGGS', tags: [], source: 'web' }),
-      mkDoc('n3', { title: 'Ideas', content: 'nothing here', tags: ['Roadmap', 'q4'], source: 'web' }),
+      mkDoc('n3', {
+        title: 'Ideas',
+        content: 'nothing here',
+        tags: ['Roadmap', 'q4'],
+        source: 'web',
+      }),
       mkDoc('n4', { title: 'Unrelated', content: 'blah', tags: ['misc'], source: 'web' }),
     ]
     getAdminDb.mockReturnValue({ collection: vi.fn().mockReturnValue(fakeQuery(docs)) })
@@ -563,7 +616,13 @@ describe('upsertDigestRoster', () => {
 describe('getReminderById', () => {
   it('hydrates the doc with its id, or returns null when it does not exist', async () => {
     const doc = vi.fn().mockReturnValue({
-      get: vi.fn().mockResolvedValue({ exists: true, id: 'rem-1', data: () => ({ message: 'Bayar listrik', kind: 'standalone' }) }),
+      get: vi
+        .fn()
+        .mockResolvedValue({
+          exists: true,
+          id: 'rem-1',
+          data: () => ({ message: 'Bayar listrik', kind: 'standalone' }),
+        }),
     })
     getAdminDb.mockReturnValue({ doc })
     const r = await getReminderById('u1', 'rem-1')
