@@ -209,6 +209,38 @@ describe('updateTask', () => {
     expect(written.doneAt).toBeTruthy()
   })
 
+  it('{ status: done } on a task whose listId points at a todo column → forces status done, moves listId to done column', async () => {
+    // The regression the old `reconcile` (list-wins) code would have failed:
+    // a live `todo` listId must NOT snap `/selesai` back to todo.
+    const { db, update } = dbWithTaskAndLists({ status: 'todo', listId: 'list-todo' }, [
+      mkDoc('list-todo', { title: 'Backlog', order: 1, mapsToStatus: 'todo' }),
+      mkDoc('list-done', { title: 'Done', order: 3, mapsToStatus: 'done' }),
+    ])
+    getAdminDb.mockReturnValue(db)
+
+    await updateTask('u1', 't1', { status: 'done' })
+
+    const written = update.mock.calls[0][0] as Record<string, unknown>
+    expect(written.status).toBe('done')
+    expect(written.listId).toBe('list-done')
+    expect(written.doneAt).toBeTruthy()
+  })
+
+  it('{ listId } only → column drives, status follows the column mapsToStatus', async () => {
+    const { db, update } = dbWithTaskAndLists({ status: 'todo', listId: 'list-todo' }, [
+      mkDoc('list-todo', { title: 'Backlog', order: 1, mapsToStatus: 'todo' }),
+      mkDoc('list-doing', { title: 'In progress', order: 2, mapsToStatus: 'doing' }),
+    ])
+    getAdminDb.mockReturnValue(db)
+
+    await updateTask('u1', 't1', { listId: 'list-doing' })
+
+    const written = update.mock.calls[0][0] as Record<string, unknown>
+    expect(written.listId).toBe('list-doing')
+    expect(written.status).toBe('doing')
+    expect('doneAt' in written).toBe(false)
+  })
+
   it('{ title } only → getBoardLists not called, payload carries no listId', async () => {
     const collection = vi.fn()
     const update = vi.fn().mockResolvedValue(undefined)

@@ -12,11 +12,10 @@ import type {
   PlannerPrefs,
   Reminder,
   Task,
-  TaskStatus,
   UpdateTaskDTO,
 } from '@/shared/types/productivity'
 import type { BoardList } from '@/shared/types/board'
-import { listForStatus, reconcile } from '@/shared/lib/task-status-sync'
+import { listForStatus, statusForList } from '@/shared/lib/task-status-sync'
 
 /**
  * Firestore Admin SDK data layer for the productivity modules (tasks, notes,
@@ -133,20 +132,22 @@ export async function updateTask(
   if (patch.priority !== undefined) update.priority = patch.priority
   if (patch.dueAt !== undefined) update.dueAt = patch.dueAt ? Timestamp.fromDate(patch.dueAt) : null
 
-  // Keep status ↔ listId in sync. Only pay the lists read when one of them moves —
-  // the common `/edit title` path is untouched.
-  let nextStatus: TaskStatus = (prev.status as TaskStatus | undefined) ?? 'todo'
+  // Directional status ↔ listId sync: whichever field the caller explicitly set wins,
+  // the other follows it. (Not `reconcile` — that's list-wins, for the board-drag path
+  // only. Here an explicit `/selesai` must force `status:'done'`, not be snapped back
+  // by a stale `todo` listId.) Only pay the lists read when one of them moves.
   if (patch.status !== undefined || patch.listId !== undefined) {
     const lists = await getBoardLists(userId)
-    const wantStatus = patch.status ?? (prev.status as TaskStatus | undefined) ?? 'todo'
-    const wantListId = patch.listId !== undefined ? patch.listId : (prev.listId ?? null)
-    const r = reconcile({ status: wantStatus, listId: wantListId }, lists)
-    nextStatus = r.status
-    update.status = r.status
-    update.listId = r.listId
+    if (patch.status !== undefined) {
+      update.status = patch.status
+      update.listId = listForStatus(patch.status, lists)
+    } else if (patch.listId !== undefined) {
+      update.listId = patch.listId
+      update.status = statusForList(patch.listId, lists)
+    }
   }
 
-  if (nextStatus === 'done' && prev.status !== 'done')
+  if (patch.status === 'done' && prev.status !== 'done')
     update.doneAt = FieldValue.serverTimestamp()
 
   await ref.update(stripUndefined(update))
