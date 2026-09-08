@@ -31,13 +31,28 @@ const LIST_TITLE: Record<'today' | 'open' | 'all', string> = {
   all: 'Semua Tugas',
 }
 
-function taskLine(t: Task, n: number, tz: string): string {
-  const head = `${n}. ${STATUS_ICON[t.status]} ${PRIORITY_ICON[t.priority]} ${escapeHtml(t.title)}`
-  return t.dueAt ? `${head}\n    🗓 ${formatDateTime(t.dueAt.toDate(), tz)}` : head
+/** Column + label context for a task card, resolved by the caller (`flow-productivity.ts`)
+ *  from `t.listId` / `t.labelIds`. All fields optional — a bot-created task with no board
+ *  passes nothing and the card renders exactly as before. */
+export interface TaskCardContext {
+  columnName?: string | null // resolved from t.listId
+  labelNames?: string[] // resolved from t.labelIds, in label order
 }
 
-function numberedTasks(items: Task[], tz: string): string {
-  return items.map((t, i) => taskLine(t, i + 1, tz)).join('\n')
+function taskLine(t: Task, n: number, tz: string, ctx?: TaskCardContext): string {
+  let out = `${n}. ${STATUS_ICON[t.status]} ${PRIORITY_ICON[t.priority]} ${escapeHtml(t.title)}`
+  if (t.dueAt) out += `\n    🗓 ${formatDateTime(t.dueAt.toDate(), tz)}`
+  if (ctx?.columnName) out += `\n    📁 ${escapeHtml(ctx.columnName)}`
+  if (ctx?.labelNames?.length) out += `\n    🏷 ${ctx.labelNames.map(escapeHtml).join(', ')}`
+  return out
+}
+
+function numberedTasks(
+  items: Task[],
+  tz: string,
+  ctxById?: Map<string, TaskCardContext>,
+): string {
+  return items.map((t, i) => taskLine(t, i + 1, tz, ctxById?.get(t.id))).join('\n')
 }
 
 function reminderLine(r: Reminder, n: number, tz: string): string {
@@ -63,18 +78,28 @@ function snippet(text: string, max = 160): string {
 
 // ─── Tugas ─────────────────────────────────────────────────────
 
-export function taskCreated(t: Task, tz: string, reminderAt: Date | null): BotReply {
-  const lines = ['✅ <b>Tugas dicatat</b>', '', taskLine(t, 1, tz)]
+export function taskCreated(
+  t: Task,
+  tz: string,
+  reminderAt: Date | null,
+  ctx?: TaskCardContext,
+): BotReply {
+  const lines = ['✅ <b>Tugas dicatat</b>', '', taskLine(t, 1, tz, ctx)]
   if (reminderAt) lines.push(`⏰ Diingatkan ${formatDateTime(reminderAt, tz)}`)
   return reply(lines.join('\n'))
 }
 
-export function taskList(items: Task[], filter: 'today' | 'open' | 'all', tz: string): BotReply {
+export function taskList(
+  items: Task[],
+  filter: 'today' | 'open' | 'all',
+  tz: string,
+  ctxById?: Map<string, TaskCardContext>,
+): BotReply {
   const title = `📋 <b>${LIST_TITLE[filter]}</b>`
   if (items.length === 0) {
     return reply(`${title}\n\nTidak ada tugas di sini — santai dulu ☕`)
   }
-  return reply(`${title}\n\n${numberedTasks(items, tz)}`)
+  return reply(`${title}\n\n${numberedTasks(items, tz, ctxById)}`)
 }
 
 export function taskDone(t: Task): BotReply {
@@ -157,8 +182,14 @@ export function reminderPush(
   r: Reminder,
   tz: string,
 ): { text: string; buttons: { text: string; token: string }[] } {
+  // Title line / message line / time line (🗓) / recurrence line — the action row is
+  // `buttons`. Survives the WhatsApp HTML-tag strip: <b> goes, the emoji-led lines carry
+  // the structure.
   return {
-    text: `⏰ <i>Pengingat</i>\n\n${escapeHtml(r.message)}${recurrenceHint(r, tz)}`,
+    text:
+      `⏰ <b>Pengingat</b>\n\n${escapeHtml(r.message)}` +
+      `\n🗓 ${formatDateTime(r.remindAt.toDate(), tz)}` +
+      recurrenceHint(r, tz),
     buttons: [
       { text: '✅ Selesai', token: `pr:done:${r.id}` },
       { text: '😴 +15 mnt', token: `pr:snooze:${r.id}:15` },
@@ -174,13 +205,14 @@ export function agenda(
   reminders: Reminder[],
   tz: string,
   dayLabel: string,
+  ctxById?: Map<string, TaskCardContext>,
 ): BotReply {
   const title = `📅 <b>Agenda ${escapeHtml(dayLabel)}</b>`
   if (tasks.length === 0 && reminders.length === 0) {
     return reply(`${title}\n\nAgenda kamu kosong hari ini — santai dulu ☕`)
   }
   const parts = [title]
-  if (tasks.length > 0) parts.push('', '<b>Tugas</b>', numberedTasks(tasks, tz))
+  if (tasks.length > 0) parts.push('', '<b>Tugas</b>', numberedTasks(tasks, tz, ctxById))
   if (reminders.length > 0) parts.push('', '<b>Pengingat</b>', numberedReminders(reminders, tz))
   return reply(parts.join('\n'))
 }
@@ -190,6 +222,7 @@ export function digest(
   tasks: Task[],
   reminders: Reminder[],
   tz: string,
+  ctxById?: Map<string, TaskCardContext>,
 ): BotReply {
   const greeting = userName ? `☀️ <b>Selamat pagi, ${escapeHtml(userName)}!</b>` : '☀️ <b>Selamat pagi!</b>'
   if (tasks.length === 0 && reminders.length === 0) {
@@ -200,7 +233,7 @@ export function digest(
     '',
     `Hari ini ada <b>${tasks.length} tugas</b> dan <b>${reminders.length} pengingat</b>.`,
   ]
-  if (tasks.length > 0) parts.push('', '<b>Tugas</b>', numberedTasks(tasks, tz))
+  if (tasks.length > 0) parts.push('', '<b>Tugas</b>', numberedTasks(tasks, tz, ctxById))
   if (reminders.length > 0) parts.push('', '<b>Pengingat</b>', numberedReminders(reminders, tz))
   return reply(parts.join('\n'))
 }

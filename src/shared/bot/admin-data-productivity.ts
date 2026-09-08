@@ -14,7 +14,7 @@ import type {
   Task,
   UpdateTaskDTO,
 } from '@/shared/types/productivity'
-import type { BoardList } from '@/shared/types/board'
+import type { BoardList, Label } from '@/shared/types/board'
 import { listForStatus, statusForList } from '@/shared/lib/task-status-sync'
 
 /**
@@ -87,6 +87,25 @@ export async function getBoardLists(userId: string): Promise<BoardList[]> {
       createdAt: data.createdAt ?? Timestamp.now(),
       updatedAt: data.updatedAt ?? Timestamp.now(),
     } as BoardList
+  })
+}
+
+/** The board's labels for a user, ordered by `order` asc. Empty (no board yet) → `[]`.
+ *  Mirrors `getBoardLists` — same Admin SDK shape, same `?? default` fallbacks. */
+export async function getBoardLabels(userId: string): Promise<Label[]> {
+  const snap = await getAdminDb()
+    .collection(`users/${userId}/labels`)
+    .orderBy('order', 'asc')
+    .get()
+  return snap.docs.map((d) => {
+    const data = d.data()
+    return {
+      id: d.id,
+      name: data.name ?? '',
+      colorKey: data.colorKey ?? 'slate',
+      order: data.order ?? 0,
+      createdAt: data.createdAt ?? Timestamp.now(),
+    } as Label
   })
 }
 
