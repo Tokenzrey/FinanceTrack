@@ -10,7 +10,10 @@ import {
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { Timestamp } from 'firebase/firestore'
 
+import { toast } from 'sonner'
+
 import { Button } from '@/shared/components/ui/button'
+import { DEFAULT_TZ } from '@/shared/lib/format'
 import {
   COL_WIDTH,
   columnForDate,
@@ -18,16 +21,19 @@ import {
   type TimelineZoom,
 } from '@/shared/lib/timeline-scale'
 import { cn } from '@/shared/lib/utils'
+import { useAuthStore } from '@/shared/stores/auth.store'
 import { usePlannerStore } from '@/shared/stores/planner.store'
-import type { Task } from '@/shared/types/productivity'
+import type { Reminder, Task } from '@/shared/types/productivity'
+import { setTaskSchedule } from '@/shared/use-cases/board/SetTaskSchedule.usecase'
 import { applyBoardFilters, describeActiveFilters } from '../shared/FilterBar'
+import { DependencyArrow } from './DependencyArrow'
+import { TimelineBar } from './TimelineBar'
 import { TimelineRuler } from './TimelineRuler'
 
 const ROW_HEIGHT = 32
-/** Left name gutter — `w-44` (176px) on mobile, `w-60` (240px) from `sm`. */
+/** Left name gutter — `w-44` (176px) on mobile, `w-60` (240px) from `sm`.
+ *  The px widths live in the `--tl-gutter` CSS var on the scroll region. */
 const GUTTER_CLASS = 'w-44 sm:w-60'
-const GUTTER_PX_MOBILE = 176
-const GUTTER_PX_DESKTOP = 240
 
 const ZOOM_TABS: { value: TimelineZoom; label: string }[] = [
   { value: 'day', label: 'Hari' },
@@ -50,9 +56,12 @@ export function TimelineView() {
   const labels = usePlannerStore((s) => s.labels)
   const clearFilters = usePlannerStore((s) => s.clearFilters)
   const openTask = usePlannerStore((s) => s.openTask)
-  // Task 14: read `useAuthStore((s) => s.profile?.timezone) ?? DEFAULT_TZ` here when
-  // converting bar edges to wall-clock. Task 13's "now" line is `new Date()` in the
-  // ambient zone, so no tz needed yet.
+  const reminders = usePlannerStore((s) => s.reminders)
+
+  // Scale math stays ambient-zone (single-user Asia/Jakarta, no DST — matches the
+  // "now" line). `tz` is only for displayed date/time strings inside the bar.
+  const tz = useAuthStore((s) => s.profile?.timezone) ?? DEFAULT_TZ
+  const uid = useAuthStore((s) => s.user?.uid)
 
   const [zoom, setZoom] = useState<TimelineZoom>('week')
   const [trayOpen, setTrayOpen] = useState(true)
@@ -121,6 +130,55 @@ export function TimelineView() {
     [rangeStart, dayCount],
   )
 
+  // This task's active (`pending`/`sending`) + `failed` reminders. `sent` /
+  // `cancelled` are not drawn.
+  const remindersByTask = useMemo(() => {
+    const m = new Map<string, Reminder[]>()
+    for (const r of reminders) {
+      if (!r.taskId) continue
+      if (r.status !== 'pending' && r.status !== 'sending' && r.status !== 'failed') continue
+      const list = m.get(r.taskId)
+      if (list) list.push(r)
+      else m.set(r.taskId, [r])
+    }
+    return m
+  }, [reminders])
+
+  const labelsById = useMemo(() => new Map(labels.map((l) => [l.id, l])), [labels])
+
+  // Dependency arrows — only between two scheduled (bar-bearing) tasks. `conflict`
+  // when the blocker's end slips past the dependent's start.
+  const dependencyArrows = useMemo(() => {
+    const rowByTask = new Map<string, number>()
+    scheduled.forEach((t, i) => rowByTask.set(t.id, i))
+    const geom = (t: Task) => {
+      const startD = (t.startAt ?? t.dueAt)!.toDate()
+      const endD = (t.dueAt ?? t.startAt)!.toDate()
+      const leftPx = (columnForDate(startD, rangeStart) + fractionOfDay(startD)) * colWidth
+      const endPx = (columnForDate(endD, rangeStart) + fractionOfDay(endD)) * colWidth
+      return { leftPx, rightPx: Math.max(endPx, leftPx + 6), startD, endD }
+    }
+    const out: { key: string; from: { x: number; y: number }; to: { x: number; y: number }; conflict: boolean }[] = []
+    for (const dep of scheduled) {
+      const depRow = rowByTask.get(dep.id)
+      if (depRow == null || !dep.dependsOn?.length) continue
+      const depG = geom(dep)
+      for (const blockerId of dep.dependsOn) {
+        const blockerRow = rowByTask.get(blockerId)
+        if (blockerRow == null) continue
+        const blocker = scheduled[blockerRow]
+        const blG = geom(blocker)
+        out.push({
+          key: `${dep.id}<-${blockerId}`,
+          from: { x: depG.leftPx, y: depRow * ROW_HEIGHT + ROW_HEIGHT / 2 },
+          to: { x: blG.rightPx, y: blockerRow * ROW_HEIGHT + ROW_HEIGHT / 2 },
+          conflict: blG.endD.getTime() > depG.startD.getTime(),
+        })
+      }
+    }
+    return out
+  }, [scheduled, rangeStart, colWidth])
+
   const activeFilters = describeActiveFilters(filters, lists, labels)
 
   if (scheduled.length === 0 && unscheduled.length === 0) {
@@ -161,8 +219,10 @@ export function TimelineView() {
       </div>
 
       {/* Scroll region — bounded height so `sticky top-0` on the two-tier header
-          has a scrollport; the page body never scrolls sideways. */}
-      <div className="relative max-h-[calc(100dvh-16rem)] overflow-auto rounded-lg border border-border">
+          has a scrollport; the page body never scrolls sideways. `--tl-gutter`
+          holds the sticky-gutter width so the "now" line and the dependency
+          overlay position with one `calc()` instead of a per-breakpoint element. */}
+      <div className="relative max-h-[calc(100dvh-16rem)] overflow-auto rounded-lg border border-border [--tl-gutter:176px] sm:[--tl-gutter:240px]">
         <div className="w-max">
           {/* Header row: sticky gutter corner + sticky two-tier ruler. */}
           <div className="sticky top-0 z-30 flex bg-background">
@@ -218,29 +278,51 @@ export function TimelineView() {
                       style={{ width: colWidth }}
                     />
                   ))}
-                  {/* Task 14: <TimelineBar task={task} rangeStart={rangeStart} colWidth={colWidth} zoom={zoom} />
-                      Task 14: reminder pins for this task go here (absolutely positioned in this relative row).
-                      Task 14: dependency arrows are drawn in an overlay above the rows container. */}
+                  {/* Bar + reminder pins for this task (absolute within this track). */}
+                  <TimelineBar
+                    task={task}
+                    rangeStart={rangeStart}
+                    colWidth={colWidth}
+                    zoom={zoom}
+                    labelsById={labelsById}
+                    reminders={remindersByTask.get(task.id) ?? []}
+                    tz={tz}
+                    onCommitSchedule={(patch) => {
+                      if (uid) {
+                        setTaskSchedule(uid, task.id, patch).catch(() =>
+                          toast.error('Gagal menyimpan jadwal.'),
+                        )
+                      }
+                    }}
+                  />
                 </div>
               </div>
             ))}
 
-            {/* "now" line — spans the rows area, offset past the sticky gutter.
-                Two elements so the offset is correct at both gutter widths
-                (`w-44` mobile / `w-60` from `sm`) without injected CSS. */}
+            {/* Dependency-arrow overlay — over the rows, offset past the gutter. */}
+            {dependencyArrows.length > 0 && (
+              <svg
+                className="pointer-events-none absolute top-0 z-10"
+                style={{
+                  left: 'var(--tl-gutter)',
+                  width: gridWidth,
+                  height: scheduled.length * ROW_HEIGHT,
+                }}
+                aria-hidden
+              >
+                {dependencyArrows.map((a) => (
+                  <DependencyArrow key={a.key} from={a.from} to={a.to} conflict={a.conflict} />
+                ))}
+              </svg>
+            )}
+
+            {/* "now" line — one element, positioned past the sticky gutter via `--tl-gutter`. */}
             {nowOffsetPx != null && scheduled.length > 0 && (
-              <>
-                <div
-                  className="pointer-events-none absolute inset-y-0 z-10 w-px bg-primary sm:hidden"
-                  style={{ left: GUTTER_PX_MOBILE + nowOffsetPx }}
-                  aria-hidden
-                />
-                <div
-                  className="pointer-events-none absolute inset-y-0 z-10 hidden w-px bg-primary sm:block"
-                  style={{ left: GUTTER_PX_DESKTOP + nowOffsetPx }}
-                  aria-hidden
-                />
-              </>
+              <div
+                className="pointer-events-none absolute inset-y-0 z-10 w-px bg-primary"
+                style={{ left: `calc(var(--tl-gutter) + ${nowOffsetPx}px)` }}
+                aria-hidden
+              />
             )}
           </div>
         </div>

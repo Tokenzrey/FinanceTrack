@@ -24,6 +24,11 @@
     --input: 214 32% 91%;
     --ring: 173 80% 40%;
     --radius: 1rem;
+
+    /* Timeline bar body fills — calm, low-saturation "planned work", not "alert". */
+    --schedule-planned: 215 25% 88%; /* cool grey-blue, quiet */
+    --schedule-active: 173 45% 78%; /* muted teal, ties to --primary hue 173 */
+    --schedule-done: 215 15% 82%; /* desaturated, "settled" */
   }
 
   .dark {
@@ -46,6 +51,10 @@
     --border: 217 33% 25%;
     --input: 217 33% 25%;
     --ring: 173 80% 40%;
+
+    --schedule-planned: 217 20% 32%;
+    --schedule-active: 173 30% 34%;
+    --schedule-done: 217 12% 28%;
   }
 
   * {
