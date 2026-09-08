@@ -8,9 +8,16 @@ import { createTask } from '@/shared/use-cases/planner/CreateTask.usecase'
 import { updateTaskStatus } from '@/shared/use-cases/planner/UpdateTaskStatus.usecase'
 import { setTaskDue } from '@/shared/use-cases/planner/SetTaskDue.usecase'
 import { cancelReminder } from '@/shared/use-cases/planner/CancelReminder.usecase'
+import { createReminder } from '@/shared/use-cases/planner/CreateReminder.usecase'
 import type { BoardList, BoardFilters, Label } from '@/shared/types/board'
 import { EMPTY_BOARD_FILTERS } from '@/shared/types/board'
-import type { CreateTaskDTO, Reminder, Task, TaskStatus } from '@/shared/types/productivity'
+import type {
+  CreateReminderDTO,
+  CreateTaskDTO,
+  Reminder,
+  Task,
+  TaskStatus,
+} from '@/shared/types/productivity'
 import { useAuthStore } from './auth.store'
 
 function currentUserId(): string | null {
@@ -60,6 +67,8 @@ interface PlannerStore {
   setDue: (id: string, title: string, dueAt: Date | null, leads: number[]) => Promise<void>
   removeTask: (id: string) => Promise<void>
   cancelReminderById: (id: string) => Promise<void>
+  /** Creates a fresh standalone reminder (used by "Jadwalkan ulang" on a failed row). */
+  createStandaloneReminder: (dto: CreateReminderDTO) => Promise<void>
 }
 
 /** Writes never re-fetch — `watch` pushes the new list. */
@@ -158,5 +167,11 @@ export const usePlannerStore = create<PlannerStore>((set, get) => ({
     const uid = currentUserId()
     if (!uid) return
     await cancelReminder(uid, id)
+  },
+
+  createStandaloneReminder: async (dto) => {
+    const uid = currentUserId()
+    if (!uid) throw new Error('Belum masuk')
+    await createReminder(uid, dto)
   },
 }))
