@@ -23,7 +23,9 @@ export function DependencyArrow({ from, to, conflict }: DependencyArrowProps) {
   const head = `${from.x - 4},${from.y - 3} ${from.x},${from.y} ${from.x - 4},${from.y + 3}`
 
   const stroke = conflict ? 'hsl(var(--destructive))' : 'hsl(var(--muted-foreground))'
-  const strokeWidth = conflict ? 1.5 : 1
+  const strokeWidth = conflict ? 2 : 1
+  // Non-colour channel for the conflict state (§3.7): dashed vs solid.
+  const strokeDasharray = conflict ? '3 2' : undefined
 
   return (
     <g
@@ -33,6 +35,7 @@ export function DependencyArrow({ from, to, conflict }: DependencyArrowProps) {
           : 'pointer-events-auto [&:hover_.dep-visible]:stroke-foreground'
       }
     >
+      {conflict && <title>Konflik jadwal — blocker selesai setelah tugas ini mulai</title>}
       {/* Fat transparent hit area so hovering near the line counts. */}
       <path d={d} fill="none" stroke="transparent" strokeWidth={8} />
       <path
@@ -41,6 +44,7 @@ export function DependencyArrow({ from, to, conflict }: DependencyArrowProps) {
         fill="none"
         stroke={stroke}
         strokeWidth={strokeWidth}
+        strokeDasharray={strokeDasharray}
       />
       <polygon
         className="dep-visible"
@@ -48,6 +52,7 @@ export function DependencyArrow({ from, to, conflict }: DependencyArrowProps) {
         fill="none"
         stroke={stroke}
         strokeWidth={strokeWidth}
+        strokeDasharray={strokeDasharray}
       />
     </g>
   )

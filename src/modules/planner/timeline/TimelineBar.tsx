@@ -77,9 +77,11 @@ export function TimelineBar({
 }: TimelineBarProps) {
   const openTask = usePlannerStore((s) => s.openTask)
 
-  const startDate = (task.startAt ?? task.dueAt)!.toDate()
-  const endDate = (task.dueAt ?? task.startAt)!.toDate()
-  const durationMs = Math.max(endDate.getTime() - startDate.getTime(), 0)
+  const startMs = (task.startAt ?? task.dueAt)!.toMillis()
+  const endMs = (task.dueAt ?? task.startAt)!.toMillis()
+  const startDate = new Date(startMs)
+  const endDate = new Date(endMs)
+  const durationMs = Math.max(endMs - startMs, 0)
 
   const [drag, setDrag] = useState<DragState | null>(null)
   const dragRef = useRef<DragState | null>(null)
@@ -148,11 +150,20 @@ export function TimelineBar({
       const d = dragRef.current
       if (!d || e.pointerId !== d.pointerId) return
       const dx = e.clientX - d.startX
-      const moved = Math.abs(dx) > DRAG_THRESHOLD || d.next !== PENDING
-      // A real drag just ended — suppress the click that jsdom/browsers fire next.
-      if (moved) draggedRef.current = true
-      if (moved) {
-        const next = d.next === PENDING ? computeNext(d.mode, dx) : d.next
+      // Gate on the computed dates actually differing from the originals — a press
+      // that crossed the threshold then drifted back is a click, not a drag.
+      const next = d.next === PENDING ? computeNext(d.mode, dx) : d.next
+      const changed =
+        d.mode === 'move'
+          ? next.startAt.getTime() !== startDate.getTime() ||
+            next.dueAt.getTime() !== endDate.getTime()
+          : d.mode === 'resize-start'
+            ? next.startAt.getTime() !== startDate.getTime()
+            : next.dueAt.getTime() !== endDate.getTime()
+
+      if (changed) {
+        // A real drag just ended — suppress the click that jsdom/browsers fire next.
+        draggedRef.current = true
         if (d.mode === 'move') {
           onCommitRef.current({ startAt: next.startAt, dueAt: next.dueAt })
         } else if (d.mode === 'resize-start') {
@@ -180,11 +191,16 @@ export function TimelineBar({
       window.removeEventListener('pointerup', onUp)
       window.removeEventListener('pointercancel', onCancel)
     }
-  }, [startDate, endDate, durationMs, rangeStart, colWidth])
+    // startDate/endDate are fresh Date objects every render; key on their millis
+    // instead so the listeners don't re-subscribe on the parent's 60s now-tick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startMs, endMs, durationMs, rangeStart, colWidth])
 
   const beginDrag = useCallback(
     (mode: DragMode, e: React.PointerEvent) => {
       // Do NOT preventDefault — a plain click must still open the task.
+      // Every new press starts clean, in case a prior pointerup missed its click.
+      draggedRef.current = false
       const state: DragState = {
         mode,
         startX: e.clientX,

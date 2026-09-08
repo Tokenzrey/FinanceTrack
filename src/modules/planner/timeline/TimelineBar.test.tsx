@@ -20,6 +20,7 @@ vi.mock('@/shared/stores/planner.store', () => {
 
 import { TimelineBar } from './TimelineBar'
 import { ReminderPin } from './ReminderPin'
+import { usePlannerStore } from '@/shared/stores/planner.store'
 
 // A fixed range start and a task spanning exactly 3 days.
 const RANGE_START = new Date('2026-09-07T00:00:00') // Monday, ambient zone
@@ -135,13 +136,28 @@ describe('TimelineBar drag / resize', () => {
     expect(Math.round(startShift / dayMs)).toBe(-1)
   })
 
-  it('a plain click (no move past threshold) does not commit', () => {
+  it('a plain click (no move past threshold) does not commit and opens the task', () => {
     const onCommit = vi.fn()
     renderBar(onCommit)
     const bar = screen.getByRole('button', { name: 'Tinjau rancangan API' })
     fireEvent.pointerDown(bar, { pointerId: 4, clientX: 100 })
     fireEvent.pointerUp(window, { pointerId: 4, clientX: 102 }) // 2px < 6px threshold
     expect(onCommit).not.toHaveBeenCalled()
+    fireEvent.click(bar)
+    expect(usePlannerStore.getState().openTask).toHaveBeenCalledWith('t1')
+  })
+
+  it('a press that crosses then returns under the threshold does not commit and still opens the task', () => {
+    const onCommit = vi.fn()
+    renderBar(onCommit)
+    const bar = screen.getByRole('button', { name: 'Tinjau rancangan API' })
+    fireEvent.pointerDown(bar, { pointerId: 5, clientX: 100 })
+    fireEvent.pointerMove(window, { pointerId: 5, clientX: 100 + 3 * COL }) // well past threshold
+    fireEvent.pointerMove(window, { pointerId: 5, clientX: 102 })           // …back to ~0 (< 1 column)
+    fireEvent.pointerUp(window, { pointerId: 5, clientX: 102 })
+    expect(onCommit).not.toHaveBeenCalled()
+    fireEvent.click(bar)
+    expect(usePlannerStore.getState().openTask).toHaveBeenCalledWith('t1')
   })
 })
 
