@@ -13,12 +13,29 @@ const addTask = vi.fn(async () => ({
   source: 'web',
 }))
 const setDue = vi.fn(async () => {})
+const setActiveView = vi.fn()
 const plannerState = {
   tasks: [],
   reminders: [],
   isLoading: false,
+  // Board slice — the page is now a view shell (Tabs + FilterBar).
+  lists: [],
+  labels: [],
+  activeView: 'list' as const,
+  filters: {
+    labelIds: [] as string[],
+    priorities: [] as string[],
+    listIds: [] as string[],
+    hasDue: null as boolean | null,
+    search: '',
+  },
+  draggingId: null,
   subscribe: () => () => {},
   subscribeReminders: () => () => {},
+  subscribeBoardMeta: () => () => {},
+  setActiveView,
+  setFilters: vi.fn(),
+  clearFilters: vi.fn(),
   addTask,
   setDue,
   setStatus: vi.fn(),
