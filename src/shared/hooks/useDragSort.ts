@@ -8,6 +8,8 @@ import type * as React from 'react'
  *
  * The consumer owns the visuals. This hook only:
  *  - marks the lifted item with `data-dragging`
+ *  - reports `dragProxy` geometry so the consumer can render a clone that follows
+ *    the pointer while the source slot holds a same-height placeholder
  *  - emits an `announcement` string for an `aria-live="polite"` node it renders
  *  - calls `onDrop({ fromIndex, toIndex, fromContainerId, toContainerId })`
  */
@@ -17,6 +19,16 @@ const DRAG_THRESHOLD = 6
 
 /** Container elements the consumer marks so cross-container hover can find them. */
 const CONTAINER_ATTR = 'data-dragsort-container'
+
+/** Geometry for the pointer-following clone the consumer renders while dragging. */
+export interface DragProxy {
+  /** Viewport coords for the clone's top-left, already offset by the grab point. */
+  x: number
+  y: number
+  /** The source card's measured size, so the clone matches it exactly. */
+  width: number
+  height: number
+}
 
 export interface DragSortResult {
   fromIndex: number
@@ -83,16 +95,23 @@ interface PointerCandidate {
   startY: number
   pointerId: number
   el: Element
+  /** Pointer offset inside the card at press time — keeps the clone under the grab point. */
+  grabX: number
+  grabY: number
+  width: number
+  height: number
 }
 
 export function useDragSort(opts: UseDragSortOptions): {
   getItemProps: (index: number) => GetItemProps
   draggingIndex: number | null
+  dragProxy: DragProxy | null
   announcement: string
 } {
   const { containerId, itemCount, onDrop, getContainerItems } = opts
 
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null)
+  const [dragProxy, setDragProxy] = useState<DragProxy | null>(null)
   const [announcement, setAnnouncement] = useState('')
 
   // Live drag state kept in refs — pointer/key handlers read it without re-binding.
@@ -121,6 +140,7 @@ export function useDragSort(opts: UseDragSortOptions): {
     toIndexRef.current = -1
     toContainerRef.current = containerId
     setDraggingIndex(null)
+    setDragProxy(null)
   }, [containerId])
 
   /** Own-container item rects, read live from the DOM at each pointermove. */
@@ -178,6 +198,12 @@ export function useDragSort(opts: UseDragSortOptions): {
         setAnnouncement(`Mengangkat item ${cand.index + 1}`)
       }
 
+      setDragProxy({
+        x: e.clientX - cand.grabX,
+        y: e.clientY - cand.grabY,
+        width: cand.width,
+        height: cand.height,
+      })
       updateHover(e.clientX, e.clientY)
     }
 
@@ -215,12 +241,19 @@ export function useDragSort(opts: UseDragSortOptions): {
   }, [containerId, reset, updateHover])
 
   const onPointerDown = useCallback((index: number, e: React.PointerEvent) => {
+    // Measure at press time: the clone must match the card it replaces, and the
+    // grab offset keeps it pinned under the cursor instead of snapping its corner.
+    const rect = e.currentTarget.getBoundingClientRect()
     candidateRef.current = {
       index,
       startX: e.clientX,
       startY: e.clientY,
       pointerId: e.pointerId,
       el: e.currentTarget,
+      grabX: e.clientX - rect.left,
+      grabY: e.clientY - rect.top,
+      width: rect.width,
+      height: rect.height,
     }
     // Capture so we keep getting move/up even if the pointer leaves the element.
     // Do NOT preventDefault here — that would eat the click in the no-drag case.
@@ -301,5 +334,5 @@ export function useDragSort(opts: UseDragSortOptions): {
     [draggingIndex, onPointerDown, onKeyDown],
   )
 
-  return { getItemProps, draggingIndex, announcement }
+  return { getItemProps, draggingIndex, dragProxy, announcement }
 }

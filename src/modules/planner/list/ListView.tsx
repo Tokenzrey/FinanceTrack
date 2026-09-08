@@ -279,8 +279,8 @@ function TaskRow({ task, tz }: { task: Task; tz: string }) {
   const [dueOpen, setDueOpen] = useState(false)
 
   return (
-    <Card>
-      <CardContent className="flex items-center gap-3 p-3">
+    <Card className="transition-colors duration-200 hover:bg-muted/40 motion-reduce:transition-none">
+      <CardContent className="flex items-center gap-3 px-4 py-3">
         <span
           className={cn('size-2.5 shrink-0 rounded-full', PRIORITY_DOT[task.priority])}
           aria-hidden
@@ -419,7 +419,7 @@ export function ListView() {
       ) : (
         <ul className="space-y-2">
           {shown.map((task) => (
-            <li key={task.id}>
+            <li key={task.id} className="animate-pop-in">
               <TaskRow task={task} tz={tz} />
             </li>
           ))}

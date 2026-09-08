@@ -14,11 +14,15 @@ import type { Reminder, Task } from '@/shared/types/productivity'
 import { ReminderPin } from './ReminderPin'
 
 const BAR_HEIGHT = 28
-const BAR_TOP = 2
+const BAR_TOP = 6
 /** Pointer travel (px) before a press becomes a drag — mirrors `useDragSort`. */
 const DRAG_THRESHOLD = 6
 /** Below this width the title sits outside the bar (to the right). */
 const TITLE_INSIDE_MIN_WIDTH = 80
+/** Don't bother with an outside title if this little room is left in the track. */
+const MIN_OUTSIDE_TITLE_WIDTH = 32
+/** Widest an outside title may run before truncating. */
+const MAX_OUTSIDE_TITLE_WIDTH = 220
 
 interface TimelineBarProps {
   task: Task
@@ -26,6 +30,8 @@ interface TimelineBarProps {
   colWidth: number
   zoom: TimelineZoom
   labelsById: Map<string, Label>
+  /** Full track width, so an outside title can be clamped to what remains. */
+  gridWidth: number
   /** This task's active + failed reminders, pre-filtered by `TimelineView`. */
   reminders: Reminder[]
   tz: string
@@ -71,6 +77,7 @@ export function TimelineBar({
   colWidth,
   zoom,
   labelsById,
+  gridWidth,
   reminders,
   tz,
   onCommitSchedule,
@@ -220,6 +227,10 @@ export function TimelineBar({
 
   const firstLabel = task.labelIds?.length ? labelsById.get(task.labelIds[0]) : undefined
   const titleInside = widthPx > TITLE_INSIDE_MIN_WIDTH
+  const outsideTitleWidth = Math.min(
+    MAX_OUTSIDE_TITLE_WIDTH,
+    Math.max(0, gridWidth - (leftPx + widthPx + 6)),
+  )
   const dragging = drag != null && drag.next !== PENDING
 
   const fmtDay = (d: Date) => format(d, 'd MMM', { locale: idLocale })
@@ -233,7 +244,9 @@ export function TimelineBar({
         aria-label={task.title}
         className={cn(
           'group absolute rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-          dragging ? 'cursor-grabbing' : 'cursor-grab',
+          dragging
+            ? 'cursor-grabbing'
+            : 'cursor-grab transition-[left,width] duration-200 ease-out motion-reduce:transition-none',
         )}
         style={{
           left: leftPx,
@@ -319,11 +332,20 @@ export function TimelineBar({
         )}
       </div>
 
-      {/* Title outside (to the right) when the bar is narrow. */}
-      {!titleInside && (
+      {/* Title outside (to the right) when the bar is too narrow to hold it.
+          Height is pinned to the bar so the text can never bleed into the row
+          above or below, and the width is clamped to the track that actually
+          remains — an unbounded `max-w` overflowed the grid on late-range bars. */}
+      {!titleInside && outsideTitleWidth >= MIN_OUTSIDE_TITLE_WIDTH && (
         <span
-          className="pointer-events-none absolute truncate text-xs leading-[28px] text-foreground"
-          style={{ left: leftPx + widthPx + 4, top: BAR_TOP, maxWidth: 200 }}
+          className="pointer-events-none absolute truncate text-xs text-foreground"
+          style={{
+            left: leftPx + widthPx + 6,
+            top: BAR_TOP,
+            width: outsideTitleWidth,
+            height: BAR_HEIGHT,
+            lineHeight: `${BAR_HEIGHT}px`,
+          }}
         >
           {task.title}
         </span>

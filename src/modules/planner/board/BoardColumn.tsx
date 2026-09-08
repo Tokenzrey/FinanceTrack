@@ -1,7 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Plus } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { ChevronsLeftRight, Plus } from 'lucide-react'
 
 import { Button } from '@/shared/components/ui/button'
 import { Input } from '@/shared/components/ui/input'
@@ -32,6 +33,8 @@ interface BoardColumnProps {
   onCardDrop: (r: DragSortResult) => void
   /** Inline "+ Tambah tugas" for this column. */
   onInlineAdd: (listId: string, title: string) => void
+  /** Expand a collapsed column — the collapsed bar is the only affordance. */
+  onExpand: (listId: string) => void
   onOpenTask?: (task: Task) => void
 }
 
@@ -48,9 +51,10 @@ export function BoardColumn({
   getContainerItems,
   onCardDrop,
   onInlineAdd,
+  onExpand,
   onOpenTask,
 }: BoardColumnProps) {
-  const bodyRef = useRef<HTMLDivElement | null>(null)
+  const bodyRef = useRef<HTMLElement | null>(null)
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState('')
 
@@ -59,7 +63,7 @@ export function BoardColumn({
     return () => registerBody(list.id, null)
   }, [list.id, registerBody])
 
-  const { getItemProps, draggingIndex } = useDragSort({
+  const { getItemProps, draggingIndex, dragProxy } = useDragSort({
     containerId: list.id,
     itemCount: cards.length,
     onDrop: onCardDrop,
@@ -83,26 +87,40 @@ export function BoardColumn({
   const isDropTarget = draggingId != null
 
   if (list.isCollapsed) {
+    // The whole bar is the expand affordance. Rendering `ColumnMenu` here instead
+    // would hide "Buka" behind a 44px-wide dropdown trigger; worse, an earlier
+    // revision rendered neither and the column became a one-way trip.
     return (
-      <div
-        ref={bodyRef}
+      <button
+        type="button"
+        ref={bodyRef as React.RefObject<HTMLButtonElement>}
         data-dragsort-container={list.id}
-        className="flex h-full w-11 shrink-0 flex-col items-center gap-2 rounded-lg bg-muted/40 py-3"
-        title={list.title}
+        onClick={() => onExpand(list.id)}
+        aria-label={`Buka kolom ${list.title}`}
+        title={`Buka kolom ${list.title}`}
+        className={cn(
+          'group flex h-full w-11 shrink-0 flex-col items-center gap-2 rounded-xl border border-border/50 bg-muted/60 py-3',
+          'transition-colors duration-200 hover:bg-muted focus-visible:outline-none focus-visible:ring-2',
+          'focus-visible:ring-ring motion-reduce:transition-none',
+        )}
       >
+        <ChevronsLeftRight
+          className="size-3.5 shrink-0 text-muted-foreground transition-colors duration-200 group-hover:text-foreground motion-reduce:transition-none"
+          aria-hidden
+        />
         <span className="[writing-mode:vertical-rl] font-display text-[13px] font-semibold uppercase tracking-wide">
           {list.title}
         </span>
         <span className={cn('font-mono text-xs', overWip ? 'text-destructive' : 'text-muted-foreground')}>
           {count}
         </span>
-      </div>
+      </button>
     )
   }
 
   return (
-    <div className="flex h-full w-72 shrink-0 flex-col rounded-lg bg-muted/40">
-      <div className="sticky top-0 z-10 flex items-center gap-2 rounded-t-lg bg-muted/40 px-3 py-2 backdrop-blur">
+    <div className="flex h-full w-72 shrink-0 flex-col rounded-xl border border-border/50 bg-muted/60">
+      <div className="sticky top-0 z-10 flex items-center gap-2 rounded-t-xl bg-muted/60 px-3 py-2.5 backdrop-blur">
         <h3 className="min-w-0 flex-1 truncate font-display text-[13px] font-semibold uppercase tracking-wide">
           {list.title}
         </h3>
@@ -116,29 +134,42 @@ export function BoardColumn({
       </div>
 
       <div
-        ref={bodyRef}
+        ref={bodyRef as React.RefObject<HTMLDivElement>}
         data-dragsort-container={list.id}
         className={cn(
-          'flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2',
-          isDropTarget && 'ring-2 ring-inset ring-ring',
+          'scrollbar-thin flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2',
+          'transition-colors duration-200 motion-reduce:transition-none',
+          isDropTarget && 'bg-primary/[0.03] ring-2 ring-inset ring-ring',
         )}
       >
-        {/* ponytail: displaced-slot dashed placeholder needs useDragSort to surface a
-            separate insert index (distinct from draggingIndex) — follow-up. */}
-        {cards.map((task, index) => (
-          <div key={task.id} className="motion-reduce:transition-none">
-            <TaskCard
-              task={task}
-              tz={tz}
-              labels={labelsFor(task.labelIds)}
-              ready={readySet ? readySet.has(task.id) : true}
-              compact={compact}
-              dragging={draggingIndex === index}
-              onOpen={onOpenTask}
-              dragProps={getItemProps(index)}
-            />
-          </div>
-        ))}
+        {cards.map((task, index) => {
+          const lifted = draggingIndex === index
+          // The lifted card leaves a same-height dashed gap and the clone (rendered
+          // in a portal by `BoardView`) follows the pointer. Keeping the card
+          // mounted-but-hidden preserves `ownRects()`'s indexing in `useDragSort`.
+          return (
+            <div key={task.id} className="relative">
+              {lifted && dragProxy && (
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 animate-in fade-in rounded-lg border border-dashed border-border bg-muted/30 duration-200 motion-reduce:animate-none"
+                />
+              )}
+              <div className={cn(lifted && 'invisible')}>
+                <TaskCard
+                  task={task}
+                  tz={tz}
+                  labels={labelsFor(task.labelIds)}
+                  ready={readySet ? readySet.has(task.id) : true}
+                  compact={compact}
+                  dragging={lifted}
+                  onOpen={onOpenTask}
+                  dragProps={getItemProps(index)}
+                />
+              </div>
+            </div>
+          )
+        })}
 
         {cards.length === 0 &&
           (draggingId != null ? (
@@ -181,6 +212,33 @@ export function BoardColumn({
           />
         )}
       </div>
+
+      {/* Pointer-following clone. Portalled to `body` so the column's
+          `overflow-y-auto` can't clip it and no stacking context traps it. */}
+      {dragProxy &&
+        draggingIndex != null &&
+        cards[draggingIndex] &&
+        createPortal(
+          <div
+            aria-hidden
+            className="pointer-events-none fixed z-50 opacity-90 shadow-lg"
+            style={{
+              left: dragProxy.x,
+              top: dragProxy.y,
+              width: dragProxy.width,
+            }}
+          >
+            <TaskCard
+              task={cards[draggingIndex]}
+              tz={tz}
+              labels={labelsFor(cards[draggingIndex].labelIds)}
+              ready={readySet ? readySet.has(cards[draggingIndex].id) : true}
+              compact={compact}
+              dragging
+            />
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }

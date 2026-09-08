@@ -39,7 +39,7 @@ export function PlannerPage() {
   }, [])
 
   return (
-    <div className="space-y-4">
+    <div className="mx-auto w-full max-w-[1600px] space-y-5 px-4 sm:px-6">
       <PageHeader title="Tugas" description="Daftar tugas dengan pengingat otomatis." />
 
       <QuickAddBar />
@@ -47,7 +47,11 @@ export function PlannerPage() {
       <Tabs value={activeView} onValueChange={(v) => setActiveView(v as typeof activeView)}>
         <TabsList>
           {VIEW_TABS.map((tab) => (
-            <TabsTrigger key={tab.value} value={tab.value}>
+            <TabsTrigger
+              key={tab.value}
+              value={tab.value}
+              className="data-[state=active]:font-semibold"
+            >
               {tab.label}
             </TabsTrigger>
           ))}

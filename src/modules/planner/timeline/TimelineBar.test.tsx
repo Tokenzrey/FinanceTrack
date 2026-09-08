@@ -58,6 +58,7 @@ function renderBar(onCommit: CommitFn, task = makeTask()) {
       colWidth={COL}
       zoom="day"
       labelsById={LABELS_BY_ID}
+      gridWidth={COL * 30}
       reminders={[]}
       tz="Asia/Jakarta"
       onCommitSchedule={onCommit}

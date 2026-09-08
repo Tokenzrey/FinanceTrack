@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Tag } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Tag } from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/shared/components/ui/button'
@@ -9,6 +9,7 @@ import { LoadingSkeleton } from '@/shared/components/finance/EmptyState'
 import type { DragSortResult } from '@/shared/hooks/useDragSort'
 import { DEFAULT_TZ } from '@/shared/lib/format'
 import { rankBetween } from '@/shared/lib/rank'
+import { repositories } from '@/shared/repositories'
 import { readyTasks } from '@/shared/lib/task-graph'
 import { usePlannerStore } from '@/shared/stores/planner.store'
 import { useAuthStore } from '@/shared/stores/auth.store'
@@ -182,6 +183,16 @@ export function BoardView() {
     [uid, sortedLists],
   )
 
+  const expandColumn = useCallback(
+    (listId: string) => {
+      if (!uid) return
+      void repositories.boardLists
+        .update(uid, listId, { isCollapsed: false })
+        .catch(() => toast.error('Gagal membuka kolom.'))
+    },
+    [uid],
+  )
+
   if (lists.length === 0) {
     return seeding || !uid ? (
       <LoadingSkeleton rows={4} />
@@ -227,27 +238,29 @@ export function BoardView() {
         onPointerDown={onColumnPointerDown}
       >
         {sortedLists.map((list, i) => (
-          <div key={list.id} className="flex h-full flex-col">
-            <div className="mb-1 flex items-center justify-between px-1">
-              <button
-                type="button"
-                aria-label={`Pindahkan kolom ${list.title} ke kiri`}
-                disabled={i === 0}
-                onClick={() => moveColumn(list.id, -1)}
-                className="rounded px-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-30"
-              >
-                ◀
-              </button>
-              <button
-                type="button"
-                aria-label={`Pindahkan kolom ${list.title} ke kanan`}
-                disabled={i === sortedLists.length - 1}
-                onClick={() => moveColumn(list.id, 1)}
-                className="rounded px-1 text-xs text-muted-foreground hover:text-foreground disabled:opacity-30"
-              >
-                ▶
-              </button>
-            </div>
+          <div key={list.id} className="group/col flex h-full flex-col">
+            {!list.isCollapsed && (
+              <div className="mb-1 flex items-center justify-between px-1 opacity-0 transition-opacity duration-200 focus-within:opacity-100 group-hover/col:opacity-100 motion-reduce:transition-none">
+                <button
+                  type="button"
+                  aria-label={`Pindahkan kolom ${list.title} ke kiri`}
+                  disabled={i === 0}
+                  onClick={() => moveColumn(list.id, -1)}
+                  className="rounded p-0.5 text-muted-foreground transition-colors duration-200 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30 motion-reduce:transition-none"
+                >
+                  <ChevronLeft className="size-3.5" aria-hidden />
+                </button>
+                <button
+                  type="button"
+                  aria-label={`Pindahkan kolom ${list.title} ke kanan`}
+                  disabled={i === sortedLists.length - 1}
+                  onClick={() => moveColumn(list.id, 1)}
+                  className="rounded p-0.5 text-muted-foreground transition-colors duration-200 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-30 motion-reduce:transition-none"
+                >
+                  <ChevronRight className="size-3.5" aria-hidden />
+                </button>
+              </div>
+            )}
             <BoardColumn
               list={list}
               lists={lists}
@@ -261,6 +274,7 @@ export function BoardView() {
               getContainerItems={getContainerItems}
               onCardDrop={onCardDrop}
               onInlineAdd={onInlineAdd}
+              onExpand={expandColumn}
               onOpenTask={(task) => openTask(task.id)}
             />
           </div>

@@ -1,12 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import {
-  addDays,
-  differenceInCalendarDays,
-  endOfWeek,
-  startOfWeek,
-} from 'date-fns'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { addDays } from 'date-fns'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { Timestamp } from 'firebase/firestore'
 
@@ -14,6 +9,12 @@ import { toast } from 'sonner'
 
 import { Button } from '@/shared/components/ui/button'
 import { DEFAULT_TZ } from '@/shared/lib/format'
+import {
+  EXTEND_DAYS,
+  extendRange,
+  initialRange,
+  type TimelineRange,
+} from '@/shared/lib/timeline-range'
 import {
   COL_WIDTH,
   columnForDate,
@@ -31,7 +32,7 @@ import { DependencyArrow } from './DependencyArrow'
 import { TimelineBar } from './TimelineBar'
 import { TimelineRuler } from './TimelineRuler'
 
-const ROW_HEIGHT = 32
+const ROW_HEIGHT = 40
 /** Left name gutter — `w-44` (176px) on mobile, `w-60` (240px) from `sm`.
  *  The px widths live in the `--tl-gutter` CSS var on the scroll region. */
 const GUTTER_CLASS = 'w-44 sm:w-60'
@@ -96,23 +97,64 @@ export function TimelineView() {
     return { scheduled: s, unscheduled: u }
   }, [visible])
 
-  const { rangeStart, dayCount } = useMemo(() => {
-    const today = new Date()
-    let min = today
-    let max = today
-    for (const t of scheduled) {
-      const span = taskSpan(t)
-      if (!span) continue
-      if (span.min < min) min = span.min
-      if (span.max > max) max = span.max
-    }
-    const start = addDays(startOfWeek(min, { weekStartsOn: 1 }), -3)
-    const end = addDays(endOfWeek(max, { weekStartsOn: 1 }), 3)
-    return { rangeStart: start, dayCount: differenceInCalendarDays(end, start) + 1 }
-  }, [scheduled])
+  // The window the user is looking at. Seeded from the tasks + zoom, then grown
+  // at whichever edge they scroll toward — see `onScroll` below.
+  const spans = useMemo(
+    () => scheduled.map(taskSpan).filter((sp): sp is { min: Date; max: Date } => sp != null),
+    [scheduled],
+  )
+  const [range, setRange] = useState<TimelineRange>(() => initialRange(zoom, new Date(), spans))
+
+  // Re-seed when the zoom changes or a task moves outside the current window.
+  // `spans` is recomputed per render, so compare by value, not identity.
+  const seedKey = useMemo(
+    () => `${zoom}|${spans.map((sp) => `${sp.min.getTime()}-${sp.max.getTime()}`).join(',')}`,
+    [zoom, spans],
+  )
+  const lastSeedRef = useRef(seedKey)
+  useEffect(() => {
+    if (lastSeedRef.current === seedKey) return
+    lastSeedRef.current = seedKey
+    setRange(initialRange(zoom, new Date(), spans))
+    // `spans` intentionally excluded: `seedKey` is its value-identity.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seedKey, zoom])
+
+  const rangeStart = range.start
+  const dayCount = range.dayCount
 
   const colWidth = COL_WIDTH[zoom]
   const gridWidth = dayCount * colWidth
+
+  // Infinite scroll. Within two viewport-widths of an edge, grow that side.
+  // Growing at the start shifts every column right, so we add the same pixel
+  // delta to `scrollLeft` in a layout effect — otherwise the view jumps back.
+  const scrollRef = useRef<HTMLDivElement | null>(null)
+  const pendingLeftShiftRef = useRef(0)
+
+  useLayoutEffect(() => {
+    const shift = pendingLeftShiftRef.current
+    if (shift === 0 || !scrollRef.current) return
+    pendingLeftShiftRef.current = 0
+    scrollRef.current.scrollLeft += shift
+  }, [range])
+
+  const onScroll = useCallback(
+    (e: React.UIEvent<HTMLDivElement>) => {
+      const el = e.currentTarget
+      const threshold = el.clientWidth * 2
+      if (el.scrollLeft < threshold) {
+        setRange((r) => {
+          const next = extendRange(r, 'start')
+          if (next !== r) pendingLeftShiftRef.current += EXTEND_DAYS * colWidth
+          return next
+        })
+      } else if (el.scrollWidth - el.scrollLeft - el.clientWidth < threshold) {
+        setRange((r) => extendRange(r, 'end'))
+      }
+    },
+    [colWidth],
+  )
 
   // "now" offset in px within the grid body, or null if today is outside the range.
   const nowCol = columnForDate(now, rangeStart)
@@ -224,7 +266,11 @@ export function TimelineView() {
           has a scrollport; the page body never scrolls sideways. `--tl-gutter`
           holds the sticky-gutter width so the "now" line and the dependency
           overlay position with one `calc()` instead of a per-breakpoint element. */}
-      <div className="relative max-h-[calc(100dvh-16rem)] overflow-auto rounded-lg border border-border [--tl-gutter:176px] sm:[--tl-gutter:240px]">
+      <div
+        ref={scrollRef}
+        onScroll={onScroll}
+        className="scrollbar-thin relative max-h-[calc(100dvh-16rem)] overflow-auto rounded-xl border border-border [--tl-gutter:176px] sm:[--tl-gutter:240px]"
+      >
         <div className="w-max">
           {/* Header row: sticky gutter corner + sticky two-tier ruler. */}
           <div className="sticky top-0 z-30 flex bg-background">
@@ -287,6 +333,7 @@ export function TimelineView() {
                     colWidth={colWidth}
                     zoom={zoom}
                     labelsById={labelsById}
+                    gridWidth={gridWidth}
                     reminders={remindersByTask.get(task.id) ?? []}
                     tz={tz}
                     onCommitSchedule={(patch) => {
