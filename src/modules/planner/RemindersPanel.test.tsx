@@ -1,14 +1,20 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Timestamp } from 'firebase/firestore'
 
 const cancelReminderById = vi.fn(async () => {})
 const createStandaloneReminder = vi.fn<(dto: unknown) => Promise<void>>(async () => {})
 const openTask = vi.fn()
 
-// Fixtures are relative to real `Date.now()` so the panel's internal `new Date()`
-// buckets them deterministically whenever the suite runs.
-const inHours = (h: number) => Timestamp.fromDate(new Date(Date.now() + h * 3600_000))
+// The clock is frozen to FROZEN_NOW in `beforeEach` (`vi.setSystemTime`, without
+// fake timers so `waitFor` still polls on real time). Fixtures are built relative
+// to that SAME instant — not `Date.now()` — because this module-level array is
+// evaluated at import time, before `beforeEach` runs. With the frozen clock:
+// inHours(1.5) = 10:30 WIB and inHours(3) = 12:00 WIB → "Hari ini";
+// inHours(-24) = yesterday's failed reminder → "Gagal terkirim".
+const FROZEN_NOW = new Date('2026-09-08T09:00:00+07:00') // Tue 09:00 WIB
+const inHours = (h: number) =>
+  Timestamp.fromDate(new Date(FROZEN_NOW.getTime() + h * 3600_000))
 
 const plannerState = {
   tasks: [],
@@ -79,6 +85,16 @@ import { RemindersPanel } from './RemindersPanel'
 const expand = () => fireEvent.click(screen.getByRole('button', { name: /pengingat/i }))
 
 describe('RemindersPanel', () => {
+  beforeEach(() => {
+    // Freeze "now" so a late-day suite run doesn't bucket fixtures across midnight.
+    // `setSystemTime` alone (no `useFakeTimers`) overrides `Date` without touching
+    // `setTimeout`/`setInterval`, so `waitFor` still resolves on real time.
+    vi.setSystemTime(FROZEN_NOW)
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
   it('groups pending reminders under "Hari ini", sorted by remindAt asc; drops sent', () => {
     render(<RemindersPanel />)
     expand()

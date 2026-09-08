@@ -1,10 +1,16 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render as rtlRender, screen } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Timestamp } from 'firebase/firestore'
 
+import { TooltipProvider } from '@/shared/components/ui/tooltip'
 import type { BoardList, BoardFilters, Label } from '@/shared/types/board'
 import { EMPTY_BOARD_FILTERS } from '@/shared/types/board'
 import type { Task } from '@/shared/types/productivity'
+
+// SourceGlyph / the blocked-marker Tooltip rely on the app-root TooltipProvider
+// (providers.tsx). Supply one here since the panel is rendered in isolation.
+const render = (ui: ReactElement) => rtlRender(<TooltipProvider>{ui}</TooltipProvider>)
 
 // ─── Mocks ───
 const { toggleChecklistItem } = vi.hoisted(() => ({ toggleChecklistItem: vi.fn() }))

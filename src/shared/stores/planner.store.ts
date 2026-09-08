@@ -148,7 +148,7 @@ export const usePlannerStore = create<PlannerStore>((set, get) => ({
   setStatus: async (id, status) => {
     const uid = currentUserId()
     if (!uid) return
-    await updateTaskStatus(uid, id, status)
+    await updateTaskStatus(uid, id, status, get().lists)
   },
 
   setDue: async (id, title, dueAt, leads) => {

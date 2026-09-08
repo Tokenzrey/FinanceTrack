@@ -1,11 +1,6 @@
 import { MessageCircle, Send, MonitorSmartphone } from 'lucide-react'
 
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/shared/components/ui/tooltip'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/components/ui/tooltip'
 import type { EntrySource } from '@/shared/types/productivity'
 
 const GLYPHS: Record<EntrySource, { Icon: typeof MessageCircle; label: string }> = {
@@ -18,15 +13,13 @@ const GLYPHS: Record<EntrySource, { Icon: typeof MessageCircle; label: string }>
 export function SourceGlyph({ source }: { source: EntrySource }) {
   const { Icon, label } = GLYPHS[source]
   return (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <span className="inline-flex text-muted-foreground" aria-label={label}>
-            <Icon className="h-3 w-3" aria-hidden />
-          </span>
-        </TooltipTrigger>
-        <TooltipContent>{label}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="inline-flex text-muted-foreground" aria-label={label}>
+          <Icon className="h-3 w-3" aria-hidden />
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>{label}</TooltipContent>
+    </Tooltip>
   )
 }

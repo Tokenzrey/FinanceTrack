@@ -37,6 +37,7 @@ import {
   type TaskPriority,
   type TaskStatus,
 } from '@/shared/types/productivity'
+import { applyBoardFilters, describeActiveFilters } from '../shared/FilterBar'
 
 /** Reminder lead times for a task's due date, from the same `meta/plannerPrefs` doc the
  *  bot honours (Settings is the only writer, via `/api/planner/prefs`). Falls back to the
@@ -274,6 +275,7 @@ function TaskDueDialog({
 function TaskRow({ task, tz }: { task: Task; tz: string }) {
   const setStatus = usePlannerStore((s) => s.setStatus)
   const removeTask = usePlannerStore((s) => s.removeTask)
+  const openTask = usePlannerStore((s) => s.openTask)
   const [dueOpen, setDueOpen] = useState(false)
 
   return (
@@ -285,14 +287,16 @@ function TaskRow({ task, tz }: { task: Task; tz: string }) {
         />
 
         <div className="min-w-0 flex-1">
-          <p
+          <button
+            type="button"
+            onClick={() => openTask(task.id)}
             className={cn(
-              'truncate text-sm font-medium',
+              'block max-w-full truncate text-left text-sm font-medium hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
               task.status === 'done' && 'text-muted-foreground line-through',
             )}
           >
             {task.title}
-          </p>
+          </button>
           {task.dueAt && (
             <p className="text-xs text-muted-foreground">
               {formatDateTime(task.dueAt.toDate(), tz)}
@@ -360,10 +364,17 @@ function TaskRow({ task, tz }: { task: Task; tz: string }) {
 export function ListView() {
   const tasks = usePlannerStore((s) => s.tasks)
   const isLoading = usePlannerStore((s) => s.isLoading)
+  const filters = usePlannerStore((s) => s.filters)
+  const lists = usePlannerStore((s) => s.lists)
+  const labels = usePlannerStore((s) => s.labels)
   const tz = useAuthStore((s) => s.profile?.timezone) ?? DEFAULT_TZ
   const [filter, setFilter] = useState<TaskStatus | 'all'>('todo')
 
-  const shown = filter === 'all' ? tasks : tasks.filter((task) => task.status === filter)
+  // Global FilterBar first (shared with Board/Timeline), then the list-local status chip.
+  const globallyFiltered = applyBoardFilters(tasks, filters)
+  const shown =
+    filter === 'all' ? globallyFiltered : globallyFiltered.filter((task) => task.status === filter)
+  const activeFilters = describeActiveFilters(filters, lists, labels)
 
   return (
     <div className="space-y-4">
@@ -371,8 +382,8 @@ export function ListView() {
         {FILTERS.map((entry) => {
           const count =
             entry.value === 'all'
-              ? tasks.length
-              : tasks.filter((task) => task.status === entry.value).length
+              ? globallyFiltered.length
+              : globallyFiltered.filter((task) => task.status === entry.value).length
           return (
             <Button
               key={entry.value}
@@ -398,8 +409,12 @@ export function ListView() {
       ) : shown.length === 0 ? (
         <EmptyState
           icon={ListChecks}
-          title="Belum ada tugas"
-          description="Belum ada tugas — tambahkan yang pertama di atas."
+          title={activeFilters.length > 0 ? 'Tidak ada yang cocok' : 'Belum ada tugas'}
+          description={
+            activeFilters.length > 0
+              ? `Tidak ada tugas yang cocok dengan filter: ${activeFilters.join(', ')}.`
+              : 'Belum ada tugas — tambahkan yang pertama di atas.'
+          }
         />
       ) : (
         <ul className="space-y-2">

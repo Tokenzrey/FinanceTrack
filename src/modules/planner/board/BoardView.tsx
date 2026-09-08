@@ -117,7 +117,8 @@ export function BoardView() {
       }
 
       const newOrder = rankBetween(prev?.order ?? null, next?.order ?? null)
-      void moveTask(uid, moved.id, r.toContainerId, newOrder, lists).catch(() => {
+      const destTasks = (cardsByList.get(r.toContainerId) ?? []).filter((t) => t.id !== moved.id)
+      void moveTask(uid, moved.id, r.toContainerId, newOrder, lists, destTasks).catch(() => {
         toast.error('Gagal memindahkan tugas.')
       })
     },

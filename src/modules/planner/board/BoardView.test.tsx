@@ -1,10 +1,16 @@
-import { render, screen, within } from '@testing-library/react'
+import { render as rtlRender, screen, within } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { Timestamp } from 'firebase/firestore'
 
+import { TooltipProvider } from '@/shared/components/ui/tooltip'
 import { EMPTY_BOARD_FILTERS } from '@/shared/types/board'
 import type { BoardList, BoardFilters, Label } from '@/shared/types/board'
 import type { Task } from '@/shared/types/productivity'
+
+// TaskCard's SourceGlyph / blocked-marker Tooltips rely on the app-root
+// TooltipProvider (providers.tsx). Supply one for the isolated render.
+const render = (ui: ReactElement) => rtlRender(<TooltipProvider>{ui}</TooltipProvider>)
 
 // ─── Mocks ───
 // Seed/migrate are async no-ops; the store already has the lists.

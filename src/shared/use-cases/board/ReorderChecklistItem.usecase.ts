@@ -1,4 +1,4 @@
-import { rankBetween } from '@/shared/lib/rank'
+import { needsRebalance, rankBetween, rebalancedRanks } from '@/shared/lib/rank'
 import { repositories } from '@/shared/repositories'
 import type { Task } from '@/shared/types/productivity'
 
@@ -33,5 +33,13 @@ export async function reorderChecklistItem(
   const reordered = { ...moved, order: rankBetween(before, after) }
   const next = sorted.map((c) => (c.id === reordered.id ? reordered : c))
 
-  await repositories.tasks.update(userId, task.id, { checklist: next })
+  // §2.4: repeated same-spot inserts collapse the fractional ranks — when a gap
+  // falls below RANK_MIN_GAP, respace every item. Still one write.
+  let out = next
+  if (needsRebalance(next.map((c) => c.order))) {
+    const fresh = rebalancedRanks(next.length)
+    out = next.map((c, i) => ({ ...c, order: fresh[i] }))
+  }
+
+  await repositories.tasks.update(userId, task.id, { checklist: out })
 }

@@ -20,14 +20,8 @@ const PRIORITY_LABELS: Record<TaskPriority, string> = {
 // ─── Pure helpers (used by BoardView / Timeline) ───
 
 /** Filter `tasks` by the active board filters. An empty filter passes everything.
- *  `opts.titleOf` is reserved for callers that key search off a related record's
- *  title; unused today (search matches the task title only). */
-export function applyBoardFilters(
-  tasks: Task[],
-  filters: BoardFilters,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  opts?: { titleOf?: (id: string) => string },
-): Task[] {
+ *  Search matches the task title only. */
+export function applyBoardFilters(tasks: Task[], filters: BoardFilters): Task[] {
   const search = filters.search.trim().toLowerCase()
   return tasks.filter((task) => {
     if (filters.labelIds.length > 0) {

@@ -3,12 +3,7 @@
 import type * as React from 'react'
 import { Lock, Paperclip } from 'lucide-react'
 
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/shared/components/ui/tooltip'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/components/ui/tooltip'
 import { cn } from '@/shared/lib/utils'
 import type { Label } from '@/shared/types/board'
 import type { Task } from '@/shared/types/productivity'
@@ -106,16 +101,14 @@ export function TaskCard({
         )}
 
         {blocked && (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className="inline-flex" aria-label="Menunggu dependency">
-                  <Lock className="h-3 w-3 text-muted-foreground" aria-hidden />
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>Menunggu tugas lain selesai</TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="inline-flex" aria-label="Menunggu dependency">
+                <Lock className="h-3 w-3 text-muted-foreground" aria-hidden />
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>Menunggu tugas lain selesai</TooltipContent>
+          </Tooltip>
         )}
 
         <SourceGlyph source={task.source} />
