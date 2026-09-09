@@ -138,8 +138,30 @@ export function noteSearchResult(keyword: string, items: Note[]): BotReply {
 
 export function noteList(items: Note[]): BotReply {
   if (items.length === 0) return reply('📒 Catatan masih kosong. Kirim apa saja untuk menyimpannya.')
-  const body = items.map((n, i) => `${i + 1}. <b>${escapeHtml(n.title)}</b>`).join('\n')
-  return reply(`📒 <b>Catatan</b>\n\n${body}`)
+  const body = items
+    .map((n, i) => {
+      const line = `${i + 1}. <b>${escapeHtml(n.title || 'Tanpa judul')}</b>`
+      const peek = snippet(n.content, 60)
+      return peek ? `${line}\n    <i>${escapeHtml(peek)}</i>` : line
+    })
+    .join('\n')
+  return reply(
+    `📒 <b>Catatan</b>\n\n${body}\n\nKetik <code>/catat lihat &lt;no&gt;</code> untuk baca lengkap.`,
+  )
+}
+
+/** One note, in full — `/catat lihat <n>`. */
+export function noteView(n: Note): BotReply {
+  const lines = [`📄 <b>${escapeHtml(n.title || 'Tanpa judul')}</b>`, '']
+  lines.push(n.content.trim() ? escapeHtml(n.content.trim()) : '<i>(kosong)</i>')
+  if (n.tags.length > 0) lines.push('', `🏷 ${n.tags.map((t) => escapeHtml(t)).join(', ')}`)
+  return reply(lines.join('\n'))
+}
+
+export function noteRefNotFound(ref: number): BotReply {
+  return reply(
+    `🤔 Tidak ada catatan nomor <b>${ref}</b>. Ketik <code>/catat</code> untuk lihat daftarnya.`,
+  )
 }
 
 // ─── Pengingat ─────────────────────────────────────────────────

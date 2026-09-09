@@ -22,6 +22,7 @@ export type ProductivityCommand =
   | { kind: 'note_add'; text: string }
   | { kind: 'note_search'; keyword: string }
   | { kind: 'note_list' }
+  | { kind: 'note_view'; ref: number }
   | { kind: 'reminder_add'; message: string; when: ParsedWhen }
   | { kind: 'agenda' }
   | { kind: 'snooze'; ref: number | null; reminderId: string | null; minutes: number }
@@ -112,6 +113,9 @@ function handleNote(rest: string): ProductivityCommand {
   if (!rest) return { kind: 'note_list' }
   const search = rest.match(/^cari\s+(.+)$/i)
   if (search) return { kind: 'note_search', keyword: search[1].trim() }
+  // `lihat 3` / `buka 3` — read one note from the last `/catat` list in full.
+  const view = rest.match(/^(?:lihat|buka)\s+(\d+)$/i)
+  if (view) return { kind: 'note_view', ref: Number(view[1]) }
   return { kind: 'note_add', text: rest }
 }
 

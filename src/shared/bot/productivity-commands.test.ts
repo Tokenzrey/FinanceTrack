@@ -31,6 +31,21 @@ describe('parseProductivityCommand', () => {
       .toEqual({ kind: 'note_add', text: 'pakai ticker go buat cron' })
   })
 
+  it('/catat lihat 3 → note_view ref 3', () => {
+    expect(parseProductivityCommand('/catat lihat 3', now, TZ)).toEqual({ kind: 'note_view', ref: 3 })
+  })
+
+  it('/catat buka 12 → note_view ref 12', () => {
+    expect(parseProductivityCommand('/catat buka 12', now, TZ)).toEqual({ kind: 'note_view', ref: 12 })
+  })
+
+  it('/catat lihat catatan-panjang → note_add (not a bare index)', () => {
+    expect(parseProductivityCommand('/catat lihat catatan-panjang', now, TZ)).toEqual({
+      kind: 'note_add',
+      text: 'lihat catatan-panjang',
+    })
+  })
+
   it('/ingatkan without a parseable time → none', () => {
     expect(parseProductivityCommand('/ingatkan sesuatu', now, TZ)).toEqual({ kind: 'none' })
   })

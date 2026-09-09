@@ -191,7 +191,17 @@ function NoteEditor({
   )
 }
 
-function NoteCard({ note, tz, onEdit }: { note: Note; tz: string; onEdit: () => void }) {
+function NoteCard({
+  note,
+  tz,
+  onView,
+  onEdit,
+}: {
+  note: Note
+  tz: string
+  onView: () => void
+  onEdit: () => void
+}) {
   const removeNote = useNotesStore((s) => s.removeNote)
 
   const remove = async () => {
@@ -207,12 +217,16 @@ function NoteCard({ note, tz, onEdit }: { note: Note; tz: string; onEdit: () => 
     <Card>
       <CardContent className="space-y-2 p-3">
         <div className="flex items-start gap-3">
-          <div className="min-w-0 flex-1">
+          <button
+            type="button"
+            onClick={onView}
+            className="min-w-0 flex-1 rounded text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
             <p className="truncate text-sm font-semibold">{note.title || 'Tanpa judul'}</p>
             <p className="mt-1 line-clamp-2 whitespace-pre-wrap text-sm text-muted-foreground">
-              {note.content}
+              {note.content || 'Ketuk untuk membaca'}
             </p>
-          </div>
+          </button>
 
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -254,6 +268,61 @@ function NoteCard({ note, tz, onEdit }: { note: Note; tz: string; onEdit: () => 
   )
 }
 
+/** Read-only note view. The `⋯` menu still has Edit/Delete; this is the "just
+ *  let me read it" path the card body opens. */
+function NoteReader({
+  note,
+  tz,
+  open,
+  onOpenChange,
+  onEdit,
+}: {
+  note: Note | null
+  tz: string
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onEdit: () => void
+}) {
+  if (!note) return null
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="pr-6 text-left">{note.title || 'Tanpa judul'}</DialogTitle>
+        </DialogHeader>
+
+        <div className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words text-sm">
+          {note.content || <span className="text-muted-foreground">Catatan ini kosong.</span>}
+        </div>
+
+        {note.tags.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {note.tags.map((tag) => (
+              <Badge key={tag} variant="secondary">
+                {tag}
+              </Badge>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center justify-between border-t pt-3 text-xs text-muted-foreground">
+          <span>Diperbarui {formatDateTime(note.updatedAt.toDate(), tz)}</span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => {
+              onOpenChange(false)
+              onEdit()
+            }}
+          >
+            Edit
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function NotesPage() {
   const notes = useNotesStore((s) => s.notes)
   const isLoading = useNotesStore((s) => s.isLoading)
@@ -262,6 +331,8 @@ export function NotesPage() {
   const [activeTag, setActiveTag] = useState<string | null>(null)
   const [editing, setEditing] = useState<Note | null>(null)
   const [editorOpen, setEditorOpen] = useState(false)
+  const [viewing, setViewing] = useState<Note | null>(null)
+  const [readerOpen, setReaderOpen] = useState(false)
 
   // `subscribe()` returns its own unsubscribe — hand it straight back to the effect.
   useEffect(() => useNotesStore.getState().subscribe(), [])
@@ -286,6 +357,10 @@ export function NotesPage() {
   const openEdit = (note: Note) => {
     setEditing(note)
     setEditorOpen(true)
+  }
+  const openView = (note: Note) => {
+    setViewing(note)
+    setReaderOpen(true)
   }
 
   return (
@@ -315,11 +390,24 @@ export function NotesPage() {
         <ul className="space-y-2">
           {shown.map((note) => (
             <li key={note.id}>
-              <NoteCard note={note} tz={tz} onEdit={() => openEdit(note)} />
+              <NoteCard
+                note={note}
+                tz={tz}
+                onView={() => openView(note)}
+                onEdit={() => openEdit(note)}
+              />
             </li>
           ))}
         </ul>
       )}
+
+      <NoteReader
+        note={viewing}
+        tz={tz}
+        open={readerOpen}
+        onOpenChange={setReaderOpen}
+        onEdit={() => viewing && openEdit(viewing)}
+      />
 
       {editorOpen && (
         <NoteEditor

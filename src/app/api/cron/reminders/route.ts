@@ -12,6 +12,7 @@ import {
 } from '@/shared/bot/admin-data-productivity'
 import { sendToUser } from '@/shared/bot/outbound'
 import { reminderPush } from '@/shared/bot/replies-productivity'
+import { rememberPoll } from '@/shared/bot/poll-map'
 import { authorizeCron } from '@/shared/bot/cron-auth'
 import { reaperCutoff, backoffDelayMs, rollRecurrence, MAX_ATTEMPTS } from '@/shared/bot/reminder-engine'
 
@@ -48,7 +49,16 @@ export async function POST(req: Request) {
     let res: { ok: boolean; sent: number; error?: string }
     try {
       const push = reminderPush(claimed, DEFAULT_TZ)
-      res = await sendToUser(claimed.ownerId, push.text, { buttons: push.buttons })
+      res = await sendToUser(claimed.ownerId, push.text, {
+        buttons: push.buttons,
+        // WhatsApp renders `buttons` as a poll; remember which option means which
+        // command so the vote webhook can be resolved back to a `pr:*` token.
+        onPollSent: (pollId, buttons) =>
+          rememberPoll(
+            pollId,
+            buttons.map((b) => ({ label: b.text, token: b.token })),
+          ),
+      })
     } catch (err) {
       // A thrown render or link lookup counts as a failed send, not a batch abort.
       res = { ok: false, sent: 0, error: String(err).slice(0, 200) }

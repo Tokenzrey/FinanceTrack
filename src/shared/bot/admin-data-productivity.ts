@@ -246,6 +246,12 @@ export async function listNotes(userId: string, limit = 50): Promise<Note[]> {
   return snap.docs.map((d) => ({ id: d.id, ...d.data() }) as unknown as Note)
 }
 
+/** 1-based index into the same order `/catat` (listNotes) shows — for `/catat lihat <n>`. */
+export async function getNoteByIndex(userId: string, index1: number): Promise<Note | null> {
+  const notes = await listNotes(userId)
+  return notes[index1 - 1] ?? null
+}
+
 export async function searchNotes(userId: string, keyword: string, limit = 20): Promise<Note[]> {
   const needle = keyword.trim().toLowerCase()
   if (!needle) return []

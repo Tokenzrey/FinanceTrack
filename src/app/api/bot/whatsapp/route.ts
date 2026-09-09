@@ -5,6 +5,7 @@ import { claimInboundMessage } from '@/shared/bot/admin-data'
 import { handleIncoming } from '@/shared/bot/core'
 import { renderForWhatsApp } from '@/shared/bot/format-wa'
 import { downloadWhatsAppMedia } from '@/shared/bot/media-whatsapp'
+import { resolvePollVote } from '@/shared/bot/poll-map'
 import { replies } from '@/shared/bot/replies'
 import type { BotIncoming, BotReply } from '@/shared/bot/types'
 
@@ -23,6 +24,12 @@ interface GowaMessage {
   is_from_me: boolean
   body: string
   image?: { path?: string; url?: string; caption?: string } | string
+  /** Present when the message is a poll vote — GOWA decrypts the selection for us. */
+  poll?: {
+    type?: string
+    poll_id?: string
+    selected_options?: string[]
+  }
 }
 
 interface GowaWebhookBody {
@@ -188,6 +195,13 @@ async function processMessage(payload: GowaMessage): Promise<void> {
         mimeType: image.mimeType,
         caption: imageCaption(payload.image),
       }
+    } else if (payload.poll?.type === 'vote' && payload.poll.selected_options?.length) {
+      // A poll vote stands in for an inline-button tap. Resolve the chosen option
+      // label back to the `pr:*` command token stashed when the poll was sent;
+      // fall through to the label as text if the poll map has expired.
+      const label = payload.poll.selected_options[0]
+      const token = await resolvePollVote(payload.poll.poll_id ?? '', label)
+      incoming = { platform: 'whatsapp', externalId, kind: 'text', text: token ?? label }
     } else if (payload.body) {
       incoming = { platform: 'whatsapp', externalId, kind: 'text', text: payload.body }
     }

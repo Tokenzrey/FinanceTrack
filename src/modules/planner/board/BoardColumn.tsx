@@ -207,23 +207,28 @@ export function BoardColumn({
           ))}
 
         {adding && (
-          <Input
-            data-dropzone="true"
-            autoFocus
-            value={draft}
-            placeholder="Judul tugas…"
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') submitAdd()
-              if (e.key === 'Escape') {
-                setDraft('')
-                setAdding(false)
-              }
-            }}
-            onBlur={submitAdd}
-            className="h-8"
-            aria-label={`Tambah tugas ke ${list.title}`}
-          />
+          // `px-0.5` + `ring-offset-0`: the column body is `overflow-y-auto`, which
+          // clips the default 2px offset focus ring against the column's rounded
+          // edge. An inset ring with a hair of side padding stays inside the box.
+          <div className="px-0.5">
+            <Input
+              data-dropzone="true"
+              autoFocus
+              value={draft}
+              placeholder="Judul tugas…"
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') submitAdd()
+                if (e.key === 'Escape') {
+                  setDraft('')
+                  setAdding(false)
+                }
+              }}
+              onBlur={submitAdd}
+              className="h-8 focus-visible:ring-offset-0"
+              aria-label={`Tambah tugas ke ${list.title}`}
+            />
+          </div>
         )}
       </div>
 

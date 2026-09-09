@@ -118,7 +118,8 @@ export interface BotReply {
    *  WhatsApp's own lite-markdown instead of sending them raw. */
   html?: boolean
   /** One row per array entry. Telegram renders this as a tappable inline keyboard.
-   *  WhatsApp has no equivalent — GOWA exposes no interactive message type at all. */
+   *  WhatsApp has no inline-button message type; the cron reminder path renders its
+   *  actions as a native poll instead (see `outbound.ts` / `poll-map.ts`). */
   keyboard?: BotKeyboardButton[][]
   /** Typed equivalents of `keyboard`, used ONLY by the WhatsApp adapter. When present
    *  it replaces the generic keyboard fallback entirely: a review card needs

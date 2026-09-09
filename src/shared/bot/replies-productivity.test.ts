@@ -7,6 +7,8 @@ import {
   digest,
   noRecentReminder,
   noteList,
+  noteView,
+  noteRefNotFound,
   noteSaved,
   noteSearchResult,
   planFallbackError,
@@ -228,14 +230,31 @@ describe('replies-productivity', () => {
     expect(r.text).toMatch(/tidak ada|kosong/i)
   })
 
-  it('noteList numbers notes and has an empty state', () => {
+  it('noteList numbers notes, shows a snippet, and points at /catat lihat', () => {
     expect(noteList([]).text).toMatch(/tidak ada|kosong/i)
     const r = noteList([
-      { id: 'n1', title: 'Alpha', content: 'a', tags: [] } as unknown as Note,
+      { id: 'n1', title: 'Alpha', content: 'isi catatan alpha', tags: [] } as unknown as Note,
       { id: 'n2', title: 'Beta', content: 'b', tags: [] } as unknown as Note,
     ])
     expect(r.text).toMatch(/1\..*Alpha/)
-    expect(r.text).toMatch(/2\..*Beta/)
+    expect(r.text).toContain('isi catatan alpha')
+    expect(r.text).toMatch(/\/catat lihat/)
+  })
+
+  it('noteView shows the full body and tags', () => {
+    const r = noteView({
+      id: 'n1',
+      title: 'Rencana',
+      content: 'baris satu\nbaris dua',
+      tags: ['kerja', 'penting'],
+    } as unknown as Note)
+    expect(r.text).toContain('baris satu\nbaris dua')
+    expect(r.text).toContain('kerja')
+    expect(r.text).toContain('penting')
+  })
+
+  it('noteRefNotFound mentions the bad reference number', () => {
+    expect(noteRefNotFound(9).text).toContain('9')
   })
 
   it('escapes HTML in user-supplied text', () => {

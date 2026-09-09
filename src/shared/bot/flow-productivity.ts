@@ -164,6 +164,12 @@ export async function handleProductivityCommand(
       return replies.noteList(items)
     }
 
+    case 'note_view': {
+      const note = await data.getNoteByIndex(userId, cmd.ref)
+      if (!note) return replies.noteRefNotFound(cmd.ref)
+      return replies.noteView(note)
+    }
+
     case 'reminder_add': {
       const reminder = await data.createReminder(
         userId,

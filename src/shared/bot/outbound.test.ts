@@ -45,22 +45,37 @@ describe('sendToUser', () => {
     )
   })
 
-  it('appends bare reply tokens to the WhatsApp message when buttons are passed', async () => {
+  it('sends a poll for buttons on WhatsApp and hands the poll id to onPollSent', async () => {
     mockedLinks.mockResolvedValue([{ platform: 'whatsapp', externalId: '628123' }])
-    const fetchMock = vi.spyOn(global, 'fetch').mockResolvedValue(okJson())
-
-    const r = await sendToUser('linked', 'Ada tagihan jatuh tempo', {
-      buttons: [
-        { text: 'Sudah bayar', token: 'paid_1' },
-        { text: 'Nanti', token: 'snooze_1' },
-      ],
+    const fetchMock = vi.spyOn(global, 'fetch').mockImplementation(async (url) => {
+      if (String(url).includes('/send/poll')) {
+        return okJson({ results: { message_id: 'poll-xyz' } })
+      }
+      return okJson()
     })
+    const onPollSent = vi.fn().mockResolvedValue(undefined)
+
+    const buttons = [
+      { text: 'Sudah bayar', token: 'paid_1' },
+      { text: 'Nanti', token: 'snooze_1' },
+    ]
+    const r = await sendToUser('linked', 'Ada tagihan jatuh tempo', { buttons, onPollSent })
 
     expect(r).toEqual({ ok: true, sent: 1 })
-    const body = JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)
-    expect(body.phone).toBe('628123')
-    expect(body.message).toContain('Ada tagihan jatuh tempo')
-    expect(body.message).toContain('Balas salah satu:\npaid_1\nsnooze_1')
+
+    // Plain text goes out with no token lines appended…
+    const textCall = fetchMock.mock.calls.find(([u]) => String(u).includes('/send/message'))!
+    const textBody = JSON.parse((textCall[1] as RequestInit).body as string)
+    expect(textBody.message).toBe('Ada tagihan jatuh tempo')
+
+    // …and a single-answer poll carries the button labels.
+    const pollCall = fetchMock.mock.calls.find(([u]) => String(u).includes('/send/poll'))!
+    const pollBody = JSON.parse((pollCall[1] as RequestInit).body as string)
+    expect(pollBody.phone).toBe('628123')
+    expect(pollBody.options).toEqual(['Sudah bayar', 'Nanti'])
+    expect(pollBody.max_answer).toBe(1)
+
+    expect(onPollSent).toHaveBeenCalledWith('poll-xyz', buttons)
   })
 
   it('strips HTML tags from the WhatsApp message (the copy is authored for Telegram)', async () => {

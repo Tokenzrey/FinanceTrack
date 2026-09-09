@@ -95,6 +95,9 @@ service cloud.firestore {
     match /bot_processed_messages/{doc} {
       allow read, write: if false;
     }
+    match /bot_poll_map/{pollId} {
+      allow read, write: if false;
+    }
     match /cron_runs/{runId} {
       allow read, write: if false;
     }
