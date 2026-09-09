@@ -16,6 +16,7 @@ import type { FinancialContext } from '@/shared/use-cases/wishlist/CalculateAffo
 import type { Wishlist } from '@/shared/types/wishlist.types'
 import { buildMonthlySummary } from '@/shared/lib/budget-math'
 import { dayKeyInTz } from '@/shared/lib/format'
+import { sanitizeItems } from '@/shared/lib/transaction-items'
 import { DEFAULT_PILLAR_CONFIG } from '@/shared/types/domain'
 import type { ModelHealth } from '@/shared/lib/gemini-router'
 import type { CategoryHint, ReceiptScanResult } from '@/shared/types/receipt-scanner.types'
@@ -555,7 +556,11 @@ function transactionPayload(dto: CreateTransactionDTO): Record<string, unknown> 
     categoryId: dto.categoryId,
     categoryItemId: dto.categoryItemId,
     amount: Math.abs(dto.amount),
+    title: dto.title?.trim() || undefined,
     description: dto.description,
+    items: dto.items ? sanitizeItems(dto.items) : undefined,
+    tax: dto.tax !== undefined ? Math.max(0, Math.round(dto.tax)) : undefined,
+    discount: dto.discount !== undefined ? Math.max(0, Math.round(dto.discount)) : undefined,
     tags: dto.tags ?? [],
     paymentMethod: dto.paymentMethod,
     gDriveFileId: dto.gDriveFileId,

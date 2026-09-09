@@ -76,6 +76,10 @@ export interface DraftBatch {
   merchant: string | null
   /** Total yang dibaca model dari struk — dibandingkan dengan jumlah baris. */
   receiptTotal: number | null
+  /** PPN + service (rupiah) dan diskon (rupiah) dari struk. Hanya breakdown; tidak
+   *  mengubah `amount`. Ikut ke transaksi saat `mode: 'single'`. */
+  tax?: number
+  discount?: number
   receipt?: { gDriveFileId: string; gDriveWebViewLink: string }
   /** Peringatan dari ekstraksi, ditampilkan di kartu. */
   warnings: string[]

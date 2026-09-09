@@ -135,6 +135,7 @@ describe('buildLinesFromParsed', () => {
 describe('buildLinesFromReceipt', () => {
   const result: ReceiptScanResult = {
     extraction: {
+      title: 'Belanja Indomaret',
       merchant: 'Indomaret',
       merchantType: 'supermarket',
       date: '2026-09-05',

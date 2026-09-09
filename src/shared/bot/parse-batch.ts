@@ -69,7 +69,8 @@ Aturan:
 - amountText: SALIN PERSIS potongan teks dari pesan yang memuat nominal transaksi itu,
   apa adanya, termasuk satuannya. Contoh: "35rb", "Rp250.000", "1,5jt".
   JANGAN menghitung, membulatkan, atau menulis ulang angkanya dalam bentuk lain.
-- description: ringkasan singkat (nama barang/toko/aktivitas), atau null.
+- description: label singkat transaksi TANPA angka nominal — nama barang/toko/aktivitas
+  ("Beli jajan", "Makan siang", "Bensin motor"), atau null.
 - categoryCandidates: 1-3 id kategori dari daftar di atas, urut dari paling yakin.
   Array kosong kalau tidak ada yang cocok.
   Kalau type "income": HANYA kategori berpilar "income".

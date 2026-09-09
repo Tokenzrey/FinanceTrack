@@ -1,6 +1,8 @@
 import { deleteDriveFile } from '@/shared/lib/gdrive'
 import { repositories } from '@/shared/repositories'
+import { reconcileToTotal } from '@/shared/lib/transaction-items'
 import type { CreateTransactionDTO } from '@/shared/types/dto'
+import type { TransactionItem } from '@/shared/types/domain'
 import type {
   ReceiptScanRecord,
   SaveScanAsTransactionsDTO,
@@ -32,6 +34,18 @@ export async function saveScanAsTransactions(
     if (!single) throw new Error('Detail transaksi belum lengkap')
     if (single.amount <= 0) throw new Error('Jumlah harus lebih dari nol')
 
+    // Carry the whole itemised read onto the one transaction: line items scaled to the
+    // amount actually being saved, plus tax/discount as breakdown info.
+    const ex = record.scanResult.extraction
+    const items: TransactionItem[] = reconcileToTotal(
+      ex.items.map((i) => ({
+        name: i.name,
+        qty: Math.max(1, Math.floor(i.quantity ?? 1)),
+        price: Math.max(0, Math.round(i.totalPrice)),
+      })),
+      single.amount,
+    )
+
     drafts.push({
       date: dto.date,
       type: 'expense',
@@ -39,7 +53,11 @@ export async function saveScanAsTransactions(
       categoryId: single.categoryId,
       categoryItemId: single.categoryItemId,
       amount: single.amount,
+      title: ex.title ?? ex.merchant ?? undefined,
       description: single.description,
+      items: items.length > 0 ? items : undefined,
+      tax: ex.tax != null || ex.serviceCharge != null ? (ex.tax ?? 0) + (ex.serviceCharge ?? 0) : undefined,
+      discount: ex.discount ?? undefined,
       location: record.scanResult.extraction.merchant ?? undefined,
       tags: ['scan'],
       gDriveFileId: record.gDriveFileId,

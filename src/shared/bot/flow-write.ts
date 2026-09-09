@@ -257,6 +257,14 @@ export async function handlePhoto(
       lines,
       merchant: result.extraction.merchant,
       receiptTotal: Math.round(result.extraction.total),
+      tax:
+        result.extraction.tax != null || result.extraction.serviceCharge != null
+          ? Math.max(0, Math.round((result.extraction.tax ?? 0) + (result.extraction.serviceCharge ?? 0)))
+          : undefined,
+      discount:
+        result.extraction.discount != null
+          ? Math.max(0, Math.round(result.extraction.discount))
+          : undefined,
       warnings: result.warnings,
       receipt: uploaded ?? undefined,
     }),

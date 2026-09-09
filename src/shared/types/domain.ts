@@ -88,6 +88,16 @@ export type PaymentMethod = 'cash' | 'debit' | 'credit' | 'transfer' | 'ewallet'
 
 export type SpendingMood = 'regret' | 'neutral' | 'happy'
 
+/** One structured line of a transaction — a receipt row, or a single inferred item
+ *  from a short text message ("beli jajan 40rb" → `{ name: 'Jajan', qty: 1, price: 40000 }`). */
+export interface TransactionItem {
+  name: string
+  /** Whole units, ≥ 1. Defaults to 1 when a receipt omits it. */
+  qty: number
+  /** Line total in rupiah (qty × unit price), ≥ 0. Not the unit price. */
+  price: number
+}
+
 export interface Transaction {
   id: string
   date: Timestamp
@@ -95,8 +105,23 @@ export interface Transaction {
   pillar: Pillar
   categoryId: string
   categoryItemId?: string
+  /**
+   * The final amount that left the account — subtotal + tax − discount. Unchanged
+   * by the itemized schema: every analytic, budget, filter and chart still reads
+   * this as "money spent". `tax`/`discount`/`items` are breakdown, not a new total.
+   */
   amount: number
+  /** Short label, e.g. "Belanja Superindo". Lazily derived from `description` for
+   *  pre-itemized rows (see `deriveTransactionTitle`). */
+  title?: string
+  /** Raw original text / OCR read, kept verbatim as a history archive. */
   description?: string
+  /** Structured line items. `[]` (or absent) for a plain, non-itemized transaction. */
+  items?: TransactionItem[]
+  /** PPN / PB1 / service — rupiah, not a rate. Default 0. */
+  tax?: number
+  /** Promo / price cut — rupiah. Default 0. */
+  discount?: number
   tags: string[]
   paymentMethod?: PaymentMethod
   /**

@@ -25,8 +25,10 @@ import { MoneyInput } from '@/shared/components/finance/MoneyInput'
 import { useIsDesktop } from '@/shared/hooks/useMediaQuery'
 import { useGoogleDrive } from '@/shared/hooks/useGoogleDrive'
 import { collectTags } from '@/shared/lib/transaction-filters'
+import { formatIDR } from '@/shared/lib/format'
 import { describeSuggestions } from '@/shared/lib/insights'
 import { hapticSuccess } from '@/shared/lib/haptics'
+import { itemsSubtotal } from '@/shared/lib/transaction-items'
 import { uploadReceipt } from '@/shared/use-cases/transactions/UploadReceipt.usecase'
 import { useTransactionStore } from '@/shared/stores/transaction.store'
 import type {
@@ -34,10 +36,12 @@ import type {
   Pillar,
   SpendingMood,
   Transaction,
+  TransactionItem,
   TransactionType,
 } from '@/shared/types/domain'
 import { CategoryCascader } from './CategoryCascader'
 import { MoodSelector, PaymentMethodSelect, TagInput } from './FormFields'
+import { ItemsEditor } from './ItemsEditor'
 import { ReceiptUploader } from './ReceiptUploader'
 
 interface TransactionFormProps {
@@ -81,11 +85,28 @@ function TransactionFormBody({
   const [date, setDate] = useState(() =>
     toDateInput(source?.date ? source.date.toDate() : new Date()),
   )
-  const [amount, setAmount] = useState(source?.amount ?? 0)
   const [pillar, setPillar] = useState<Pillar | ''>(source?.pillar ?? '')
   const [categoryId, setCategoryId] = useState(source?.categoryId ?? '')
   const [categoryItemId, setCategoryItemId] = useState(source?.categoryItemId ?? '')
+  const [title, setTitle] = useState(source?.title ?? '')
   const [description, setDescription] = useState(source?.description ?? '')
+  const [items, setItems] = useState<TransactionItem[]>(source?.items ?? [])
+  const [tax, setTax] = useState(source?.tax ?? 0)
+  const [discount, setDiscount] = useState(source?.discount ?? 0)
+  // The amount actually paid. Follows the item math when there are items; a plain
+  // free-typed amount otherwise.
+  const [manualAmount, setManualAmount] = useState(source?.amount ?? 0)
+
+  const hasItems = items.length > 0
+  const grandTotal = hasItems
+    ? Math.max(0, itemsSubtotal(items) + tax - discount)
+    : manualAmount
+  const amount = grandTotal
+  // Editing an old row whose amount was set before items existed: flag a mismatch so
+  // the user notices the item list does not reconcile to what was paid.
+  const originalAmount = transaction?.amount ?? null
+  const integrityOff =
+    hasItems && originalAmount !== null && Math.abs(grandTotal - originalAmount) > 1
   const [location, setLocation] = useState(source?.location ?? '')
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | ''>(
     source?.paymentMethod ?? '',
@@ -149,7 +170,11 @@ function TransactionFormBody({
         categoryId,
         categoryItemId: categoryItemId || undefined,
         amount,
+        title: title.trim() || undefined,
         description: description.trim() || undefined,
+        items: hasItems ? items.filter((it) => it.name.trim()) : undefined,
+        tax: hasItems && tax > 0 ? tax : undefined,
+        discount: hasItems && discount > 0 ? discount : undefined,
         location: location.trim() || undefined,
         paymentMethod: paymentMethod || undefined,
         mood: mood || undefined,
@@ -191,7 +216,7 @@ function TransactionFormBody({
   }
 
   return (
-    <form onSubmit={submit} className="space-y-4">
+    <form onSubmit={submit} className="space-y-4 pb-16">
       <div className="flex gap-2" role="group" aria-label="Jenis transaksi">
         {TYPES.map((option) => (
           <Button
@@ -205,6 +230,19 @@ function TransactionFormBody({
             {option.label}
           </Button>
         ))}
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="tx-title" className="text-xs">
+          Judul
+        </Label>
+        <Input
+          id="tx-title"
+          value={title}
+          onChange={(event) => setTitle(event.target.value)}
+          placeholder="mis. Belanja bulanan Superindo"
+          className="text-lg font-medium"
+        />
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2">
@@ -221,52 +259,29 @@ function TransactionFormBody({
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="tx-amount" className="text-xs">
-            Jumlah
+            Jumlah {hasItems && <span className="text-muted-foreground">(dari rincian)</span>}
           </Label>
-          <MoneyInput id="tx-amount" value={amount} onChange={setAmount} />
+          <MoneyInput
+            id="tx-amount"
+            value={hasItems ? grandTotal : manualAmount}
+            onChange={setManualAmount}
+            disabled={hasItems}
+          />
         </div>
       </div>
 
-      <CategoryCascader
-        pillar={pillar}
-        categoryId={categoryId}
-        categoryItemId={categoryItemId}
-        incomeMode={type === 'income'}
-        onChange={(next) => {
-          setPillar(next.pillar)
-          setCategoryId(next.categoryId)
-          setCategoryItemId(next.categoryItemId)
-        }}
-      />
-
-      <div className="space-y-1.5">
-        <Label htmlFor="tx-description" className="text-xs">
-          Keterangan
-        </Label>
-        <Textarea
-          id="tx-description"
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-          rows={2}
-          placeholder="Opsional"
+      <div className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2">
+        <CategoryCascader
+          pillar={pillar}
+          categoryId={categoryId}
+          categoryItemId={categoryItemId}
+          incomeMode={type === 'income'}
+          onChange={(next) => {
+            setPillar(next.pillar)
+            setCategoryId(next.categoryId)
+            setCategoryItemId(next.categoryItemId)
+          }}
         />
-        {descriptionSuggestions.length > 0 && description !== descriptionSuggestions[0] && (
-          <div className="flex flex-wrap gap-1.5">
-            {descriptionSuggestions.map((suggestion) => (
-              <button
-                key={suggestion}
-                type="button"
-                onClick={() => setDescription(suggestion)}
-                className="rounded-md border px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted"
-              >
-                {suggestion}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
           <Label htmlFor="tx-location" className="text-xs">
             Toko / merchant
@@ -278,10 +293,82 @@ function TransactionFormBody({
             placeholder="Opsional"
           />
         </div>
-        <PaymentMethodSelect value={paymentMethod} onChange={setPaymentMethod} />
       </div>
 
-      {type === 'expense' && <MoodSelector value={mood} onChange={setMood} />}
+      <ItemsEditor items={items} onChange={setItems} />
+
+      {hasItems && (
+        <div className="space-y-2 rounded-xl border p-3">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="tx-tax" className="text-xs">
+                PPN / service
+              </Label>
+              <MoneyInput id="tx-tax" value={tax} onChange={setTax} numpad={false} className="h-8" />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="tx-discount" className="text-xs">
+                Diskon
+              </Label>
+              <MoneyInput
+                id="tx-discount"
+                value={discount}
+                onChange={setDiscount}
+                numpad={false}
+                className="h-8"
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-between border-t pt-2 text-sm">
+            <span className="text-muted-foreground">Subtotal</span>
+            <span className="tabular">{formatIDR(itemsSubtotal(items))}</span>
+          </div>
+          <div className="flex items-center justify-between text-base font-semibold">
+            <span>Total</span>
+            <span className="tabular">{formatIDR(grandTotal)}</span>
+          </div>
+          {integrityOff && originalAmount !== null && (
+            <p className="rounded-md bg-yellow-100 px-2 py-1 text-xs text-yellow-900 dark:bg-yellow-900/40 dark:text-yellow-200">
+              Total rincian ({formatIDR(grandTotal)}) tidak sama dengan jumlah tersimpan (
+              {formatIDR(originalAmount)}). Menyimpan akan memakai total rincian.
+            </p>
+          )}
+        </div>
+      )}
+
+      <details className="rounded-lg border px-3 py-2 text-sm">
+        <summary className="cursor-pointer text-xs text-muted-foreground">
+          Keterangan / teks asli
+        </summary>
+        <div className="mt-2 space-y-1.5">
+          <Textarea
+            id="tx-description"
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            rows={2}
+            placeholder="Opsional — catatan atau teks OCR mentah"
+          />
+          {descriptionSuggestions.length > 0 && description !== descriptionSuggestions[0] && (
+            <div className="flex flex-wrap gap-1.5">
+              {descriptionSuggestions.map((suggestion) => (
+                <button
+                  key={suggestion}
+                  type="button"
+                  onClick={() => setDescription(suggestion)}
+                  className="rounded-md border px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-muted"
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </details>
+
+      <div className="grid gap-3 sm:grid-cols-2">
+        <PaymentMethodSelect value={paymentMethod} onChange={setPaymentMethod} />
+        {type === 'expense' && <MoodSelector value={mood} onChange={setMood} />}
+      </div>
 
       <TagInput tags={tags} onChange={setTags} suggestions={tagSuggestions} />
 
@@ -296,10 +383,12 @@ function TransactionFormBody({
         }}
       />
 
-      <Button type="submit" className="w-full" disabled={saving}>
-        {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
-        {transaction ? 'Simpan perubahan' : 'Simpan transaksi'}
-      </Button>
+      <div className="sticky bottom-0 -mx-4 border-t bg-background/80 px-4 py-3 backdrop-blur">
+        <Button type="submit" className="w-full" disabled={saving}>
+          {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
+          {transaction ? 'Simpan perubahan' : 'Simpan transaksi'}
+        </Button>
+      </div>
     </form>
   )
 }

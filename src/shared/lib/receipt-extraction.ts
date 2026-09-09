@@ -50,11 +50,18 @@ Catatan penting:
 - Jika gambar ini JELAS BUKAN struk belanja (misalnya foto orang, pemandangan,
   atau tangkapan layar acak), set confidence di bawah 20 dan items array kosong
 - Jika total tidak terbaca, estimasi dari penjumlahan item
+- title: label singkat transaksi ini, umumnya "Belanja <merchant>" atau "<merchant>"
+  ("Belanja Superindo", "Kopi Kenangan"). Maksimal ~6 kata.
+- Integritas: pastikan (jumlah semua totalPrice item) + tax + serviceCharge − discount
+  = total. Jika ada selisih kecil karena pembulatan, sesuaikan totalPrice item terakhir
+  atau tambahkan satu item bernama "Pembulatan" agar penjumlahan tepat. Jangan ubah
+  angka total akhir yang tercetak di struk.
 `.trim()
 
 const extractionSchema = {
   type: Type.OBJECT,
   properties: {
+    title: { type: Type.STRING, nullable: true, description: 'label singkat, mis. "Belanja Superindo"' },
     merchant: { type: Type.STRING, nullable: true },
     merchantType: {
       type: Type.STRING,
@@ -195,6 +202,7 @@ export async function extractReceipt(
   const raw = JSON.parse(extractionResponse.text ?? '{}')
 
   const extraction: ReceiptExtraction = {
+    title: typeof raw.title === 'string' && raw.title.trim() ? raw.title.trim() : null,
     merchant: raw.merchant ?? null,
     merchantType: raw.merchantType ?? null,
     date: raw.date ?? null,

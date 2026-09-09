@@ -1,6 +1,7 @@
-import type { Category, Pillar } from '@/shared/types/domain'
+import type { Category, Pillar, TransactionItem } from '@/shared/types/domain'
 import type { CreateTransactionDTO } from '@/shared/types/dto'
 import type { MappedReceiptItem, ReceiptScanResult } from '@/shared/types/receipt-scanner.types'
+import { reconcileToTotal } from '@/shared/lib/transaction-items'
 import { parseAmount } from './parse-amount'
 import type { BotTxType, DraftBatch, DraftLine, ParsedLine } from './types'
 
@@ -173,7 +174,21 @@ function pillarOf(line: DraftLine, categories: Map<string, Pillar>): Pillar | nu
  */
 export function batchToDTOs(batch: DraftBatch, categories: Category[] = []): CreateTransactionDTO[] {
   const pillars = new Map(categories.map((c) => [c.id, c.pillar]))
-  const source = batch.mode === 'single' && batch.lines.length > 0 ? [collapseToSingle(batch)] : batch.lines
+  const collapsing = batch.mode === 'single' && batch.lines.length > 0
+  const source = collapsing ? [collapseToSingle(batch)] : batch.lines
+
+  // A collapsed receipt keeps its per-item breakdown on the one transaction: the lines
+  // become `items[]`, scaled so their sum matches the amount being written.
+  const items: TransactionItem[] | undefined = collapsing
+    ? reconcileToTotal(
+        batch.lines.map((l) => ({
+          name: l.description ?? 'Item',
+          qty: Math.max(1, Math.floor(l.quantity ?? 1)),
+          price: Math.max(0, Math.round(l.amount)),
+        })),
+        source[0].amount,
+      )
+    : undefined
 
   return source
     .filter((line) => line.categoryId !== null && line.amount > 0)
@@ -183,7 +198,11 @@ export function batchToDTOs(batch: DraftBatch, categories: Category[] = []): Cre
       pillar: pillarOf(line, pillars) ?? inferPillar(line.type),
       categoryId: line.categoryId as string,
       amount: line.amount,
+      title: collapsing ? (batch.merchant?.trim() || undefined) : undefined,
       description: line.description ?? undefined,
+      items: items && items.length > 0 ? items : undefined,
+      tax: collapsing ? batch.tax : undefined,
+      discount: collapsing ? batch.discount : undefined,
       tags: ['bot'],
       gDriveFileId: batch.receipt?.gDriveFileId,
       gDriveWebViewLink: batch.receipt?.gDriveWebViewLink,

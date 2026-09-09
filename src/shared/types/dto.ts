@@ -8,6 +8,7 @@ import type {
   PillarConfig,
   RecurringFrequency,
   SpendingMood,
+  TransactionItem,
   TransactionType,
 } from './domain'
 
@@ -19,8 +20,13 @@ export interface CreateTransactionDTO {
   pillar: Pillar
   categoryId: string
   categoryItemId?: string
+  /** Final amount paid (subtotal + tax − discount). Still the one figure downstream reads. */
   amount: number
+  title?: string
   description?: string
+  items?: TransactionItem[]
+  tax?: number
+  discount?: number
   tags?: string[]
   paymentMethod?: PaymentMethod
   /** @deprecated Legacy Firebase Storage URL; new uploads use the gDrive fields. */

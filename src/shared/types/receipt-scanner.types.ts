@@ -10,6 +10,8 @@ export interface ExtractedReceiptItem {
 }
 
 export interface ReceiptExtraction {
+  /** Short label for the whole transaction, e.g. "Belanja Superindo". Null → derive from merchant. */
+  title: string | null
   merchant: string | null
   merchantType: string | null
   /** ISO yyyy-MM-dd, or null when the receipt date could not be read. */

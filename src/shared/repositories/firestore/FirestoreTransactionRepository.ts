@@ -21,6 +21,7 @@ import type { ITransactionRepository } from '../interfaces'
 import type { Pillar, Transaction } from '@/shared/types/domain'
 import type { CreateTransactionDTO, UpdateTransactionDTO } from '@/shared/types/dto'
 import { COLLECTIONS, col, colDoc, newDoc, stripUndefined } from './paths'
+import { deriveTransactionTitle, sanitizeItems } from '@/shared/lib/transaction-items'
 
 const NAME = COLLECTIONS.transactions
 
@@ -37,7 +38,12 @@ function toTransaction(snap: QueryDocumentSnapshot): Transaction {
     categoryId: data.categoryId,
     categoryItemId: data.categoryItemId,
     amount: data.amount,
+    // Itemized schema — lazily backfilled for rows written before it.
+    title: deriveTransactionTitle(data),
     description: data.description,
+    items: sanitizeItems(data.items),
+    tax: data.tax ?? 0,
+    discount: data.discount ?? 0,
     tags: data.tags ?? [],
     paymentMethod: data.paymentMethod,
     receiptUrl: data.receiptUrl,
@@ -70,7 +76,11 @@ function toWriteModel(data: CreateTransactionDTO) {
     categoryId: data.categoryId,
     categoryItemId: data.categoryItemId,
     amount: Math.abs(data.amount),
+    title: data.title?.trim() || undefined,
     description: data.description,
+    items: data.items ? sanitizeItems(data.items) : undefined,
+    tax: data.tax !== undefined ? Math.max(0, Math.round(data.tax)) : undefined,
+    discount: data.discount !== undefined ? Math.max(0, Math.round(data.discount)) : undefined,
     tags: data.tags ?? [],
     paymentMethod: data.paymentMethod,
     receiptUrl: data.receiptUrl,
