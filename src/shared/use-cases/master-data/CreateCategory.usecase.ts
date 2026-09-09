@@ -6,7 +6,11 @@ import type { CreateCategoryDTO } from '@/shared/types/dto'
 export async function createCategory(userId: string, data: CreateCategoryDTO): Promise<Category> {
   const name = data.name.trim()
   if (!name) throw new Error('Nama kategori wajib diisi')
-  if (data.percentOfIncome < 0 || data.percentOfIncome > 100) {
+  if (data.budgetMode === 'fixed') {
+    if ((data.fixedMonthlyBudget ?? 0) <= 0) {
+      throw new Error('Anggaran tetap harus lebih dari 0')
+    }
+  } else if (data.percentOfIncome < 0 || data.percentOfIncome > 100) {
     throw new Error('Persentase harus antara 0 dan 100')
   }
 

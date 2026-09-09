@@ -12,6 +12,13 @@ export async function updateCategory(
   ) {
     throw new Error('Persentase harus antara 0 dan 100')
   }
+  if (
+    data.budgetMode === 'fixed' &&
+    data.fixedMonthlyBudget !== undefined &&
+    data.fixedMonthlyBudget <= 0
+  ) {
+    throw new Error('Anggaran tetap harus lebih dari 0')
+  }
   await repositories.categories.update(userId, id, {
     ...data,
     ...(data.name ? { name: data.name.trim() } : {}),

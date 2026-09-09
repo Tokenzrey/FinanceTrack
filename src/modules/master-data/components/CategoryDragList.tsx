@@ -81,8 +81,14 @@ function SortableCategoryRow({
       <div className="min-w-0 flex-1 overflow-hidden">
         <p className="truncate text-sm font-medium leading-tight">{category.name}</p>
         <p className="truncate text-xs text-muted-foreground">
-          {formatPercent(category.percentOfIncome, 1)}
-          {income > 0 && ` · ${formatIDR((income * category.percentOfIncome) / 100)}`}
+          {category.budgetMode === 'fixed' ? (
+            <>{formatIDR(category.fixedMonthlyBudget ?? 0)} · tetap</>
+          ) : (
+            <>
+              {formatPercent(category.percentOfIncome, 1)}
+              {income > 0 && ` · ${formatIDR((income * category.percentOfIncome) / 100)}`}
+            </>
+          )}
         </p>
       </div>
 
@@ -144,7 +150,14 @@ export function CategoryDragList({
     .sort((a, b) => a.order - b.order)
 
   const income = summary?.totalIncome ?? 0
-  const allocated = inPillar.reduce((sum, c) => sum + c.percentOfIncome, 0)
+  // Fixed-nominal categories carry a leftover `percentOfIncome` that isn't real —
+  // count their actual rupiah as an income share instead so the pillar total is honest.
+  const allocated = inPillar.reduce((sum, c) => {
+    if (c.budgetMode === 'fixed') {
+      return sum + (income > 0 ? ((c.fixedMonthlyBudget ?? 0) / income) * 100 : 0)
+    }
+    return sum + c.percentOfIncome
+  }, 0)
   const ceiling = (monthlyBudget?.pillarConfig?.[pillar] ?? 0) * 100
   const overAllocated = ceiling > 0 && allocated > ceiling + 0.05
   const gap = ceiling > 0 && allocated < ceiling - 0.05

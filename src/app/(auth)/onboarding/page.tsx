@@ -16,6 +16,7 @@ import {
 import { Input } from '@/shared/components/ui/input'
 import { Label } from '@/shared/components/ui/label'
 import { MoneyInput } from '@/shared/components/finance/MoneyInput'
+import { PercentInput } from '@/shared/components/finance/PercentInput'
 import { PillarColorDot } from '@/shared/components/finance/PillarBadge'
 import { FirebaseSetupNotice } from '@/shared/components/layout/FirebaseSetupNotice'
 import { isFirebaseConfigured } from '@/shared/lib/firebase'
@@ -173,25 +174,34 @@ export default function OnboardingPage() {
                         {PILLAR_LABELS[pillar]}
                       </span>
                       <span className="tabular text-muted-foreground">
-                        {formatPercent(pillarConfig[pillar] * 100)} ·{' '}
                         {formatIDR(monthlyIncome * pillarConfig[pillar])}
                       </span>
                     </div>
-                    <input
-                      type="range"
-                      min={0}
-                      max={100}
-                      step={1}
-                      value={Math.round(pillarConfig[pillar] * 100)}
-                      onChange={(event) =>
-                        setPillarConfig({
-                          ...pillarConfig,
-                          [pillar]: Number(event.target.value) / 100,
-                        })
-                      }
-                      className="w-full accent-primary"
-                      aria-label={`Alokasi ${PILLAR_LABELS[pillar]}`}
-                    />
+                    <div className="flex items-center gap-3">
+                      <input
+                        type="range"
+                        min={0}
+                        max={100}
+                        step={1}
+                        value={Math.round(pillarConfig[pillar] * 100)}
+                        onChange={(event) =>
+                          setPillarConfig({
+                            ...pillarConfig,
+                            [pillar]: Number(event.target.value) / 100,
+                          })
+                        }
+                        className="min-w-0 flex-1 accent-primary"
+                        aria-label={`Alokasi ${PILLAR_LABELS[pillar]}`}
+                      />
+                      <PercentInput
+                        value={Number((pillarConfig[pillar] * 100).toFixed(1))}
+                        onChange={(v) =>
+                          setPillarConfig({ ...pillarConfig, [pillar]: v / 100 })
+                        }
+                        className="h-9 w-20"
+                        aria-label={`Alokasi ${PILLAR_LABELS[pillar]} (persen)`}
+                      />
+                    </div>
                   </div>
                 ))}
 

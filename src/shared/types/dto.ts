@@ -1,5 +1,6 @@
 import type {
   AssetType,
+  CategoryBudgetMode,
   CategoryIcon,
   LiabilityType,
   PaymentMethod,
@@ -41,6 +42,8 @@ export interface CreateCategoryDTO {
   name: string
   pillar: Pillar
   percentOfIncome: number
+  budgetMode?: CategoryBudgetMode
+  fixedMonthlyBudget?: number
   color: string
   icon: CategoryIcon
   isSinkingFund?: boolean

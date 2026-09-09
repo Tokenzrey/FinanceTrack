@@ -81,6 +81,26 @@ describe('budgetForCategory', () => {
   it('never returns a negative budget', () => {
     expect(budgetForCategory(category({ percentOfIncome: -10 }), income)).toBe(0)
   })
+
+  it('uses fixedMonthlyBudget verbatim when budgetMode is fixed, ignoring income', () => {
+    const cat = category({ budgetMode: 'fixed', fixedMonthlyBudget: 750_000, percentOfIncome: 20 })
+    expect(budgetForCategory(cat, income)).toBe(750_000)
+    expect(budgetForCategory(cat, 0)).toBe(750_000)
+  })
+
+  it('a monthly override still beats the category fixed amount', () => {
+    const cat = category({ budgetMode: 'fixed', fixedMonthlyBudget: 750_000 })
+    expect(budgetForCategory(cat, income, [{ categoryId: 'cat-1', fixedBudget: 900_000 }])).toBe(
+      900_000,
+    )
+    expect(budgetForCategory(cat, income, [{ categoryId: 'cat-1', percentOverride: 10 }])).toBe(
+      1_000_000,
+    )
+  })
+
+  it('a fixed category with no amount set is treated as zero, not NaN', () => {
+    expect(budgetForCategory(category({ budgetMode: 'fixed' }), income)).toBe(0)
+  })
 })
 
 describe('pillarBudgets', () => {

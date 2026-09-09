@@ -14,6 +14,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/components/ui/tabs'
 import { EmptyState, LoadingSkeleton } from '@/shared/components/finance/EmptyState'
 import { MoneyDisplay } from '@/shared/components/finance/MoneyDisplay'
+import { PercentInput } from '@/shared/components/finance/PercentInput'
 import { AbsorptionBar } from '@/shared/components/finance/AbsorptionBar'
 import { ChartContainer } from '@/shared/components/charts/ChartContainer'
 import { GaugeChart } from '@/shared/components/charts/GaugeChart'
@@ -174,18 +175,24 @@ function WhatIfSimulator({
               ))}
             </SelectContent>
           </Select>
-          <span className="text-sm">sebanyak {formatPercent(cut)}</span>
+          <span className="text-sm">sebanyak</span>
+          <PercentInput
+            value={cut}
+            onChange={setCut}
+            className="h-8 w-20"
+            aria-label="Persentase pemotongan"
+          />
         </div>
 
         <input
           type="range"
           min={0}
           max={100}
-          step={5}
+          step={1}
           value={cut}
           onChange={(event) => setCut(Number(event.target.value))}
           className="w-full accent-primary"
-          aria-label="Persentase pemotongan"
+          aria-label="Persentase pemotongan (geser)"
         />
 
         {result && (

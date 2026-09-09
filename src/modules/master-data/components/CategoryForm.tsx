@@ -51,9 +51,11 @@ import {
   SelectValue,
 } from '@/shared/components/ui/select'
 import { Switch } from '@/shared/components/ui/switch'
+import { MoneyInput } from '@/shared/components/finance/MoneyInput'
+import { PercentInput } from '@/shared/components/finance/PercentInput'
 import { useIsDesktop } from '@/shared/hooks/useMediaQuery'
 import { cn } from '@/shared/lib/utils'
-import { formatIDR, formatPercent } from '@/shared/lib/format'
+import { formatIDR } from '@/shared/lib/format'
 import { useBudgetStore } from '@/shared/stores/budget.store'
 import { useMasterDataStore } from '@/shared/stores/master-data.store'
 import { PILLAR_LABELS, type Category, type CategoryIcon, type Pillar } from '@/shared/types/domain'
@@ -110,6 +112,8 @@ function FormBody({ category, onDone }: { category?: Category | null; onDone: ()
   const [name, setName] = useState(category?.name ?? '')
   const [pillar, setPillar] = useState<Pillar>(category?.pillar ?? 'needs')
   const [percent, setPercent] = useState(category?.percentOfIncome ?? 5)
+  const [budgetMode, setBudgetMode] = useState<'percent' | 'fixed'>(category?.budgetMode ?? 'percent')
+  const [fixedBudget, setFixedBudget] = useState(category?.fixedMonthlyBudget ?? 0)
   const [color, setColor] = useState(category?.color ?? PRESET_COLORS[0])
   const [icon, setIcon] = useState<CategoryIcon>(category?.icon ?? 'shopping-cart')
   const [isSinkingFund, setIsSinkingFund] = useState(category?.isSinkingFund ?? false)
@@ -127,6 +131,8 @@ function FormBody({ category, onDone }: { category?: Category | null; onDone: ()
         name,
         pillar,
         percentOfIncome: percent,
+        budgetMode,
+        fixedMonthlyBudget: budgetMode === 'fixed' ? fixedBudget : undefined,
         color,
         icon,
         isSinkingFund,
@@ -191,25 +197,85 @@ function FormBody({ category, onDone }: { category?: Category | null; onDone: ()
       </div>
 
       <div className="space-y-2">
-        <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
-          <Label htmlFor="cat-percent" className="text-xs">
-            Persentase dari pemasukan
-          </Label>
-          <span className="tabular text-xs text-muted-foreground">
-            {formatPercent(percent, 1)}
-            {income > 0 && ` · ${formatIDR((income * percent) / 100)}`}
-          </span>
+        <div className="flex items-center gap-1 rounded-lg bg-muted p-0.5 text-xs">
+          <button
+            type="button"
+            onClick={() => setBudgetMode('percent')}
+            aria-pressed={budgetMode === 'percent'}
+            className={cn(
+              'flex-1 rounded-md px-2 py-1.5 font-medium transition-colors',
+              budgetMode === 'percent'
+                ? 'bg-background shadow-sm'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            Persentase pemasukan
+          </button>
+          <button
+            type="button"
+            onClick={() => setBudgetMode('fixed')}
+            aria-pressed={budgetMode === 'fixed'}
+            className={cn(
+              'flex-1 rounded-md px-2 py-1.5 font-medium transition-colors',
+              budgetMode === 'fixed'
+                ? 'bg-background shadow-sm'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            Nominal tetap
+          </button>
         </div>
-        <input
-          id="cat-percent"
-          type="range"
-          min={0}
-          max={60}
-          step={0.5}
-          value={percent}
-          onChange={(event) => setPercent(Number(event.target.value))}
-          className="w-full accent-primary"
-        />
+
+        {budgetMode === 'percent' ? (
+          <>
+            <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5">
+              <Label htmlFor="cat-percent" className="text-xs">
+                Persentase dari pemasukan
+              </Label>
+              {income > 0 && (
+                <span className="tabular text-xs text-muted-foreground">
+                  {formatIDR((income * percent) / 100)}
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              <input
+                id="cat-percent"
+                type="range"
+                min={0}
+                max={60}
+                step={0.5}
+                value={percent}
+                onChange={(event) => setPercent(Number(event.target.value))}
+                className="min-w-0 flex-1 accent-primary"
+              />
+              <PercentInput
+                value={percent}
+                onChange={setPercent}
+                min={0}
+                max={60}
+                className="h-8 w-20 text-xs"
+                aria-label="Persentase dari pemasukan"
+              />
+            </div>
+          </>
+        ) : (
+          <div className="space-y-1.5">
+            <Label htmlFor="cat-fixed" className="text-xs">
+              Anggaran per bulan
+            </Label>
+            <MoneyInput
+              id="cat-fixed"
+              value={fixedBudget}
+              onChange={setFixedBudget}
+              className="h-9"
+              aria-label="Anggaran tetap per bulan"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Nominal tetap tiap bulan, tidak ikut naik saat pemasukan bertambah.
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="space-y-1.5">

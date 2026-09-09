@@ -39,11 +39,23 @@ export type CategoryIcon =
   | 'dollar-sign'
   | 'star'
 
+export type CategoryBudgetMode = 'percent' | 'fixed'
+
 export interface Category {
   id: string
   name: string
   pillar: Pillar
+  /** Share of total income when `budgetMode` is `'percent'` (the default). */
   percentOfIncome: number
+  /**
+   * `'percent'` (default, and the mode for every pre-existing category) sizes the
+   * budget from `percentOfIncome × income`. `'fixed'` uses `fixedMonthlyBudget`
+   * verbatim and ignores income entirely — for categories with a set monthly
+   * allowance that shouldn't drift with a raise.
+   */
+  budgetMode?: CategoryBudgetMode
+  /** Rupiah budget per month when `budgetMode === 'fixed'`. */
+  fixedMonthlyBudget?: number
   color: string
   icon: CategoryIcon
   isSinkingFund: boolean

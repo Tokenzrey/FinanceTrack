@@ -51,7 +51,9 @@ export function daysElapsedInMonth(year: number, month: number, today = new Date
 
 /**
  * Budget for one category.
- * Precedence: fixed override > percent override > the category's own percentOfIncome.
+ * Precedence: this month's fixed override > this month's percent override >
+ * the category's own setting (a flat `fixedMonthlyBudget` when
+ * `budgetMode === 'fixed'`, otherwise `percentOfIncome × income`).
  * All percents are percent-of-total-income, matching the master-data editor.
  */
 export function budgetForCategory(
@@ -61,8 +63,13 @@ export function budgetForCategory(
 ): number {
   const override = overrides.find((o) => o.categoryId === category.id)
   if (override?.fixedBudget !== undefined) return Math.max(0, override.fixedBudget)
-  const percent = override?.percentOverride ?? category.percentOfIncome
-  return Math.max(0, (totalIncome * percent) / 100)
+  if (override?.percentOverride !== undefined) {
+    return Math.max(0, (totalIncome * override.percentOverride) / 100)
+  }
+  if (category.budgetMode === 'fixed') {
+    return Math.max(0, category.fixedMonthlyBudget ?? 0)
+  }
+  return Math.max(0, (totalIncome * category.percentOfIncome) / 100)
 }
 
 /** Income split across the three spend pillars, e.g. 50/30/20. */

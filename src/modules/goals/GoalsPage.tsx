@@ -342,18 +342,26 @@ function ForecastSlider({ goal }: { goal: SavingsGoal }) {
           <Sparkles className="size-3.5 text-savings" aria-hidden />
           Simulasi setoran
         </span>
-        <MoneyDisplay value={monthly} className="font-semibold" compact />
       </div>
-      <input
-        type="range"
-        min={0}
-        max={max}
-        step={50_000}
-        value={monthly}
-        onChange={(event) => setMonthly(Number(event.target.value))}
-        className="w-full accent-savings"
-        aria-label="Simulasi setoran bulanan"
-      />
+      <div className="flex items-center gap-3">
+        <input
+          type="range"
+          min={0}
+          max={max}
+          step={50_000}
+          value={Math.min(monthly, max)}
+          onChange={(event) => setMonthly(Number(event.target.value))}
+          className="min-w-0 flex-1 accent-savings"
+          aria-label="Simulasi setoran bulanan"
+        />
+        <MoneyInput
+          value={monthly}
+          onChange={setMonthly}
+          numpad={false}
+          className="h-8 w-32 text-xs"
+          aria-label="Simulasi setoran bulanan (nominal)"
+        />
+      </div>
       <p className="text-xs text-muted-foreground">
         {projection.monthsToTarget === 0
           ? 'Target sudah tercapai.'

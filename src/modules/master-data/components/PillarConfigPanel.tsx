@@ -7,6 +7,7 @@ import { Button } from '@/shared/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui/card'
 import { PillarAllocationBar } from '@/shared/components/charts/PillarAllocationBar'
 import { PillarColorDot } from '@/shared/components/finance/PillarBadge'
+import { PercentInput } from '@/shared/components/finance/PercentInput'
 import { cn } from '@/shared/lib/utils'
 import { formatIDR, formatPercent } from '@/shared/lib/format'
 import { useBudgetStore } from '@/shared/stores/budget.store'
@@ -86,21 +87,29 @@ export function PillarConfigPanel() {
                   point of its own, so without somewhere to wrap to it would force this
                   row wider than its card on a narrow screen. */}
               <span className="tabular text-muted-foreground">
-                {formatPercent(config[pillar] * 100)} · {formatIDR(income * config[pillar])}
+                {formatIDR(income * config[pillar])}
               </span>
             </div>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              step={1}
-              value={Math.round(config[pillar] * 100)}
-              onChange={(event) =>
-                setConfig({ ...config, [pillar]: Number(event.target.value) / 100 })
-              }
-              className="w-full accent-primary"
-              aria-label={`Alokasi ${PILLAR_LABELS[pillar]}`}
-            />
+            <div className="flex items-center gap-3">
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={Math.round(config[pillar] * 100)}
+                onChange={(event) =>
+                  setConfig({ ...config, [pillar]: Number(event.target.value) / 100 })
+                }
+                className="min-w-0 flex-1 accent-primary"
+                aria-label={`Alokasi ${PILLAR_LABELS[pillar]}`}
+              />
+              <PercentInput
+                value={Number((config[pillar] * 100).toFixed(1))}
+                onChange={(v) => setConfig({ ...config, [pillar]: v / 100 })}
+                className="h-8 w-20 text-xs"
+                aria-label={`Alokasi ${PILLAR_LABELS[pillar]} (persen)`}
+              />
+            </div>
           </div>
         ))}
 
