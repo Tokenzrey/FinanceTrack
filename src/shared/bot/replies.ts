@@ -135,6 +135,7 @@ export const replies = {
         '/agenda — tugas &amp; pengingat hari ini',
         '/catat &lt;teks&gt; — simpan catatan',
         '/catat cari &lt;kata&gt; — cari catatan',
+        '/catat lihat &lt;no&gt; — baca satu catatan lengkap',
         '/ingatkan &lt;teks&gt; &lt;waktu&gt; — mis. <code>/ingatkan minum obat jam 8 malam</code>',
         '/tunda &lt;menit&gt; — tunda pengingat terakhir',
         '',
