@@ -166,7 +166,7 @@ export function LabelManagerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-[360px] sm:max-w-[360px]">
+      <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>Kelola label</DialogTitle>
           {labels.length === 0 && (

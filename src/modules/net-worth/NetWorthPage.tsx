@@ -15,7 +15,7 @@ import { toast } from 'sonner'
 import { Badge } from '@/shared/components/ui/badge'
 import { Button } from '@/shared/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui/card'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/components/ui/dialog'
+import { ModalFormShell } from '@/shared/components/ui/modal-form-shell'
 import { Input } from '@/shared/components/ui/input'
 import { Label } from '@/shared/components/ui/label'
 import {
@@ -102,12 +102,19 @@ function AssetForm({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{asset ? 'Ubah aset' : 'Aset baru'}</DialogTitle>
-        </DialogHeader>
-        <form onSubmit={submit} className="space-y-4">
+    <ModalFormShell
+      open={open}
+      onOpenChange={onOpenChange}
+      title={asset ? 'Ubah aset' : 'Aset baru'}
+      size="md"
+      footer={
+        <Button form="asset-form" type="submit" className="w-full sm:w-auto" disabled={saving}>
+          {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
+          Simpan
+        </Button>
+      }
+    >
+      <form id="asset-form" onSubmit={submit} className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="asset-name" className="text-xs">
               Nama
@@ -155,13 +162,8 @@ function AssetForm({
               onChange={(event) => setInstitution(event.target.value)}
             />
           </div>
-          <Button type="submit" className="w-full" disabled={saving}>
-            {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
-            Simpan
-          </Button>
         </form>
-      </DialogContent>
-    </Dialog>
+    </ModalFormShell>
   )
 }
 
@@ -209,12 +211,19 @@ function LiabilityForm({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{liability ? 'Ubah utang' : 'Utang baru'}</DialogTitle>
-        </DialogHeader>
-        <form onSubmit={submit} className="space-y-4">
+    <ModalFormShell
+      open={open}
+      onOpenChange={onOpenChange}
+      title={liability ? 'Ubah utang' : 'Utang baru'}
+      size="md"
+      footer={
+        <Button form="liability-form" type="submit" className="w-full sm:w-auto" disabled={saving}>
+          {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
+          Simpan
+        </Button>
+      }
+    >
+      <form id="liability-form" onSubmit={submit} className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="liab-name" className="text-xs">
               Nama
@@ -284,13 +293,8 @@ function LiabilityForm({
             </div>
           </div>
 
-          <Button type="submit" className="w-full" disabled={saving}>
-            {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
-            Simpan
-          </Button>
         </form>
-      </DialogContent>
-    </Dialog>
+    </ModalFormShell>
   )
 }
 

@@ -15,7 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/shared/components/ui/alert-dialog'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/components/ui/dialog'
+import { ModalFormShell } from '@/shared/components/ui/modal-form-shell'
 import { Input } from '@/shared/components/ui/input'
 import { Label } from '@/shared/components/ui/label'
 import { EmptyState } from '@/shared/components/finance/EmptyState'
@@ -197,30 +197,34 @@ export function BudgetTemplates() {
         </ul>
       )}
 
-      <Dialog open={saveOpen} onOpenChange={setSaveOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Simpan sebagai template</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="template-name" className="text-xs">
-                Nama template
-              </Label>
-              <Input
-                id="template-name"
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder="Bulan hemat"
-                autoFocus
-              />
-            </div>
-            <Button onClick={() => void saveCurrent()} className="w-full">
-              Simpan template
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ModalFormShell
+        open={saveOpen}
+        onOpenChange={setSaveOpen}
+        title="Simpan sebagai template"
+        size="md"
+        footer={
+          <Button
+            className="w-full sm:w-auto"
+            disabled={!name.trim()}
+            onClick={() => void saveCurrent()}
+          >
+            Simpan template
+          </Button>
+        }
+      >
+        <div className="space-y-1.5">
+          <Label htmlFor="template-name" className="text-xs">
+            Nama template
+          </Label>
+          <Input
+            id="template-name"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="Bulan hemat"
+            autoFocus
+          />
+        </div>
+      </ModalFormShell>
 
       <AlertDialog open={Boolean(applying)} onOpenChange={() => setApplying(null)}>
         <AlertDialogContent>

@@ -16,6 +16,7 @@ import {
 } from '@/shared/components/ui/select'
 import {
   Drawer,
+  DrawerBody,
   DrawerContent,
   DrawerHeader,
   DrawerTitle,
@@ -185,9 +186,9 @@ export function QuickEntryFab() {
             <DrawerHeader>
               <DrawerTitle>Catat cepat</DrawerTitle>
             </DrawerHeader>
-            <div className="px-4 pb-8">
+            <DrawerBody className="pb-8">
               <QuickEntryForm onDone={() => setOpen(false)} />
-            </div>
+            </DrawerBody>
           </DrawerContent>
         </Drawer>
       </div>

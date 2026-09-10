@@ -14,7 +14,7 @@ import { toast } from 'sonner'
 import { Badge } from '@/shared/components/ui/badge'
 import { Button } from '@/shared/components/ui/button'
 import { Card, CardContent } from '@/shared/components/ui/card'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/components/ui/dialog'
+import { ModalFormShell } from '@/shared/components/ui/modal-form-shell'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -132,13 +132,20 @@ function WishlistForm({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{item ? 'Ubah rencana beli' : 'Rencana beli baru'}</DialogTitle>
-        </DialogHeader>
-
-        <form onSubmit={submit} className="space-y-4">
+    <ModalFormShell
+      open={open}
+      onOpenChange={onOpenChange}
+      title={item ? 'Ubah rencana beli' : 'Rencana beli baru'}
+      description="Simpan niat beli lengkap dengan masa tunggunya."
+      size="md"
+      footer={
+        <Button form="wishlist-form" type="submit" className="w-full sm:w-auto" disabled={saving}>
+          {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
+          Simpan
+        </Button>
+      }
+    >
+      <form id="wishlist-form" onSubmit={submit} className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="wish-name" className="text-xs">
               Nama barang
@@ -310,13 +317,8 @@ function WishlistForm({
             </div>
           )}
 
-          <Button type="submit" className="w-full" disabled={saving}>
-            {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
-            Simpan
-          </Button>
         </form>
-      </DialogContent>
-    </Dialog>
+    </ModalFormShell>
   )
 }
 
@@ -353,13 +355,24 @@ function PurchaseDialog({
   }
 
   return (
-    <Dialog open onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Tandai {item.name} sebagai dibeli</DialogTitle>
-        </DialogHeader>
-
-        <form onSubmit={submit} className="space-y-4">
+    <ModalFormShell
+      open
+      onOpenChange={onOpenChange}
+      title={`Tandai ${item.name} sebagai dibeli`}
+      size="md"
+      footer={
+        <Button
+          form="purchase-form"
+          type="submit"
+          className="w-full sm:w-auto"
+          disabled={saving || !categoryId}
+        >
+          {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
+          Catat pembelian
+        </Button>
+      }
+    >
+      <form id="purchase-form" onSubmit={submit} className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="purchase-price" className="text-xs">
               Harga sebenarnya
@@ -397,14 +410,8 @@ function PurchaseDialog({
             Transaksi pengeluaran akan dibuat di jurnal utama dan item ini pindah ke
             &ldquo;Dibeli&rdquo;.
           </p>
-
-          <Button type="submit" className="w-full" disabled={saving || !categoryId}>
-            {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
-            Catat pembelian
-          </Button>
         </form>
-      </DialogContent>
-    </Dialog>
+    </ModalFormShell>
   )
 }
 

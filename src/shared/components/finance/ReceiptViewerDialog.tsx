@@ -3,7 +3,14 @@
 import { useEffect, useRef, useState } from 'react'
 import { ExternalLink, Loader2, Minus, Plus, RotateCcw } from 'lucide-react'
 import { Button } from '@/shared/components/ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/components/ui/dialog'
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/shared/components/ui/dialog'
 import { fetchDriveFileUrl } from '@/shared/lib/gdrive'
 import { useGoogleDrive } from '@/shared/hooks/useGoogleDrive'
 
@@ -101,11 +108,12 @@ export function ReceiptViewerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent unstyledBody className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Struk</DialogTitle>
         </DialogHeader>
 
+        <DialogBody className="overflow-hidden">
         <div
           className="relative flex h-[60dvh] items-center justify-center overflow-hidden rounded-xl bg-muted"
           onWheel={(event) => {
@@ -157,8 +165,9 @@ export function ReceiptViewerDialog({
             />
           )}
         </div>
+        </DialogBody>
 
-        <div className="flex items-center justify-between gap-2">
+        <DialogFooter className="flex-row items-center justify-between sm:justify-between">
           <div className="flex items-center gap-1">
             <Button
               variant="outline"
@@ -203,7 +212,7 @@ export function ReceiptViewerDialog({
               </a>
             </Button>
           )}
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

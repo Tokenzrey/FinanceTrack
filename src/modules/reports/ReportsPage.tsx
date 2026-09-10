@@ -535,11 +535,11 @@ export function ReportsPage() {
       </div>
 
       <Dialog open={Boolean(shareUrl)} onOpenChange={(open) => !open && setShareUrl(null)}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>Tautan laporan</DialogTitle>
           </DialogHeader>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-sm text-muted-foreground">
             Siapa pun dengan tautan ini bisa melihat ringkasan {formatMonthLong(year, month)} —
             hanya angka ringkasan seperti di halaman ini, tanpa transaksi mentah atau data akunmu.
           </p>
@@ -550,7 +550,9 @@ export function ReportsPage() {
               onFocus={(event) => event.target.select()}
               className="text-xs"
             />
-            <Button onClick={copyShareLink}>Salin</Button>
+            <Button onClick={copyShareLink} className="shrink-0">
+              Salin
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

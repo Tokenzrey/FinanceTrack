@@ -68,7 +68,7 @@ export function AffordabilityDetail({
 
   return (
     <Dialog open onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{item.name}</DialogTitle>
           <DialogDescription>

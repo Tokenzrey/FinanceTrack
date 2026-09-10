@@ -6,7 +6,15 @@ import { toast } from 'sonner'
 import { Badge } from '@/shared/components/ui/badge'
 import { Button } from '@/shared/components/ui/button'
 import { Card, CardContent } from '@/shared/components/ui/card'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/components/ui/dialog'
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/shared/components/ui/dialog'
+import { ModalFormShell } from '@/shared/components/ui/modal-form-shell'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -133,61 +141,61 @@ function NoteEditor({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg" onKeyDown={onKeyDown}>
-        <DialogHeader>
-          <DialogTitle>{note ? 'Edit catatan' : 'Catatan baru'}</DialogTitle>
-        </DialogHeader>
-
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="note-title" className="text-xs">
-              Judul
-            </Label>
-            <Input
-              id="note-title"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              placeholder="Judul (opsional)"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="note-content" className="text-xs">
-              Isi
-            </Label>
-            <Textarea
-              id="note-content"
-              value={content}
-              rows={8}
-              onChange={(event) => setContent(event.target.value)}
-              placeholder="Tulis catatan…"
-            />
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="note-tags" className="text-xs">
-              Tag
-            </Label>
-            <Input
-              id="note-tags"
-              value={tags}
-              onChange={(event) => setTags(event.target.value)}
-              placeholder="Pisahkan dengan koma"
-            />
-          </div>
-
-          <Button
-            className="w-full"
-            disabled={saving || !content.trim()}
-            onClick={() => void save()}
-          >
-            {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
-            Simpan
-          </Button>
+    <ModalFormShell
+      open={open}
+      onOpenChange={onOpenChange}
+      title={note ? 'Edit catatan' : 'Catatan baru'}
+      size="md"
+      footer={
+        <Button
+          className="w-full sm:w-auto"
+          disabled={saving || !content.trim()}
+          onClick={() => void save()}
+        >
+          {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
+          Simpan
+        </Button>
+      }
+    >
+      <div className="space-y-4" onKeyDown={onKeyDown}>
+        <div className="space-y-1.5">
+          <Label htmlFor="note-title" className="text-xs">
+            Judul
+          </Label>
+          <Input
+            id="note-title"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Judul (opsional)"
+          />
         </div>
-      </DialogContent>
-    </Dialog>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="note-content" className="text-xs">
+            Isi
+          </Label>
+          <Textarea
+            id="note-content"
+            value={content}
+            rows={8}
+            onChange={(event) => setContent(event.target.value)}
+            placeholder="Tulis catatan…"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="note-tags" className="text-xs">
+            Tag
+          </Label>
+          <Input
+            id="note-tags"
+            value={tags}
+            onChange={(event) => setTags(event.target.value)}
+            placeholder="Pisahkan dengan koma"
+          />
+        </div>
+      </div>
+    </ModalFormShell>
   )
 }
 
@@ -286,27 +294,31 @@ function NoteReader({
   if (!note) return null
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent unstyledBody className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="pr-6 text-left">{note.title || 'Tanpa judul'}</DialogTitle>
+          <DialogTitle className="text-left">{note.title || 'Tanpa judul'}</DialogTitle>
         </DialogHeader>
 
-        <div className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words text-sm">
-          {note.content || <span className="text-muted-foreground">Catatan ini kosong.</span>}
-        </div>
+        <DialogBody className="space-y-3">
+          <p className="whitespace-pre-wrap break-words text-sm">
+            {note.content || <span className="text-muted-foreground">Catatan ini kosong.</span>}
+          </p>
 
-        {note.tags.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            {note.tags.map((tag) => (
-              <Badge key={tag} variant="secondary">
-                {tag}
-              </Badge>
-            ))}
-          </div>
-        )}
+          {note.tags.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {note.tags.map((tag) => (
+                <Badge key={tag} variant="secondary">
+                  {tag}
+                </Badge>
+              ))}
+            </div>
+          )}
+        </DialogBody>
 
-        <div className="flex items-center justify-between border-t pt-3 text-xs text-muted-foreground">
-          <span>Diperbarui {formatDateTime(note.updatedAt.toDate(), tz)}</span>
+        <DialogFooter className="flex-row items-center justify-between sm:justify-between">
+          <span className="truncate text-xs text-muted-foreground">
+            Diperbarui {formatDateTime(note.updatedAt.toDate(), tz)}
+          </span>
           <Button
             size="sm"
             variant="outline"
@@ -317,7 +329,7 @@ function NoteReader({
           >
             Edit
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

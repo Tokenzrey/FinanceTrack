@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 import { Badge } from '@/shared/components/ui/badge'
 import { Button } from '@/shared/components/ui/button'
 import { Card, CardContent } from '@/shared/components/ui/card'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/components/ui/dialog'
+import { ModalFormShell } from '@/shared/components/ui/modal-form-shell'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -221,54 +221,53 @@ function TaskDueDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-sm">
-        <DialogHeader>
-          <DialogTitle>Atur jatuh tempo</DialogTitle>
-        </DialogHeader>
-
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="task-due" className="text-xs">
-              Tanggal &amp; waktu
-            </Label>
-            <Input
-              id="task-due"
-              type="datetime-local"
-              value={value}
-              onChange={(event) => setValue(event.target.value)}
-            />
-          </div>
-
-          <div className="flex gap-2">
+    <ModalFormShell
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Atur jatuh tempo"
+      size="sm"
+      footer={
+        <>
+          {task.dueAt && (
             <Button
-              className="flex-1"
-              disabled={saving || !value}
+              variant="outline"
+              className="w-full sm:w-auto"
+              disabled={saving}
               onClick={() =>
-                void run(
-                  () => setDue(task.id, task.title, datetimeLocalToUtc(value, tz), leads),
-                  'Jatuh tempo diatur',
-                )
+                void run(() => setDue(task.id, task.title, null, []), 'Jatuh tempo dihapus')
               }
             >
-              {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
-              Simpan
+              Hapus jatuh tempo
             </Button>
-            {task.dueAt && (
-              <Button
-                variant="outline"
-                disabled={saving}
-                onClick={() =>
-                  void run(() => setDue(task.id, task.title, null, []), 'Jatuh tempo dihapus')
-                }
-              >
-                Hapus jatuh tempo
-              </Button>
-            )}
-          </div>
-        </div>
-      </DialogContent>
-    </Dialog>
+          )}
+          <Button
+            className="w-full sm:w-auto"
+            disabled={saving || !value}
+            onClick={() =>
+              void run(
+                () => setDue(task.id, task.title, datetimeLocalToUtc(value, tz), leads),
+                'Jatuh tempo diatur',
+              )
+            }
+          >
+            {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
+            Simpan
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-1.5">
+        <Label htmlFor="task-due" className="text-xs">
+          Tanggal &amp; waktu
+        </Label>
+        <Input
+          id="task-due"
+          type="datetime-local"
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+        />
+      </div>
+    </ModalFormShell>
   )
 }
 

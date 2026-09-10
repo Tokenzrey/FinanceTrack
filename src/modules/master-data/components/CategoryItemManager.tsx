@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { Badge } from '@/shared/components/ui/badge'
 import { Button } from '@/shared/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui/card'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/components/ui/dialog'
+import { ModalFormShell } from '@/shared/components/ui/modal-form-shell'
 import { Input } from '@/shared/components/ui/input'
 import { Label } from '@/shared/components/ui/label'
 import { Switch } from '@/shared/components/ui/switch'
@@ -71,13 +71,19 @@ function ItemForm({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{item ? 'Ubah item' : 'Item baru'}</DialogTitle>
-        </DialogHeader>
-
-        <form onSubmit={submit} className="space-y-4">
+    <ModalFormShell
+      open={open}
+      onOpenChange={onOpenChange}
+      title={item ? 'Ubah item' : 'Item baru'}
+      size="md"
+      footer={
+        <Button form="cat-item-form" type="submit" className="w-full sm:w-auto" disabled={saving}>
+          {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
+          Simpan
+        </Button>
+      }
+    >
+      <form id="cat-item-form" onSubmit={submit} className="space-y-4">
           <div className="space-y-1.5">
             <Label htmlFor="item-name" className="text-xs">
               Nama item
@@ -127,13 +133,8 @@ function ItemForm({
             </div>
           )}
 
-          <Button type="submit" className="w-full" disabled={saving}>
-            {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
-            Simpan
-          </Button>
         </form>
-      </DialogContent>
-    </Dialog>
+    </ModalFormShell>
   )
 }
 

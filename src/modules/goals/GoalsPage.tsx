@@ -16,7 +16,7 @@ import { toast } from 'sonner'
 import { Badge } from '@/shared/components/ui/badge'
 import { Button } from '@/shared/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui/card'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/components/ui/dialog'
+import { ModalFormShell } from '@/shared/components/ui/modal-form-shell'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -126,19 +126,33 @@ function GoalForm({
     }
   }
 
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{goal ? 'Ubah target' : 'Target baru'}</DialogTitle>
-        </DialogHeader>
+  const canSubmit = savingsCategories.length > 0
 
-        {savingsCategories.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Buat dulu minimal satu kategori di pilar Tabungan lewat Master Data.
-          </p>
-        ) : (
-          <form onSubmit={submit} className="space-y-4">
+  return (
+    <ModalFormShell
+      open={open}
+      onOpenChange={onOpenChange}
+      title={goal ? 'Ubah target' : 'Target baru'}
+      description="Tetapkan sasaran tabungan dan setoran bulanannya."
+      size="md"
+      footer={
+        <Button
+          form="goal-form"
+          type="submit"
+          className="w-full sm:w-auto"
+          disabled={saving || !canSubmit}
+        >
+          {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
+          Simpan
+        </Button>
+      }
+    >
+      {!canSubmit ? (
+        <p className="text-sm text-muted-foreground">
+          Buat dulu minimal satu kategori di pilar Tabungan lewat Master Data.
+        </p>
+      ) : (
+        <form id="goal-form" onSubmit={submit} className="space-y-4">
             <div className="space-y-1.5">
               <span className="text-xs font-medium">Emoji</span>
               <div className="flex flex-wrap gap-1.5">
@@ -234,14 +248,9 @@ function GoalForm({
               </Select>
             </div>
 
-            <Button type="submit" className="w-full" disabled={saving}>
-              {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
-              Simpan
-            </Button>
           </form>
-        )}
-      </DialogContent>
-    </Dialog>
+      )}
+    </ModalFormShell>
   )
 }
 
@@ -296,35 +305,33 @@ function ContributionDialog({
   }
 
   return (
-    <Dialog open onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>Setor ke {goal.name}</DialogTitle>
-        </DialogHeader>
-        <form onSubmit={submit} className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="contrib-amount" className="text-xs">
-              Jumlah
-            </Label>
-            <MoneyInput id="contrib-amount" value={amount} onChange={setAmount} autoFocus />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="contrib-note" className="text-xs">
-              Catatan <span className="text-muted-foreground">(opsional)</span>
-            </Label>
-            <Input
-              id="contrib-note"
-              value={note}
-              onChange={(event) => setNote(event.target.value)}
-            />
-          </div>
-          <Button type="submit" className="w-full" disabled={saving}>
-            {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
-            Setor
-          </Button>
-        </form>
-      </DialogContent>
-    </Dialog>
+    <ModalFormShell
+      open
+      onOpenChange={onOpenChange}
+      title={`Setor ke ${goal.name}`}
+      size="md"
+      footer={
+        <Button form="contrib-form" type="submit" className="w-full sm:w-auto" disabled={saving}>
+          {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
+          Setor
+        </Button>
+      }
+    >
+      <form id="contrib-form" onSubmit={submit} className="space-y-4">
+        <div className="space-y-1.5">
+          <Label htmlFor="contrib-amount" className="text-xs">
+            Jumlah
+          </Label>
+          <MoneyInput id="contrib-amount" value={amount} onChange={setAmount} autoFocus />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="contrib-note" className="text-xs">
+            Catatan <span className="text-muted-foreground">(opsional)</span>
+          </Label>
+          <Input id="contrib-note" value={note} onChange={(event) => setNote(event.target.value)} />
+        </div>
+      </form>
+    </ModalFormShell>
   )
 }
 
