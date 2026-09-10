@@ -328,10 +328,11 @@ export function TimelineBar({
           }}
         />
 
-        {/* Sticking drag tooltip. */}
+        {/* Drag tooltip — anchored inside the bar's top-left so the track's
+            `overflow-hidden` (which stops left-bleed onto the gutter) keeps it visible. */}
         {dragging && (
           <div
-            className="pointer-events-none absolute -top-6 left-0 whitespace-nowrap rounded bg-foreground px-1.5 py-0.5 text-[10px] text-background"
+            className="pointer-events-none absolute left-1 top-1 z-20 whitespace-nowrap rounded bg-foreground px-1.5 py-0.5 text-[10px] text-background shadow-sm"
             role="status"
           >
             {drag!.mode === 'resize-start'

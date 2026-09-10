@@ -202,67 +202,63 @@ function ScheduleField({
   }
 
   return (
-    <div className="w-full space-y-2 rounded-lg border border-border/80 bg-background/95 p-2.5 shadow-xs">
-      <div className="grid grid-cols-2 gap-2">
-        <div className="min-w-0">
-          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Tanggal
-          </label>
-          <Input
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            className="h-8 w-full min-w-0 px-2 text-xs"
-            aria-label={`${label} tanggal`}
-          />
-        </div>
-        <div className="min-w-0">
-          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            Waktu
-          </label>
-          <Input
-            type="time"
-            value={time}
-            onChange={(e) => setTime(e.target.value)}
-            className="h-8 w-full min-w-0 px-2 text-xs"
-            aria-label={`${label} waktu`}
-          />
-        </div>
+    <div className="w-full space-y-2.5 rounded-lg border border-border/80 bg-background/95 p-3 shadow-xs">
+      <div className="space-y-1.5">
+        <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Tanggal
+        </label>
+        <Input
+          type="date"
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
+          className="h-9 w-full min-w-0 text-sm"
+          aria-label={`${label} tanggal`}
+        />
       </div>
-      <div className="flex items-center justify-between border-t border-border/50 pt-2">
-        <div className="flex items-center gap-1.5">
-          <Button
-            type="button"
-            size="sm"
-            className="h-7 px-2.5 text-xs font-medium"
-            onClick={() => {
-              commit(date, time)
-              setEditing(false)
-            }}
-          >
-            Simpan
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
-            onClick={() => {
-              const prev = toDateTimeParts(ts, tz)
-              setDate(prev.date)
-              setTime(prev.time)
-              setEditing(false)
-            }}
-          >
-            Batal
-          </Button>
-        </div>
+      <div className="space-y-1.5">
+        <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Waktu
+        </label>
+        <Input
+          type="time"
+          value={time}
+          onChange={(e) => setTime(e.target.value)}
+          className="h-9 w-full min-w-0 text-sm"
+          aria-label={`${label} waktu`}
+        />
+      </div>
+      <div className="flex flex-wrap items-center gap-2 border-t border-border/50 pt-2.5">
+        <Button
+          type="button"
+          size="sm"
+          className="h-8 flex-1 text-xs font-medium"
+          onClick={() => {
+            commit(date, time)
+            setEditing(false)
+          }}
+        >
+          Simpan
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 px-3 text-xs text-muted-foreground hover:text-foreground"
+          onClick={() => {
+            const prev = toDateTimeParts(ts, tz)
+            setDate(prev.date)
+            setTime(prev.time)
+            setEditing(false)
+          }}
+        >
+          Batal
+        </Button>
         {date && (
           <Button
             type="button"
             size="sm"
             variant="ghost"
-            className="h-7 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+            className="h-8 px-3 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
             onClick={() => {
               commit('', '')
               setEditing(false)
@@ -315,63 +311,63 @@ function ReminderAdder({
   }
 
   return (
-    <div className="w-full space-y-2 rounded-lg border border-border/80 bg-background/95 p-2.5 shadow-xs">
-      <div className="grid grid-cols-2 gap-2">
-        <div className="min-w-0">
-          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+    <div className="w-full space-y-2.5 rounded-lg border border-border/80 bg-background/95 p-3 shadow-xs">
+      <div className="grid grid-cols-[1fr_auto] gap-2">
+        <div className="min-w-0 space-y-1.5">
+          <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Tanggal
           </label>
           <Input
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
-            className="h-8 w-full min-w-0 px-2 text-xs"
+            className="h-9 w-full min-w-0 text-sm"
             aria-label="Tanggal pengingat"
           />
         </div>
-        <div className="min-w-0">
-          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <div className="w-24 space-y-1.5">
+          <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Waktu
           </label>
           <Input
             type="time"
             value={time}
             onChange={(e) => setTime(e.target.value)}
-            className="h-8 w-full min-w-0 px-2 text-xs"
+            className="h-9 w-full min-w-0 text-sm"
             aria-label="Waktu pengingat"
           />
         </div>
       </div>
-      <div>
-        <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+      <div className="space-y-1.5">
+        <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           Pesan
         </label>
         <Input
           value={message}
           onChange={(e) => setMessage(e.target.value)}
-          className="h-8 text-xs px-2 w-full"
+          className="h-9 w-full text-sm"
           aria-label="Isi pengingat"
           placeholder="Pesan pengingat"
         />
       </div>
-      <div className="flex items-center justify-end gap-1.5 border-t border-border/50 pt-2">
+      <div className="flex items-center gap-2 border-t border-border/50 pt-2.5">
         <Button
           type="button"
           size="sm"
-          variant="ghost"
-          className="h-7 px-2 text-xs text-muted-foreground"
-          onClick={onDone}
-        >
-          Batal
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          className="h-7 px-3 text-xs font-medium"
+          className="h-8 flex-1 text-xs font-medium"
           disabled={busy}
           onClick={() => void submit()}
         >
           Tambah
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-8 px-3 text-xs text-muted-foreground hover:text-foreground"
+          onClick={onDone}
+        >
+          Batal
         </Button>
       </div>
     </div>

@@ -431,8 +431,8 @@ export function TimelineView() {
                 {/* Sticky name gutter - 100% opaque solid background */}
                 <div
                   className={cn(
-                    'sticky left-0 z-20 flex shrink-0 items-center gap-1.5 border-b border-r border-border bg-background px-2.5 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)] dark:shadow-[2px_0_6px_-2px_rgba(0,0,0,0.25)] transition-colors',
-                    focusedTaskId === task.id ? 'bg-primary/10' : 'hover:bg-muted/30',
+                    'sticky left-0 z-[100] flex shrink-0 items-center gap-1.5 border-b border-r border-border bg-background px-2.5 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)] dark:shadow-[2px_0_6px_-2px_rgba(0,0,0,0.25)] transition-colors',
+                    focusedTaskId === task.id ? 'bg-primary/10' : 'hover:bg-muted/80',
                     GUTTER_CLASS,
                   )}
                 >
@@ -460,10 +460,12 @@ export function TimelineView() {
                   </button>
                 </div>
 
-                {/* Grid track — day-cell background; Task 14 mounts the bar here. */}
+                {/* Grid track — day-cell background; Task 14 mounts the bar here.
+                    `overflow-hidden` keeps a bar (and its title) that starts before
+                    the visible range from bleeding left over the sticky name gutter. */}
                 <div
                   className={cn(
-                    'relative flex border-b border-border transition-colors duration-200 motion-reduce:transition-none',
+                    'relative flex overflow-hidden border-b border-border transition-colors duration-200 motion-reduce:transition-none',
                     focusedTaskId === task.id && 'bg-primary/5',
                   )}
                   style={{ width: gridWidth, height: ROW_HEIGHT }}
