@@ -108,7 +108,7 @@ export function ReceiptViewerDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent unstyledBody className="max-w-2xl">
+      <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>Struk</DialogTitle>
         </DialogHeader>

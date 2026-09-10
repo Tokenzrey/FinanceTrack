@@ -14,7 +14,14 @@ import {
 import { toast } from 'sonner'
 import { Button } from '@/shared/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/shared/components/ui/card'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/components/ui/dialog'
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/shared/components/ui/dialog'
 import { Input } from '@/shared/components/ui/input'
 import { Label } from '@/shared/components/ui/label'
 import { Textarea } from '@/shared/components/ui/textarea'
@@ -539,21 +546,24 @@ export function ReportsPage() {
           <DialogHeader>
             <DialogTitle>Tautan laporan</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Siapa pun dengan tautan ini bisa melihat ringkasan {formatMonthLong(year, month)} —
-            hanya angka ringkasan seperti di halaman ini, tanpa transaksi mentah atau data akunmu.
-          </p>
-          <div className="flex gap-2">
+          <DialogBody className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Siapa pun dengan tautan ini bisa melihat ringkasan {formatMonthLong(year, month)} —
+              hanya angka ringkasan seperti di halaman ini, tanpa transaksi mentah atau data
+              akunmu.
+            </p>
             <Input
               readOnly
               value={shareUrl ?? ''}
               onFocus={(event) => event.target.select()}
               className="text-xs"
             />
-            <Button onClick={copyShareLink} className="shrink-0">
-              Salin
+          </DialogBody>
+          <DialogFooter>
+            <Button onClick={copyShareLink} className="w-full sm:w-auto">
+              Salin tautan
             </Button>
-          </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

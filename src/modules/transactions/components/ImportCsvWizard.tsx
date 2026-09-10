@@ -5,7 +5,13 @@ import { FileUp, Loader2, Upload } from 'lucide-react'
 import { toast } from 'sonner'
 import { Badge } from '@/shared/components/ui/badge'
 import { Button } from '@/shared/components/ui/button'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/components/ui/dialog'
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/shared/components/ui/dialog'
 import { Label } from '@/shared/components/ui/label'
 import { MoneyDisplay } from '@/shared/components/finance/MoneyDisplay'
 import { parseCsv, type CsvDateFormat } from '@/shared/lib/csv'
@@ -142,11 +148,12 @@ export function ImportCsvWizard({
         if (!next) reset()
       }}
     >
-      <DialogContent className="max-w-2xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Impor transaksi dari CSV</DialogTitle>
         </DialogHeader>
 
+        <DialogBody>
         {step === 'upload' && (
           <div className="space-y-3">
             <p className="text-sm text-muted-foreground">
@@ -331,6 +338,7 @@ export function ImportCsvWizard({
             </Button>
           </div>
         )}
+        </DialogBody>
       </DialogContent>
     </Dialog>
   )

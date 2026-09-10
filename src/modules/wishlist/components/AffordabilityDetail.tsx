@@ -3,6 +3,7 @@
 import { AlertTriangle, CheckCircle2, PiggyBank, TrendingUp } from 'lucide-react'
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -76,7 +77,7 @@ export function AffordabilityDetail({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <DialogBody className="space-y-4">
           <div className={cn('flex items-center gap-3 rounded-2xl border p-4', style.className)}>
             <Icon className="size-6 shrink-0" aria-hidden />
             <div className="min-w-0 flex-1">
@@ -148,7 +149,7 @@ export function AffordabilityDetail({
             Perhitungan memakai aset likuid, cicilan berjalan, dan anggaran bulan aktif yang
             tercatat di aplikasi. Semakin lengkap data Kekayaan Bersih, semakin akurat hasilnya.
           </p>
-        </div>
+        </DialogBody>
       </DialogContent>
     </Dialog>
   )

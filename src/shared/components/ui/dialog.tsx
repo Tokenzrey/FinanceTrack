@@ -31,35 +31,23 @@ DialogOverlay.displayName = DialogPrimitive.Overlay.displayName
 
 const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
-    /** Drop the built-in padded scroll region — for a dialog that manages its own
-     *  zones (`DialogHeader` / `DialogBody` / `DialogFooter` as flex siblings). */
-    unstyledBody?: boolean
-  }
->(({ className, children, unstyledBody = false, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
+>(({ className, children, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
     <DialogPrimitive.Content
       ref={ref}
       className={cn(
-        // Bounded flex column, always inside the viewport. The child below is the one
-        // scroll region; `DialogHeader` / `DialogFooter` inside it are sticky, so the
-        // title and the primary action stay in view while a long form scrolls.
-        'fixed left-[50%] top-[50%] z-50 flex max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg translate-x-[-50%] translate-y-[-50%] flex-col overflow-hidden border bg-background shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:max-h-[calc(100dvh-4rem)] sm:rounded-lg',
+        // Bounded flex column, always inside the viewport. Compose the three zones as
+        // direct children: `DialogHeader` (fixed) · `DialogBody` (the one scroll
+        // region) · `DialogFooter` (fixed). A short dialog can still drop `DialogBody`
+        // and pass content straight through — it just won't scroll.
+        'fixed left-[50%] top-[50%] z-50 flex max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg translate-x-[-50%] translate-y-[-50%] flex-col overflow-hidden border bg-background shadow-lg duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[state=closed]:slide-out-to-left-1/2 data-[state=closed]:slide-out-to-top-[48%] data-[state=open]:slide-in-from-left-1/2 data-[state=open]:slide-in-from-top-[48%] sm:max-h-[calc(100dvh-3rem)] sm:rounded-lg',
         className,
       )}
       {...props}
     >
-      {unstyledBody ? (
-        children
-      ) : (
-        // Default scroll region with a content gutter. A `DialogHeader` / `DialogFooter`
-        // placed directly inside breaks out to the panel edges (see their `-mx`/`-my`)
-        // and sticks; plain content keeps the `px-6 py-5` padding.
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain px-6 py-5">
-          {children}
-        </div>
-      )}
+      {children}
       <DialogPrimitive.Close className="absolute right-4 top-4 z-10 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-accent data-[state=open]:text-muted-foreground">
         <X className="h-4 w-4" />
         <span className="sr-only">Tutup</span>
@@ -69,15 +57,11 @@ const DialogContent = React.forwardRef<
 ))
 DialogContent.displayName = DialogPrimitive.Content.displayName
 
-/**
- * Sticks to the top of the scroll region so the title stays visible on a long form.
- * The negative margins cancel the default body gutter so the header (and its border)
- * span the full panel width; `pr-12` keeps clear of the close button.
- */
+/** Fixed top zone: title + optional description, a divider, and room for the close button. */
 const DialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn(
-      'sticky top-0 z-[1] -mx-6 -mt-5 mb-1 flex flex-col space-y-1.5 border-b bg-background px-6 py-4 pr-12 text-left',
+      'flex shrink-0 flex-col space-y-1 border-b px-6 py-4 pr-12 text-left',
       className,
     )}
     {...props}
@@ -85,7 +69,7 @@ const DialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivEleme
 )
 DialogHeader.displayName = 'DialogHeader'
 
-/** Explicit content zone — for the `unstyledBody` layout where the gutter isn't inherited. */
+/** The one scroll region, between header and footer. Its gutter matches them. */
 const DialogBody = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-5', className)}
@@ -94,14 +78,11 @@ const DialogBody = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement
 )
 DialogBody.displayName = 'DialogBody'
 
-/**
- * Sticks to the bottom of the scroll region so the primary action stays reachable.
- * Negative margins match `DialogHeader` so the footer spans the full panel width.
- */
+/** Fixed bottom zone for the primary action. Full-width buttons stack on mobile. */
 const DialogFooter = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
     className={cn(
-      'sticky bottom-0 z-[1] -mx-6 -mb-5 mt-1 flex flex-col-reverse gap-2 border-t bg-background px-6 py-4 sm:flex-row sm:justify-end',
+      'flex shrink-0 flex-col-reverse gap-2 border-t px-6 py-4 sm:flex-row sm:justify-end',
       className,
     )}
     {...props}

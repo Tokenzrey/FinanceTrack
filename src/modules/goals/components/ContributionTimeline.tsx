@@ -2,7 +2,13 @@
 
 import { useEffect, useState } from 'react'
 import { History } from 'lucide-react'
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/components/ui/dialog'
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/shared/components/ui/dialog'
 import { LoadingSkeleton } from '@/shared/components/finance/EmptyState'
 import { MoneyDisplay } from '@/shared/components/finance/MoneyDisplay'
 import { formatDay } from '@/shared/lib/format'
@@ -43,30 +49,35 @@ export function ContributionTimeline({
           </DialogTitle>
         </DialogHeader>
 
-        {loading ? (
-          <LoadingSkeleton rows={4} />
-        ) : contributions.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">
-            Belum ada setoran tercatat untuk target ini.
-          </p>
-        ) : (
-          <ul className="space-y-2">
-            {contributions.map((contribution) => (
-              <li
-                key={contribution.id}
-                className="flex items-center justify-between gap-3 rounded-xl border p-3"
-              >
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">{formatDay(contribution.date.toDate())}</p>
-                  {contribution.note && (
-                    <p className="truncate text-xs text-muted-foreground">{contribution.note}</p>
-                  )}
-                </div>
-                <MoneyDisplay value={contribution.amount} className="shrink-0 font-semibold text-safe" />
-              </li>
-            ))}
-          </ul>
-        )}
+        <DialogBody>
+          {loading ? (
+            <LoadingSkeleton rows={4} />
+          ) : contributions.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">
+              Belum ada setoran tercatat untuk target ini.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {contributions.map((contribution) => (
+                <li
+                  key={contribution.id}
+                  className="flex items-center justify-between gap-3 rounded-xl border p-3"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">{formatDay(contribution.date.toDate())}</p>
+                    {contribution.note && (
+                      <p className="truncate text-xs text-muted-foreground">{contribution.note}</p>
+                    )}
+                  </div>
+                  <MoneyDisplay
+                    value={contribution.amount}
+                    className="shrink-0 font-semibold text-safe"
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
+        </DialogBody>
       </DialogContent>
     </Dialog>
   )

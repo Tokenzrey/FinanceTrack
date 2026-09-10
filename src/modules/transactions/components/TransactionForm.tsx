@@ -264,8 +264,9 @@ function TransactionFormBody({
         </div>
       </div>
 
-      <div className="grid gap-3 rounded-xl border p-3 sm:grid-cols-2">
+      <div className="grid gap-3 rounded-xl border bg-muted/30 p-3 sm:grid-cols-2">
         <CategoryCascader
+          className="contents"
           pillar={pillar}
           categoryId={categoryId}
           categoryItemId={categoryItemId}

@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { Button } from '@/shared/components/ui/button'
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -195,7 +196,7 @@ export function ScanDialog({ open, onOpenChange, onSaved }: ScanDialogProps) {
             <DialogTitle>{title}</DialogTitle>
             <DialogDescription>{description}</DialogDescription>
           </DialogHeader>
-          {body}
+          <DialogBody>{body}</DialogBody>
         </DialogContent>
       </Dialog>
     )

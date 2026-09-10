@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
   DialogHeader,
@@ -98,7 +99,7 @@ export function TaskDetailPanel() {
             <DialogTitle className="font-display">{task.title}</DialogTitle>
             <DialogDescription className="sr-only">Detail tugas</DialogDescription>
           </DialogHeader>
-          {body}
+          <DialogBody>{body}</DialogBody>
         </DialogContent>
       </Dialog>
     )

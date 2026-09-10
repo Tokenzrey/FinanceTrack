@@ -294,7 +294,7 @@ function NoteReader({
   if (!note) return null
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent unstyledBody className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="text-left">{note.title || 'Tanpa judul'}</DialogTitle>
         </DialogHeader>

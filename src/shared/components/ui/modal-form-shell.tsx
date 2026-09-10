@@ -57,13 +57,13 @@ export function ModalFormShell({
   if (isDesktop) {
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent unstyledBody className={maxWidth}>
-          <DialogHeader className="mx-0 mt-0">
+        <DialogContent className={maxWidth}>
+          <DialogHeader>
             <DialogTitle>{title}</DialogTitle>
             {description && <DialogDescription>{description}</DialogDescription>}
           </DialogHeader>
           <DialogBody>{children}</DialogBody>
-          <DialogFooter className="mx-0 mb-0">{footer}</DialogFooter>
+          <DialogFooter>{footer}</DialogFooter>
         </DialogContent>
       </Dialog>
     )

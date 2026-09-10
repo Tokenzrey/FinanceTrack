@@ -7,8 +7,10 @@ import { toast } from 'sonner'
 import { Button } from '@/shared/components/ui/button'
 import {
   Dialog,
+  DialogBody,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/shared/components/ui/dialog'
@@ -176,21 +178,23 @@ export function LabelManagerDialog({
           )}
         </DialogHeader>
 
-        {labels.length > 0 && (
-          <ul className="space-y-1.5">
-            {labels.map((l) => (
-              <LabelRow
-                key={l.id}
-                label={l}
-                onRename={(name) => void updateLabel(l.id, { name }).catch(fail)}
-                onRecolor={(colorKey) => void updateLabel(l.id, { colorKey }).catch(fail)}
-                onDelete={() => void deleteLabel(l.id).catch(fail)}
-              />
-            ))}
-          </ul>
-        )}
+        <DialogBody>
+          {labels.length > 0 && (
+            <ul className="space-y-1.5">
+              {labels.map((l) => (
+                <LabelRow
+                  key={l.id}
+                  label={l}
+                  onRename={(name) => void updateLabel(l.id, { name }).catch(fail)}
+                  onRecolor={(colorKey) => void updateLabel(l.id, { colorKey }).catch(fail)}
+                  onDelete={() => void deleteLabel(l.id).catch(fail)}
+                />
+              ))}
+            </ul>
+          )}
+        </DialogBody>
 
-        <div className="space-y-1.5 border-t border-border pt-3">
+        <DialogFooter className="flex-col gap-1.5 sm:flex-col">
           <Input
             value={newName}
             maxLength={24}
@@ -208,7 +212,7 @@ export function LabelManagerDialog({
               Tambah
             </Button>
           </div>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )

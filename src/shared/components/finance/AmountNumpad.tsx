@@ -56,7 +56,7 @@ export function AmountNumpad({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent unstyledBody className="max-w-xs">
+      <DialogContent className="max-w-xs">
         <DialogHeader>
           <DialogTitle>Masukkan jumlah</DialogTitle>
         </DialogHeader>

@@ -54,10 +54,6 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
   done: 'Selesai',
 }
 
-/** Shared styling for a click-to-edit display button in a rail Row. */
-const DISPLAY_BUTTON_CLASS =
-  'rounded-md px-1 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
-
 const SOURCE_LABELS: Record<Task['source'], string> = {
   web: 'Web',
   whatsapp: 'WhatsApp',

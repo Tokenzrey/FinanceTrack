@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
+import { cn } from '@/shared/lib/utils'
 import { Label } from '@/shared/components/ui/label'
 import {
   Select,
@@ -20,6 +21,9 @@ interface CategoryCascaderProps {
   onChange: (value: { pillar: Pillar | ''; categoryId: string; categoryItemId: string }) => void
   /** Income transactions pick from income categories only, and vice versa. */
   incomeMode?: boolean
+  /** Overrides the default 3-column grid — pass `contents` to drop the wrapper and let
+   *  the parent lay the three selects out in its own grid. */
+  className?: string
 }
 
 /**
@@ -34,6 +38,7 @@ export function CategoryCascader({
   categoryItemId,
   onChange,
   incomeMode = false,
+  className,
 }: CategoryCascaderProps) {
   const categories = useMasterDataStore((s) => s.categories)
   const categoryItems = useMasterDataStore((s) => s.categoryItems)
@@ -51,7 +56,7 @@ export function CategoryCascader({
   )
 
   return (
-    <div className="grid gap-3 sm:grid-cols-3">
+    <div className={cn('grid gap-3 sm:grid-cols-3', className)}>
       <div className="space-y-1.5">
         <Label htmlFor="tx-pillar" className="text-xs">
           Pilar
