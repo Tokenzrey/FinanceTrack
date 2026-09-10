@@ -27,20 +27,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/shared/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/shared/components/ui/dialog'
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerHeader,
-  DrawerTitle,
-} from '@/shared/components/ui/drawer'
+import { ModalFormShell } from '@/shared/components/ui/modal-form-shell'
 import { Input } from '@/shared/components/ui/input'
 import { Label } from '@/shared/components/ui/label'
 import {
@@ -53,7 +40,6 @@ import {
 import { Switch } from '@/shared/components/ui/switch'
 import { MoneyInput } from '@/shared/components/finance/MoneyInput'
 import { PercentInput } from '@/shared/components/finance/PercentInput'
-import { useIsDesktop } from '@/shared/hooks/useMediaQuery'
 import { cn } from '@/shared/lib/utils'
 import { formatIDR } from '@/shared/lib/format'
 import { useBudgetStore } from '@/shared/stores/budget.store'
@@ -104,7 +90,17 @@ const PRESET_COLORS = [
 
 const SPEND_PILLARS: Exclude<Pillar, 'income'>[] = ['needs', 'wants', 'savings']
 
-function FormBody({ category, onDone }: { category?: Category | null; onDone: () => void }) {
+const FORM_ID = 'category-form'
+
+function FormBody({
+  category,
+  onDone,
+  onSavingChange,
+}: {
+  category?: Category | null
+  onDone: () => void
+  onSavingChange: (saving: boolean) => void
+}) {
   const addCategory = useMasterDataStore((s) => s.addCategory)
   const updateCategory = useMasterDataStore((s) => s.updateCategory)
   const summary = useBudgetStore((s) => s.summary)
@@ -118,7 +114,7 @@ function FormBody({ category, onDone }: { category?: Category | null; onDone: ()
   const [icon, setIcon] = useState<CategoryIcon>(category?.icon ?? 'shopping-cart')
   const [isSinkingFund, setIsSinkingFund] = useState(category?.isSinkingFund ?? false)
   const [sinkingMonths, setSinkingMonths] = useState(category?.sinkingFundTargetMonths ?? 12)
-  const [saving, setSaving] = useState(false)
+  const setSaving = onSavingChange
 
   const income = summary?.totalIncome ?? 0
 
@@ -157,7 +153,7 @@ function FormBody({ category, onDone }: { category?: Category | null; onDone: ()
   const SelectedIcon = CATEGORY_ICONS[icon]
 
   return (
-    <form onSubmit={submit} className="space-y-4">
+    <form id={FORM_ID} onSubmit={submit} className="space-y-4">
       <div className="flex items-center gap-3">
         <span
           className="flex size-11 shrink-0 items-center justify-center rounded-2xl text-white"
@@ -362,10 +358,6 @@ function FormBody({ category, onDone }: { category?: Category | null; onDone: ()
         </div>
       )}
 
-      <Button type="submit" className="w-full" disabled={saving}>
-        {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
-        {category ? 'Simpan perubahan' : 'Tambah kategori'}
-      </Button>
     </form>
   )
 }
@@ -379,34 +371,29 @@ export function CategoryForm({
   onOpenChange: (open: boolean) => void
   category?: Category | null
 }) {
-  const isDesktop = useIsDesktop()
+  const [saving, setSaving] = useState(false)
   const title = category ? 'Ubah kategori' : 'Kategori baru'
-  const description = 'Atur pilar, porsi anggaran, ikon, dan warna.'
-  const body = open ? <FormBody category={category} onDone={() => onOpenChange(false)} /> : null
-
-  if (isDesktop) {
-    return (
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{title}</DialogTitle>
-            <DialogDescription>{description}</DialogDescription>
-          </DialogHeader>
-          {body}
-        </DialogContent>
-      </Dialog>
-    )
-  }
 
   return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="max-h-[92dvh]">
-        <DrawerHeader className="text-left">
-          <DrawerTitle>{title}</DrawerTitle>
-          <DrawerDescription>{description}</DrawerDescription>
-        </DrawerHeader>
-        <div className="overflow-y-auto px-4 pb-8">{body}</div>
-      </DrawerContent>
-    </Drawer>
+    <ModalFormShell
+      open={open}
+      onOpenChange={onOpenChange}
+      title={title}
+      description="Atur pilar, porsi anggaran, ikon, dan warna."
+      footer={
+        <Button form={FORM_ID} type="submit" className="w-full sm:w-auto" disabled={saving}>
+          {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
+          {category ? 'Simpan perubahan' : 'Tambah kategori'}
+        </Button>
+      }
+    >
+      {open && (
+        <FormBody
+          category={category}
+          onDone={() => onOpenChange(false)}
+          onSavingChange={setSaving}
+        />
+      )}
+    </ModalFormShell>
   )
 }

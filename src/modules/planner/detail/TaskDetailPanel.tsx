@@ -13,6 +13,7 @@ import {
 } from '@/shared/components/ui/dialog'
 import {
   Drawer,
+  DrawerBody,
   DrawerContent,
   DrawerDescription,
   DrawerHeader,
@@ -105,12 +106,12 @@ export function TaskDetailPanel() {
 
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent data-testid="task-detail-drawer" className="max-h-[92dvh]">
-        <DrawerHeader className="text-left">
+      <DrawerContent data-testid="task-detail-drawer">
+        <DrawerHeader>
           <DrawerTitle className="font-display">{task.title}</DrawerTitle>
           <DrawerDescription className="sr-only">Detail tugas</DrawerDescription>
         </DrawerHeader>
-        <div className="overflow-y-auto px-4 pb-8">{body}</div>
+        <DrawerBody className="pb-8">{body}</DrawerBody>
       </DrawerContent>
     </Drawer>
   )

@@ -13,6 +13,7 @@ import {
 } from '@/shared/components/ui/dialog'
 import {
   Drawer,
+  DrawerBody,
   DrawerContent,
   DrawerDescription,
   DrawerHeader,
@@ -189,7 +190,7 @@ export function ScanDialog({ open, onOpenChange, onSaved }: ScanDialogProps) {
   if (isDesktop) {
     return (
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
+        <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{title}</DialogTitle>
             <DialogDescription>{description}</DialogDescription>
@@ -202,12 +203,12 @@ export function ScanDialog({ open, onOpenChange, onSaved }: ScanDialogProps) {
 
   return (
     <Drawer open={open} onOpenChange={handleOpenChange}>
-      <DrawerContent className="max-h-[92dvh]">
-        <DrawerHeader className="text-left">
+      <DrawerContent>
+        <DrawerHeader>
           <DrawerTitle>{title}</DrawerTitle>
           <DrawerDescription>{description}</DrawerDescription>
         </DrawerHeader>
-        <div className="overflow-y-auto px-4 pb-8">{body}</div>
+        <DrawerBody>{body}</DrawerBody>
       </DrawerContent>
     </Drawer>
   )

@@ -40,12 +40,15 @@ const DrawerContent = React.forwardRef<
     <DrawerPrimitive.Content
       ref={ref}
       className={cn(
-        'fixed inset-x-0 bottom-0 z-50 mt-24 flex h-auto flex-col rounded-t-[10px] border bg-background',
+        // Capped just under the viewport so a tall form scrolls inside `DrawerBody`
+        // rather than pushing the grabber off-screen. `overflow-hidden` keeps the
+        // rounded top corners clipping the scroll region.
+        'fixed inset-x-0 bottom-0 z-50 mt-24 flex h-auto max-h-[calc(100dvh-4rem)] flex-col overflow-hidden rounded-t-[10px] border bg-background',
         className,
       )}
       {...props}
     >
-      <div className="mx-auto mt-4 h-2 w-[100px] rounded-full bg-muted" />
+      <div className="mx-auto mt-3 h-1.5 w-12 shrink-0 rounded-full bg-muted" />
       {children}
     </DrawerPrimitive.Content>
   </DrawerPortal>
@@ -53,12 +56,27 @@ const DrawerContent = React.forwardRef<
 DrawerContent.displayName = 'DrawerContent'
 
 const DrawerHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn('grid gap-1.5 p-4 text-center sm:text-left', className)} {...props} />
+  <div
+    className={cn('grid shrink-0 gap-1.5 border-b px-4 py-3 text-left', className)}
+    {...props}
+  />
 )
 DrawerHeader.displayName = 'DrawerHeader'
 
+/** The scrolling middle of a drawer. Sibling of the header and footer, not nested. */
+const DrawerBody = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+  <div
+    className={cn('min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4', className)}
+    {...props}
+  />
+)
+DrawerBody.displayName = 'DrawerBody'
+
 const DrawerFooter = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn('mt-auto flex flex-col gap-2 p-4', className)} {...props} />
+  <div
+    className={cn('flex shrink-0 flex-col gap-2 border-t bg-background px-4 py-3', className)}
+    {...props}
+  />
 )
 DrawerFooter.displayName = 'DrawerFooter'
 
@@ -94,6 +112,7 @@ export {
   DrawerClose,
   DrawerContent,
   DrawerHeader,
+  DrawerBody,
   DrawerFooter,
   DrawerTitle,
   DrawerDescription,

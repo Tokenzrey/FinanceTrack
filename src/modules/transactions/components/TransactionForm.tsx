@@ -4,25 +4,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/shared/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/shared/components/ui/dialog'
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerHeader,
-  DrawerTitle,
-} from '@/shared/components/ui/drawer'
+import { ModalFormShell } from '@/shared/components/ui/modal-form-shell'
 import { Input } from '@/shared/components/ui/input'
 import { Label } from '@/shared/components/ui/label'
 import { Textarea } from '@/shared/components/ui/textarea'
 import { MoneyInput } from '@/shared/components/finance/MoneyInput'
-import { useIsDesktop } from '@/shared/hooks/useMediaQuery'
 import { useGoogleDrive } from '@/shared/hooks/useGoogleDrive'
 import { collectTags } from '@/shared/lib/transaction-filters'
 import { formatIDR } from '@/shared/lib/format'
@@ -65,14 +51,19 @@ const TYPES: { value: TransactionType; label: string }[] = [
   { value: 'transfer', label: 'Transfer' },
 ]
 
+/** Ties the pinned footer button (rendered by `ModalFormShell`) to the scrolling form. */
+const FORM_ID = 'transaction-form'
+
 function TransactionFormBody({
   transaction,
   initial,
   onDone,
+  onSavingChange,
 }: {
   transaction?: Transaction | null
   initial?: Partial<Transaction> | null
   onDone: () => void
+  onSavingChange: (saving: boolean) => void
 }) {
   const { executeWithToken } = useGoogleDrive()
   const transactions = useTransactionStore((s) => s.transactions)
@@ -125,7 +116,7 @@ function TransactionFormBody({
     gDriveWebViewLink: source?.gDriveWebViewLink,
     gDriveThumbnailLink: source?.gDriveThumbnailLink,
   })
-  const [saving, setSaving] = useState(false)
+  const setSaving = onSavingChange
 
   // Switching to income moves the pillar; keeping "needs" would file income as a cost.
   useEffect(() => {
@@ -219,7 +210,7 @@ function TransactionFormBody({
   }
 
   return (
-    <form onSubmit={submit} className="space-y-4 pb-16">
+    <form id={FORM_ID} onSubmit={submit} className="space-y-4">
       <div className="flex gap-2" role="group" aria-label="Jenis transaksi">
         {TYPES.map((option) => (
           <Button
@@ -385,62 +376,45 @@ function TransactionFormBody({
           setDrive({})
         }}
       />
-
-      <div className="sticky bottom-0 -mx-4 border-t bg-background/80 px-4 py-3 backdrop-blur">
-        <Button type="submit" className="w-full" disabled={saving}>
-          {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
-          {transaction ? 'Simpan perubahan' : 'Simpan transaksi'}
-        </Button>
-      </div>
     </form>
   )
 }
 
-/** Desktop gets a dialog, mobile a bottom sheet — same fields either way. */
+/** Desktop gets a dialog, mobile a bottom sheet — same fields, one shell. */
 export function TransactionForm({
   open,
   onOpenChange,
   transaction,
   initial,
 }: TransactionFormProps) {
-  const isDesktop = useIsDesktop()
+  const [saving, setSaving] = useState(false)
   const title = transaction ? 'Ubah transaksi' : 'Transaksi baru'
   const description = transaction
     ? 'Perbarui detail transaksi ini.'
     : 'Catat pemasukan atau pengeluaran.'
 
-  // Remounting on open resets the fields to the record being edited.
-  const body = open ? (
-    <TransactionFormBody
-      transaction={transaction}
-      initial={initial}
-      onDone={() => onOpenChange(false)}
-    />
-  ) : null
-
-  if (isDesktop) {
-    return (
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{title}</DialogTitle>
-            <DialogDescription>{description}</DialogDescription>
-          </DialogHeader>
-          {body}
-        </DialogContent>
-      </Dialog>
-    )
-  }
-
   return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="max-h-[92dvh]">
-        <DrawerHeader className="text-left">
-          <DrawerTitle>{title}</DrawerTitle>
-          <DrawerDescription>{description}</DrawerDescription>
-        </DrawerHeader>
-        <div className="overflow-y-auto px-4 pb-8">{body}</div>
-      </DrawerContent>
-    </Drawer>
+    <ModalFormShell
+      open={open}
+      onOpenChange={onOpenChange}
+      title={title}
+      description={description}
+      footer={
+        <Button form={FORM_ID} type="submit" className="w-full sm:w-auto" disabled={saving}>
+          {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
+          {transaction ? 'Simpan perubahan' : 'Simpan transaksi'}
+        </Button>
+      }
+    >
+      {/* Remounting on open resets the fields to the record being edited. */}
+      {open && (
+        <TransactionFormBody
+          transaction={transaction}
+          initial={initial}
+          onDone={() => onOpenChange(false)}
+          onSavingChange={setSaving}
+        />
+      )}
+    </ModalFormShell>
   )
 }

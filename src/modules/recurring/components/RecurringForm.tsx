@@ -4,20 +4,7 @@ import { useState } from 'react'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button } from '@/shared/components/ui/button'
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/shared/components/ui/dialog'
-import {
-  Drawer,
-  DrawerContent,
-  DrawerDescription,
-  DrawerHeader,
-  DrawerTitle,
-} from '@/shared/components/ui/drawer'
+import { ModalFormShell } from '@/shared/components/ui/modal-form-shell'
 import { Input } from '@/shared/components/ui/input'
 import { Label } from '@/shared/components/ui/label'
 import {
@@ -28,7 +15,6 @@ import {
   SelectValue,
 } from '@/shared/components/ui/select'
 import { MoneyInput } from '@/shared/components/finance/MoneyInput'
-import { useIsDesktop } from '@/shared/hooks/useMediaQuery'
 import { useMasterDataStore } from '@/shared/stores/master-data.store'
 import { useRecurringStore } from '@/shared/stores/recurring.store'
 import {
@@ -57,7 +43,17 @@ function toDateInput(date: Date): string {
   return `${date.getFullYear()}-${month}-${day}`
 }
 
-function FormBody({ rule, onDone }: { rule?: RecurringRule | null; onDone: () => void }) {
+const FORM_ID = 'recurring-form'
+
+function FormBody({
+  rule,
+  onDone,
+  onSavingChange,
+}: {
+  rule?: RecurringRule | null
+  onDone: () => void
+  onSavingChange: (saving: boolean) => void
+}) {
   const categories = useMasterDataStore((s) => s.categories)
   const create = useRecurringStore((s) => s.create)
   const update = useRecurringStore((s) => s.update)
@@ -73,7 +69,7 @@ function FormBody({ rule, onDone }: { rule?: RecurringRule | null; onDone: () =>
   )
   const [endDate, setEndDate] = useState(rule?.endDate ? toDateInput(rule.endDate.toDate()) : '')
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | ''>(rule?.paymentMethod ?? '')
-  const [saving, setSaving] = useState(false)
+  const setSaving = onSavingChange
 
   const active = categories.filter((c) => c.isActive && c.pillar !== 'income')
 
@@ -116,7 +112,7 @@ function FormBody({ rule, onDone }: { rule?: RecurringRule | null; onDone: () =>
   }
 
   return (
-    <form onSubmit={submit} className="space-y-4">
+    <form id={FORM_ID} onSubmit={submit} className="space-y-4">
       <div className="space-y-1.5">
         <Label htmlFor="rec-name" className="text-xs">
           Nama
@@ -261,10 +257,6 @@ function FormBody({ rule, onDone }: { rule?: RecurringRule | null; onDone: () =>
 
       <PaymentMethodSelect value={paymentMethod} onChange={setPaymentMethod} />
 
-      <Button type="submit" className="w-full" disabled={saving}>
-        {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
-        {rule ? 'Simpan perubahan' : 'Buat aturan'}
-      </Button>
     </form>
   )
 }
@@ -278,34 +270,25 @@ export function RecurringForm({
   onOpenChange: (open: boolean) => void
   rule?: RecurringRule | null
 }) {
-  const isDesktop = useIsDesktop()
+  const [saving, setSaving] = useState(false)
   const title = rule ? 'Ubah aturan berulang' : 'Aturan berulang baru'
-  const description = 'Tagihan, langganan, atau cicilan yang berulang tiap periode.'
-  const body = open ? <FormBody rule={rule} onDone={() => onOpenChange(false)} /> : null
-
-  if (isDesktop) {
-    return (
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>{title}</DialogTitle>
-            <DialogDescription>{description}</DialogDescription>
-          </DialogHeader>
-          {body}
-        </DialogContent>
-      </Dialog>
-    )
-  }
 
   return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent className="max-h-[92dvh]">
-        <DrawerHeader className="text-left">
-          <DrawerTitle>{title}</DrawerTitle>
-          <DrawerDescription>{description}</DrawerDescription>
-        </DrawerHeader>
-        <div className="overflow-y-auto px-4 pb-8">{body}</div>
-      </DrawerContent>
-    </Drawer>
+    <ModalFormShell
+      open={open}
+      onOpenChange={onOpenChange}
+      title={title}
+      description="Tagihan, langganan, atau cicilan yang berulang tiap periode."
+      footer={
+        <Button form={FORM_ID} type="submit" className="w-full sm:w-auto" disabled={saving}>
+          {saving && <Loader2 className="mr-2 size-4 animate-spin" />}
+          {rule ? 'Simpan perubahan' : 'Buat aturan'}
+        </Button>
+      }
+    >
+      {open && (
+        <FormBody rule={rule} onDone={() => onOpenChange(false)} onSavingChange={setSaving} />
+      )}
+    </ModalFormShell>
   )
 }
