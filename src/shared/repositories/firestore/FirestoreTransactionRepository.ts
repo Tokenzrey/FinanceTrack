@@ -166,6 +166,12 @@ export class FirestoreTransactionRepository implements ITransactionRepository {
       ...data,
       date: data.date ? Timestamp.fromDate(data.date) : undefined,
       amount: data.amount !== undefined ? Math.abs(data.amount) : undefined,
+      // Same normalisation as `toWriteModel`. An explicit `[]` / `0` from the edit
+      // form is kept (it clears a now-plain transaction); `undefined` is dropped.
+      title: data.title !== undefined ? data.title.trim() || undefined : undefined,
+      items: data.items !== undefined ? sanitizeItems(data.items) : undefined,
+      tax: data.tax !== undefined ? Math.max(0, Math.round(data.tax)) : undefined,
+      discount: data.discount !== undefined ? Math.max(0, Math.round(data.discount)) : undefined,
     })
     await updateDoc(colDoc(userId, NAME, id), { ...patch, updatedAt: serverTimestamp() })
   }

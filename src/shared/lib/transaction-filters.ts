@@ -116,9 +116,11 @@ export function filterTransactions(
 
     if (needle) {
       const haystack = [
+        tx.title ?? '',
         tx.description ?? '',
         tx.location ?? '',
         categoryNames[tx.categoryId] ?? '',
+        ...(tx.items?.map((i) => i.name) ?? []),
         ...tx.tags,
       ]
         .join(' ')

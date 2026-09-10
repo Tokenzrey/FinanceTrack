@@ -16,6 +16,7 @@ import { PillarColorDot } from '@/shared/components/finance/PillarBadge'
 import type { ReceiptRef } from '@/shared/components/finance/ReceiptViewerDialog'
 import { cn } from '@/shared/lib/utils'
 import { formatDay } from '@/shared/lib/format'
+import { deriveTransactionTitle } from '@/shared/lib/transaction-items'
 import type { Category, Transaction } from '@/shared/types/domain'
 import { PAYMENT_METHODS } from './FormFields'
 
@@ -101,7 +102,7 @@ export function TransactionTable({
                 <Checkbox
                   checked={selected}
                   onCheckedChange={() => onToggleSelect(tx.id)}
-                  aria-label={`Pilih transaksi ${tx.description ?? formatDay(tx.date.toDate())}`}
+                  aria-label={`Pilih transaksi ${deriveTransactionTitle(tx) || formatDay(tx.date.toDate())}`}
                 />
 
                 <span className="tabular text-xs text-muted-foreground">
@@ -110,10 +111,16 @@ export function TransactionTable({
 
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">
-                    {tx.description || category?.name || 'Tanpa keterangan'}
+                    {deriveTransactionTitle(tx) || category?.name || 'Tanpa keterangan'}
                   </p>
-                  {tx.location && (
-                    <p className="truncate text-xs text-muted-foreground">{tx.location}</p>
+                  {tx.items && tx.items.length > 0 ? (
+                    <p className="truncate text-xs text-muted-foreground">
+                      {tx.items.length} item{tx.location ? ` · ${tx.location}` : ''}
+                    </p>
+                  ) : (
+                    tx.location && (
+                      <p className="truncate text-xs text-muted-foreground">{tx.location}</p>
+                    )
                   )}
                 </div>
 

@@ -218,7 +218,7 @@ describe('transactionsToCsv', () => {
     const lines = csv.split('\r\n')
 
     expect(lines[0]).toBe(
-      'Tanggal,Jenis,Pilar,Kategori,Item,Keterangan,Toko,Metode,Tag,Perasaan,Jumlah',
+      'Tanggal,Jenis,Pilar,Kategori,Item,Judul,Keterangan,Rincian,Toko,Metode,Tag,Perasaan,Jumlah',
     )
     expect(lines).toHaveLength(2)
     expect(lines[1]).toContain('2026-08-15')

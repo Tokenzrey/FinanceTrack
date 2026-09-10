@@ -296,6 +296,25 @@ describe('batchToDTOs', () => {
     expect(batchToDTOs(b)[0].amount).toBe(59000)
   })
 
+  it('records the printed receipt total (not the line sum) and carries items + tax', () => {
+    const b = batch({
+      source: 'receipt',
+      mode: 'single',
+      merchant: 'Kopi Kita',
+      receiptTotal: 65000, // line items sum to 59000; 6000 is tax
+      tax: 6000,
+      lines: renumber([
+        line({ amount: 35000, description: 'Nasi goreng' }),
+        line({ amount: 24000, description: 'Teh botol' }),
+      ]),
+    })
+    const [dto] = batchToDTOs(b)
+    expect(dto.amount).toBe(65000)
+    expect(dto.title).toBe('Kopi Kita')
+    expect(dto.tax).toBe(6000)
+    expect(dto.items?.reduce((s, i) => s + i.price, 0)).toBe(65000) // reconciled up to the paid total
+  })
+
   it('attaches the Drive receipt to every DTO it produces', () => {
     const b = batch({
       source: 'receipt',

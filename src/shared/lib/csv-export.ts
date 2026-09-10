@@ -1,5 +1,6 @@
 import type { Category, Transaction } from '@/shared/types/domain'
 import { PILLAR_LABELS } from '@/shared/types/domain'
+import { deriveTransactionTitle } from './transaction-items'
 
 /**
  * CSV that opens cleanly in Google Sheets and Excel.
@@ -15,7 +16,9 @@ const HEADERS = [
   'Pilar',
   'Kategori',
   'Item',
+  'Judul',
   'Keterangan',
+  'Rincian',
   'Toko',
   'Metode',
   'Tag',
@@ -70,7 +73,11 @@ export function transactionsToCsv(
       PILLAR_LABELS[tx.pillar],
       category?.name ?? '',
       tx.categoryItemId ? (categoryItemNames[tx.categoryItemId] ?? '') : '',
+      deriveTransactionTitle(tx),
       tx.description ?? '',
+      tx.items && tx.items.length > 0
+        ? tx.items.map((i) => `${i.name} x${i.qty} @${Math.round(i.price)}`).join('; ')
+        : '',
       tx.location ?? '',
       tx.paymentMethod ? METHOD_LABEL[tx.paymentMethod] : '',
       tx.tags.join(' '),

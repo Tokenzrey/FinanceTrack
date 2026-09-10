@@ -163,6 +163,7 @@ function TransactionFormBody({
 
     setSaving(true)
     try {
+      const cleanItems = items.filter((it) => it.name.trim())
       const payload = {
         date: new Date(`${date}T12:00:00`),
         type,
@@ -172,9 +173,11 @@ function TransactionFormBody({
         amount,
         title: title.trim() || undefined,
         description: description.trim() || undefined,
-        items: hasItems ? items.filter((it) => it.name.trim()) : undefined,
-        tax: hasItems && tax > 0 ? tax : undefined,
-        discount: hasItems && discount > 0 ? discount : undefined,
+        // On create, omit the itemized fields when unused. On edit they are always
+        // sent (as [] / 0) so removing every row actually clears the stored data.
+        items: cleanItems.length > 0 ? cleanItems : transaction ? [] : undefined,
+        tax: cleanItems.length > 0 && tax > 0 ? tax : transaction ? 0 : undefined,
+        discount: cleanItems.length > 0 && discount > 0 ? discount : transaction ? 0 : undefined,
         location: location.trim() || undefined,
         paymentMethod: paymentMethod || undefined,
         mood: mood || undefined,

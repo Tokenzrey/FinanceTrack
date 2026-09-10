@@ -137,13 +137,20 @@ export function batchTotals(batch: DraftBatch): {
   return { expense, income, transfer, net: income - expense }
 }
 
+/** What a collapsed `single` batch actually records: the model's printed receipt total
+ *  when it read one (tax/service included), else the sum of the line items. */
+export function collapsedAmount(batch: DraftBatch): number {
+  if (batch.receiptTotal !== null && batch.receiptTotal > 0) return batch.receiptTotal
+  return batch.lines.reduce((total, l) => total + l.amount, 0)
+}
+
 /** The one line a `mode: 'single'` batch commits as. Category follows the highest-value
  *  line, since that is what the combined transaction mostly *is*. */
 export function collapseToSingle(batch: DraftBatch): DraftLine {
   // Every current caller pre-checks `lines.length > 0`; make a future one that forgets
   // fail loudly rather than spread `undefined` into a malformed line.
   if (batch.lines.length === 0) throw new Error('collapseToSingle: empty batch')
-  const amount = batch.lines.reduce((total, l) => total + l.amount, 0)
+  const amount = collapsedAmount(batch)
   const heaviest = [...batch.lines].sort((a, b) => b.amount - a.amount)[0]
   const description =
     batch.merchant?.trim() ||
@@ -175,18 +182,20 @@ function pillarOf(line: DraftLine, categories: Map<string, Pillar>): Pillar | nu
 export function batchToDTOs(batch: DraftBatch, categories: Category[] = []): CreateTransactionDTO[] {
   const pillars = new Map(categories.map((c) => [c.id, c.pillar]))
   const collapsing = batch.mode === 'single' && batch.lines.length > 0
-  const source = collapsing ? [collapseToSingle(batch)] : batch.lines
+  // `collapseToSingle` already resolves the amount to the printed receipt total when
+  // there is one (tax/service the line items miss), else the line sum.
+  const collapsed = collapsing ? collapseToSingle(batch) : null
+  const source = collapsed ? [collapsed] : batch.lines
 
-  // A collapsed receipt keeps its per-item breakdown on the one transaction: the lines
-  // become `items[]`, scaled so their sum matches the amount being written.
-  const items: TransactionItem[] | undefined = collapsing
+  // The lines become `items[]`, scaled so their sum matches the amount written.
+  const items: TransactionItem[] | undefined = collapsed
     ? reconcileToTotal(
         batch.lines.map((l) => ({
           name: l.description ?? 'Item',
           qty: Math.max(1, Math.floor(l.quantity ?? 1)),
           price: Math.max(0, Math.round(l.amount)),
         })),
-        source[0].amount,
+        collapsed.amount,
       )
     : undefined
 
@@ -198,11 +207,11 @@ export function batchToDTOs(batch: DraftBatch, categories: Category[] = []): Cre
       pillar: pillarOf(line, pillars) ?? inferPillar(line.type),
       categoryId: line.categoryId as string,
       amount: line.amount,
-      title: collapsing ? (batch.merchant?.trim() || undefined) : undefined,
+      title: collapsed ? (batch.merchant?.trim() || undefined) : undefined,
       description: line.description ?? undefined,
       items: items && items.length > 0 ? items : undefined,
-      tax: collapsing ? batch.tax : undefined,
-      discount: collapsing ? batch.discount : undefined,
+      tax: collapsed ? batch.tax : undefined,
+      discount: collapsed ? batch.discount : undefined,
       tags: ['bot'],
       gDriveFileId: batch.receipt?.gDriveFileId,
       gDriveWebViewLink: batch.receipt?.gDriveWebViewLink,

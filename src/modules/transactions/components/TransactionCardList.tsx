@@ -8,6 +8,7 @@ import { PillarColorDot } from '@/shared/components/finance/PillarBadge'
 import { Checkbox } from '@/shared/components/ui/checkbox'
 import { cn } from '@/shared/lib/utils'
 import { formatDay } from '@/shared/lib/format'
+import { deriveTransactionTitle } from '@/shared/lib/transaction-items'
 import type { Category, Transaction } from '@/shared/types/domain'
 
 interface TransactionCardListProps {
@@ -81,11 +82,12 @@ function SwipeableCard({
           <PillarColorDot pillar={tx.pillar} />
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium">
-              {tx.description || category?.name || 'Tanpa keterangan'}
+              {deriveTransactionTitle(tx) || category?.name || 'Tanpa keterangan'}
             </p>
             <p className="truncate text-xs text-muted-foreground">
               {formatDay(tx.date.toDate())}
               {category ? ` · ${category.name}` : ''}
+              {tx.items && tx.items.length > 0 ? ` · ${tx.items.length} item` : ''}
               {tx.location ? ` · ${tx.location}` : ''}
             </p>
           </div>
