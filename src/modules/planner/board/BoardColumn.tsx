@@ -111,7 +111,7 @@ export function BoardColumn({
         aria-label={`Buka kolom ${list.title}`}
         title={`Buka kolom ${list.title}`}
         className={cn(
-          'group flex h-full w-11 shrink-0 flex-col items-center gap-2 rounded-xl border border-border/50 bg-muted/60 py-3',
+          'group flex min-h-0 flex-1 w-11 shrink-0 flex-col items-center gap-2 rounded-xl border border-border/50 bg-muted/60 py-3',
           'transition-colors duration-200 hover:bg-muted focus-visible:outline-none focus-visible:ring-2',
           'focus-visible:ring-ring motion-reduce:transition-none',
         )}
@@ -131,7 +131,7 @@ export function BoardColumn({
   }
 
   return (
-    <div className="flex h-full w-72 shrink-0 flex-col rounded-xl border border-border/50 bg-muted/60">
+    <div className="flex min-h-0 flex-1 w-72 shrink-0 flex-col rounded-xl border border-border/50 bg-muted/60">
       <div className="sticky top-0 z-10 flex items-center gap-2 rounded-t-xl bg-muted/60 px-3 py-2.5 backdrop-blur">
         <h3 className="min-w-0 flex-1 truncate font-display text-[13px] font-semibold uppercase tracking-wide">
           {list.title}

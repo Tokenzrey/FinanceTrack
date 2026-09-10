@@ -28,9 +28,9 @@ export const MAX_RANGE_DAYS = 3650
 /** How much window each zoom wants on first paint. A tighter column fits more
  *  days in the same pixels, so `month` opens wider than `day`. */
 const INITIAL_DAYS: Record<TimelineZoom, number> = {
-  day: 60,
-  week: 168,
-  month: 540,
+  day: 35,
+  week: 63,
+  month: 182,
 }
 
 /** Breathing room kept before the earliest and after the latest task. */

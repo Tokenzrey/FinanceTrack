@@ -13,9 +13,9 @@ export type TimelineZoom = 'day' | 'week' | 'month'
 
 /** Column width in px per zoom. day = roomy, week = medium, month = tight. */
 export const COL_WIDTH: Record<TimelineZoom, number> = {
-  day: 48,
-  week: 20,
-  month: 8,
+  day: 64,
+  week: 36,
+  month: 16,
 }
 
 const MS_PER_DAY = 86_400_000

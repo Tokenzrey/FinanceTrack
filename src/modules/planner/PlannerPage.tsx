@@ -39,7 +39,7 @@ export function PlannerPage() {
   }, [])
 
   return (
-    <div className="mx-auto w-full max-w-[1600px] space-y-5 px-4 sm:px-6">
+    <div className="mx-auto w-full max-w-[1600px] space-y-3.5 px-4 sm:px-6">
       <PageHeader title="Tugas" description="Daftar tugas dengan pengingat otomatis." />
 
       <QuickAddBar />

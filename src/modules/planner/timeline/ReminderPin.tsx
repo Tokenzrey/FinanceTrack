@@ -47,7 +47,7 @@ export function ReminderPin({ reminder, rangeStart, colWidth, zoom }: ReminderPi
             'absolute h-[5px] w-[5px] rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
             failed ? 'border border-destructive bg-transparent' : 'bg-primary',
           )}
-          style={{ left: leftPx - 2.5, top: 2 + 14 - 2.5 }}
+          style={{ left: leftPx - 2.5, top: 7 + 17 - 2.5 }}
         />
       </TooltipTrigger>
       <TooltipContent className="text-xs">

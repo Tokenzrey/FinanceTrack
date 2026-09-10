@@ -253,7 +253,7 @@ export function BoardView() {
       <LabelManagerDialog open={labelMgrOpen} onOpenChange={setLabelMgrOpen} />
 
       <div
-        className="flex h-[calc(100vh-20rem)] gap-3 overflow-x-auto pb-2"
+        className="flex h-[calc(100dvh-27.5rem)] min-h-[420px] gap-3 overflow-x-auto overflow-y-hidden pb-2"
         onPointerDown={onColumnPointerDown}
       >
         {sortedLists.map((list, i) => (

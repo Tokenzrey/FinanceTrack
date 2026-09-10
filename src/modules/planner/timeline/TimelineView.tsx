@@ -33,15 +33,16 @@ import type { Reminder, Task } from '@/shared/types/productivity'
 import { reorderTimelineRow } from '@/shared/use-cases/board/ReorderTimelineRow.usecase'
 import { setTaskSchedule } from '@/shared/use-cases/board/SetTaskSchedule.usecase'
 import { useTaskLeads } from '../list/ListView'
+import { PriorityDot } from '../shared/PriorityDot'
 import { applyBoardFilters, describeActiveFilters } from '../shared/FilterBar'
 import { DependencyArrow } from './DependencyArrow'
 import { TimelineBar } from './TimelineBar'
 import { TimelineRuler } from './TimelineRuler'
 
-const ROW_HEIGHT = 40
-/** Left name gutter — `w-44` (176px) on mobile, `w-60` (240px) from `sm`.
+const ROW_HEIGHT = 48
+/** Left name gutter — `w-56` (224px) on mobile, `w-72` (288px) from `sm`, `w-80` (320px) from `md`.
  *  The px widths live in the `--tl-gutter` CSS var on the scroll region. */
-const GUTTER_CLASS = 'w-44 sm:w-60'
+const GUTTER_CLASS = 'w-56 sm:w-72 md:w-80'
 
 /** `useDragSort` container id for the row-reorder handles in the name gutter. */
 const TIMELINE_ROWS_CONTAINER = 'timeline-rows'
@@ -390,17 +391,24 @@ export function TimelineView() {
       <div
         ref={scrollRef}
         onScroll={onScroll}
-        className="scrollbar-thin relative max-h-[calc(100dvh-16rem)] overflow-auto rounded-xl border border-border [--tl-gutter:176px] sm:[--tl-gutter:240px]"
+        className="scrollbar-thin relative max-h-[calc(100dvh-17rem)] overflow-auto rounded-xl border border-border [--tl-gutter:224px] sm:[--tl-gutter:288px] md:[--tl-gutter:320px]"
       >
         <div className="w-max">
           {/* Header row: sticky gutter corner + sticky two-tier ruler. */}
           <div className="sticky top-0 z-30 flex bg-background">
             <div
               className={cn(
-                'sticky left-0 z-40 shrink-0 border-b border-r border-border bg-background',
+                'sticky left-0 z-40 flex shrink-0 items-center justify-between border-b border-r border-border bg-background px-3 py-2 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)] dark:shadow-[2px_0_6px_-2px_rgba(0,0,0,0.25)]',
                 GUTTER_CLASS,
               )}
-            />
+            >
+              <span className="font-display text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Daftar Tugas
+              </span>
+              <span className="font-mono text-xs text-muted-foreground/70">
+                {scheduled.length}
+              </span>
+            </div>
             <TimelineRuler
               rangeStart={rangeStart}
               dayCount={dayCount}
@@ -420,15 +428,11 @@ export function TimelineView() {
                 data-timeline-row
                 style={{ height: ROW_HEIGHT }}
               >
-                {/* Sticky name gutter */}
+                {/* Sticky name gutter - 100% opaque solid background */}
                 <div
                   className={cn(
-                    // `bg-background` alone let the grid show through where the
-                    // sticky layer met the scrolling track; an explicit opaque
-                    // base plus the row tint keeps the gutter solid.
-                    'sticky left-0 z-20 flex shrink-0 items-center gap-1 border-b border-r border-border px-2',
-                    'bg-background supports-[backdrop-filter]:backdrop-blur-sm',
-                    focusedTaskId === task.id && 'bg-primary/10',
+                    'sticky left-0 z-20 flex shrink-0 items-center gap-1.5 border-b border-r border-border bg-background px-2.5 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)] dark:shadow-[2px_0_6px_-2px_rgba(0,0,0,0.25)] transition-colors',
+                    focusedTaskId === task.id ? 'bg-primary/10' : 'hover:bg-muted/30',
                     GUTTER_CLASS,
                   )}
                 >
@@ -439,12 +443,18 @@ export function TimelineView() {
                   >
                     <GripVertical className="size-3.5" aria-hidden />
                   </span>
+                  <PriorityDot priority={task.priority} />
                   <button
                     type="button"
                     onClick={() => focusTask(task)}
                     onDoubleClick={() => openTask(task.id)}
-                    title="Klik untuk fokus ke bar; klik dua kali untuk membuka tugas"
-                    className="min-w-0 flex-1 truncate rounded text-left text-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    title={`${task.title} (Klik untuk fokus ke bar; klik dua kali untuk membuka tugas)`}
+                    className={cn(
+                      'min-w-0 flex-1 truncate rounded text-left text-xs sm:text-sm transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      task.status === 'done'
+                        ? 'line-through text-muted-foreground'
+                        : 'font-medium text-foreground',
+                    )}
                   >
                     {task.title}
                   </button>

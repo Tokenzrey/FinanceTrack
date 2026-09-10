@@ -13,12 +13,12 @@ import { LABEL_COLORS } from '@/shared/types/board'
 import type { Reminder, Task } from '@/shared/types/productivity'
 import { ReminderPin } from './ReminderPin'
 
-const BAR_HEIGHT = 28
-const BAR_TOP = 6
+const BAR_HEIGHT = 34
+const BAR_TOP = 7
 /** Pointer travel (px) before a press becomes a drag — mirrors `useDragSort`. */
 const DRAG_THRESHOLD = 6
 /** Below this width the title sits outside the bar (to the right). */
-const TITLE_INSIDE_MIN_WIDTH = 80
+const TITLE_INSIDE_MIN_WIDTH = 70
 /** Don't bother with an outside title if this little room is left in the track. */
 const MIN_OUTSIDE_TITLE_WIDTH = 32
 /** Widest an outside title may run before truncating. */
@@ -294,7 +294,7 @@ export function TimelineBar({
 
         {/* Title inside when wide enough. */}
         {titleInside && (
-          <span className="pointer-events-none block truncate pl-2 pr-1.5 text-xs leading-[28px] text-foreground">
+          <span className="pointer-events-none flex h-full items-center truncate pl-2.5 pr-2 text-xs font-medium text-foreground">
             {task.title}
           </span>
         )}
@@ -338,9 +338,9 @@ export function TimelineBar({
           remains — an unbounded `max-w` overflowed the grid on late-range bars. */}
       {!titleInside && outsideTitleWidth >= MIN_OUTSIDE_TITLE_WIDTH && (
         <span
-          className="pointer-events-none absolute truncate text-xs text-foreground"
+          className="pointer-events-none absolute flex items-center truncate text-xs font-medium text-foreground"
           style={{
-            left: leftPx + widthPx + 6,
+            left: leftPx + widthPx + 8,
             top: BAR_TOP,
             width: outsideTitleWidth,
             height: BAR_HEIGHT,
