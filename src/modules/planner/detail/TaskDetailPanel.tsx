@@ -93,13 +93,13 @@ export function TaskDetailPanel() {
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent
           data-testid="task-detail-dialog"
-          className="max-w-4xl lg:max-w-5xl"
+          className="max-w-3xl lg:max-w-4xl"
         >
           <DialogHeader className="text-left">
-            <DialogTitle className="font-display">{task.title}</DialogTitle>
+            <DialogTitle className="font-display leading-snug">{task.title}</DialogTitle>
             <DialogDescription className="sr-only">Detail tugas</DialogDescription>
           </DialogHeader>
-          <DialogBody>{body}</DialogBody>
+          <DialogBody className="overflow-x-hidden">{body}</DialogBody>
         </DialogContent>
       </Dialog>
     )
@@ -145,9 +145,9 @@ function PanelBody({
 
   if (isDesktop) {
     return (
-      <div className="grid grid-cols-[1fr_340px] gap-6 lg:gap-8 items-start">
+      <div className="grid grid-cols-[minmax(0,1fr)_300px] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-8">
         <div className="min-w-0">{main}</div>
-        <aside className="border-l border-border/60 pl-5 pr-1">{rail}</aside>
+        <aside className="min-w-0 border-l border-border/60 pl-5">{rail}</aside>
       </div>
     )
   }

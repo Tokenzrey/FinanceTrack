@@ -182,10 +182,10 @@ function ScheduleField({
       <button
         type="button"
         onClick={() => setEditing(true)}
-        className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-2.5 py-1 text-xs sm:text-sm font-medium hover:bg-accent/60 hover:border-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-left"
+        className="flex max-w-full items-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-2.5 py-1 text-xs font-medium transition-colors hover:border-border hover:bg-accent/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-sm"
       >
-        <Calendar className="size-3.5 text-muted-foreground shrink-0" aria-hidden />
-        <span className="truncate">{formatDateTime(ts.toDate(), tz)}</span>
+        <Calendar className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        <span className="min-w-0 truncate">{formatDateTime(ts.toDate(), tz)}</span>
       </button>
     ) : (
       <AddAction label={label} onClick={() => setEditing(true)} />

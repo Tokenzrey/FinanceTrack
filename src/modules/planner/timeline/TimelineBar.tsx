@@ -100,9 +100,16 @@ export function TimelineBar({
   const effStart = drag ? drag.next.startAt : startDate
   const effEnd = drag ? drag.next.dueAt : endDate
 
-  const leftPx = pxForDate(effStart, rangeStart, colWidth)
-  const endPx = pxForDate(effEnd, rangeStart, colWidth)
+  const rawLeftPx = pxForDate(effStart, rangeStart, colWidth)
+  const rawEndPx = pxForDate(effEnd, rangeStart, colWidth)
+  // Clamp into the track: a task that starts before the visible range (or ends
+  // after it) must not bleed the bar — or its inside title — past the grid edges
+  // into the sticky name gutter on the left.
+  const leftPx = Math.max(rawLeftPx, 0)
+  const endPx = Math.min(Math.max(rawEndPx, leftPx + 6), gridWidth)
   const widthPx = Math.max(endPx - leftPx, 6)
+  const clippedStart = rawLeftPx < 0
+  const clippedEnd = rawEndPx > gridWidth
 
   const onCommitRef = useRef(onCommitSchedule)
   onCommitRef.current = onCommitSchedule
@@ -247,6 +254,9 @@ export function TimelineBar({
           dragging
             ? 'cursor-grabbing'
             : 'cursor-grab transition-[left,width] duration-200 ease-out motion-reduce:transition-none',
+          // Square off an edge that runs past the visible range — it continues off-screen.
+          clippedStart && 'rounded-l-none',
+          clippedEnd && 'rounded-r-none',
         )}
         style={{
           left: leftPx,
@@ -292,10 +302,11 @@ export function TimelineBar({
           className={cn('absolute inset-y-0 left-0 w-[3px] rounded-l-md', PRIORITY_CAP[task.priority])}
         />
 
-        {/* Title inside when wide enough. */}
+        {/* Title inside when wide enough. `overflow-hidden` on the bar-width box so a
+            long title clips at the bar's right edge instead of spilling out. */}
         {titleInside && (
-          <span className="pointer-events-none flex h-full items-center truncate pl-2.5 pr-2 text-xs font-medium text-foreground">
-            {task.title}
+          <span className="pointer-events-none absolute inset-0 flex items-center overflow-hidden pl-2.5 pr-2 text-xs font-medium text-foreground">
+            <span className="truncate">{task.title}</span>
           </span>
         )}
 
