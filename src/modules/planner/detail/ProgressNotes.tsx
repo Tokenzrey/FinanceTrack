@@ -1,17 +1,32 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
-import { Button } from '@/shared/components/ui/button'
 import { Textarea } from '@/shared/components/ui/textarea'
 import { formatDateTime } from '@/shared/lib/format'
 import { useAuthStore } from '@/shared/stores/auth.store'
 import type { Task } from '@/shared/types/productivity'
 import { addProgressNote } from '@/shared/use-cases/board/AddProgressNote.usecase'
 
-/** Timestamped entries, newest on top. Not "Komentar" — there is no one else. */
-export function ProgressNotes({ task, tz }: { task: Task; tz: string }) {
+/** The form the modal footer's "Tambah catatan" button submits. */
+export const PROGRESS_NOTE_FORM_ID = 'progress-note-form'
+
+/**
+ * Timestamped entries, newest on top. Not "Komentar" — there is no one else.
+ * The submit control lives in the modal footer (see `TaskDetailPanel`), wired here
+ * through `PROGRESS_NOTE_FORM_ID`; `onDraftStateChange` keeps that button's
+ * enabled/busy state in sync.
+ */
+export function ProgressNotes({
+  task,
+  tz,
+  onDraftStateChange,
+}: {
+  task: Task
+  tz: string
+  onDraftStateChange?: (state: { hasText: boolean; busy: boolean }) => void
+}) {
   const uid = useAuthStore((s) => s.user?.uid)
   const notes = useMemo(
     () =>
@@ -23,6 +38,10 @@ export function ProgressNotes({ task, tz }: { task: Task; tz: string }) {
 
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
+
+  useEffect(() => {
+    onDraftStateChange?.({ hasText: draft.trim().length > 0, busy })
+  }, [draft, busy, onDraftStateChange])
 
   const submit = async () => {
     const body = draft.trim()
@@ -42,19 +61,22 @@ export function ProgressNotes({ task, tz }: { task: Task; tz: string }) {
     <section className="space-y-2">
       <h3 className="font-display text-sm font-semibold">Catatan progres</h3>
 
-      <div className="space-y-1.5">
+      <form
+        id={PROGRESS_NOTE_FORM_ID}
+        onSubmit={(e) => {
+          e.preventDefault()
+          void submit()
+        }}
+      >
         <Textarea
           value={draft}
           maxLength={2000}
-          rows={2}
+          rows={3}
           placeholder="Tulis catatan progres…"
           onChange={(e) => setDraft(e.target.value)}
           aria-label="Catatan progres baru"
         />
-        <Button size="sm" className="h-7" disabled={busy || !draft.trim()} onClick={() => void submit()}>
-          Tambah catatan
-        </Button>
-      </div>
+      </form>
 
       {notes.length > 0 && (
         <ul className="space-y-2">

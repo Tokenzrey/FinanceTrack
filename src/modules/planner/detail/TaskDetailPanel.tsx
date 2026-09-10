@@ -9,6 +9,7 @@ import {
   DialogBody,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/shared/components/ui/dialog'
@@ -17,6 +18,7 @@ import {
   DrawerBody,
   DrawerContent,
   DrawerDescription,
+  DrawerFooter,
   DrawerHeader,
   DrawerTitle,
 } from '@/shared/components/ui/drawer'
@@ -36,7 +38,7 @@ import { Attachments } from './Attachments'
 import { Checklist } from './Checklist'
 import { insertLink, toggleLinePrefix, wrapInline, type EditResult } from './description-toolbar'
 import { MetadataRail } from './MetadataRail'
-import { ProgressNotes } from './ProgressNotes'
+import { PROGRESS_NOTE_FORM_ID, ProgressNotes } from './ProgressNotes'
 
 /**
  * Task detail. `Dialog` at ≥ lg (two columns: content left, 300px metadata rail
@@ -61,13 +63,14 @@ export function TaskDetailPanel() {
 
   if (!open || !task) return null
 
-  const body = (
-    <PanelBody
+  return (
+    <TaskDetailShell
       task={task}
       lists={lists}
       labels={labels}
       tz={tz}
       isDesktop={isDesktop}
+      onOpenChange={onOpenChange}
       onMarkTaskDone={() => {
         // Keep listId in sync: if a "done" column exists, route through moveTask
         // (writes listId + status) so the card doesn't strand in its old column.
@@ -87,43 +90,20 @@ export function TaskDetailPanel() {
       }}
     />
   )
-
-  if (isDesktop) {
-    return (
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent
-          data-testid="task-detail-dialog"
-          className="max-w-3xl lg:max-w-4xl"
-        >
-          <DialogHeader className="text-left">
-            <DialogTitle className="font-display leading-snug">{task.title}</DialogTitle>
-            <DialogDescription className="sr-only">Detail tugas</DialogDescription>
-          </DialogHeader>
-          <DialogBody className="overflow-x-hidden">{body}</DialogBody>
-        </DialogContent>
-      </Dialog>
-    )
-  }
-
-  return (
-    <Drawer open={open} onOpenChange={onOpenChange}>
-      <DrawerContent data-testid="task-detail-drawer">
-        <DrawerHeader>
-          <DrawerTitle className="font-display">{task.title}</DrawerTitle>
-          <DrawerDescription className="sr-only">Detail tugas</DrawerDescription>
-        </DrawerHeader>
-        <DrawerBody className="pb-8">{body}</DrawerBody>
-      </DrawerContent>
-    </Drawer>
-  )
 }
 
-function PanelBody({
+/**
+ * Dialog on desktop (two panes: content left, metadata rail right), Drawer on mobile.
+ * Both share one header / scrolling body / pinned footer, matching every other modal;
+ * the footer's "Tambah catatan" submits the progress-note form inside the body.
+ */
+function TaskDetailShell({
   task,
   lists,
   labels,
   tz,
   isDesktop,
+  onOpenChange,
   onMarkTaskDone,
 }: {
   task: Task
@@ -131,31 +111,80 @@ function PanelBody({
   labels: Parameters<typeof MetadataRail>[0]['labels']
   tz: string
   isDesktop: boolean
+  onOpenChange: (open: boolean) => void
   onMarkTaskDone: () => void
 }) {
+  const [note, setNote] = useState({ hasText: false, busy: false })
+
   const rail = <MetadataRail task={task} lists={lists} labels={labels} tz={tz} />
   const main = (
     <div className="space-y-6">
       <Description task={task} />
       <Checklist task={task} onMarkTaskDone={onMarkTaskDone} />
       <Attachments task={task} />
-      <ProgressNotes task={task} tz={tz} />
+      <ProgressNotes task={task} tz={tz} onDraftStateChange={setNote} />
     </div>
   )
 
-  if (isDesktop) {
-    return (
-      <div className="grid grid-cols-[minmax(0,1fr)_300px] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_320px] lg:gap-8">
-        <div className="min-w-0">{main}</div>
-        <aside className="min-w-0 border-l border-border/60 pl-5">{rail}</aside>
-      </div>
-    )
-  }
-  return (
+  const body = isDesktop ? (
+    <div className="grid grid-cols-[minmax(0,1fr)_18rem] items-start gap-6 lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-8">
+      <div className="min-w-0">{main}</div>
+      <aside className="min-w-0 border-l border-border/60 pl-5">{rail}</aside>
+    </div>
+  ) : (
     <div className="space-y-6">
       <RailSection>{rail}</RailSection>
       {main}
     </div>
+  )
+
+  const footer = (
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        className="w-full sm:w-auto"
+        onClick={() => onOpenChange(false)}
+      >
+        Tutup
+      </Button>
+      <Button
+        form={PROGRESS_NOTE_FORM_ID}
+        type="submit"
+        className="w-full sm:w-auto"
+        disabled={!note.hasText || note.busy}
+      >
+        Tambah catatan
+      </Button>
+    </>
+  )
+
+  if (isDesktop) {
+    return (
+      <Dialog open onOpenChange={onOpenChange}>
+        <DialogContent data-testid="task-detail-dialog" className="max-w-3xl lg:max-w-4xl">
+          <DialogHeader className="text-left">
+            <DialogTitle className="font-display leading-snug">{task.title}</DialogTitle>
+            <DialogDescription className="sr-only">Detail tugas</DialogDescription>
+          </DialogHeader>
+          <DialogBody className="overflow-x-hidden">{body}</DialogBody>
+          <DialogFooter>{footer}</DialogFooter>
+        </DialogContent>
+      </Dialog>
+    )
+  }
+
+  return (
+    <Drawer open onOpenChange={onOpenChange}>
+      <DrawerContent data-testid="task-detail-drawer">
+        <DrawerHeader>
+          <DrawerTitle className="font-display">{task.title}</DrawerTitle>
+          <DrawerDescription className="sr-only">Detail tugas</DrawerDescription>
+        </DrawerHeader>
+        <DrawerBody>{body}</DrawerBody>
+        <DrawerFooter>{footer}</DrawerFooter>
+      </DrawerContent>
+    </Drawer>
   )
 }
 

@@ -74,18 +74,21 @@ function Row({
   children: ReactNode
   className?: string
 }) {
+  // Always stacked: label on top, value full-width below. The rail lives in a ~320px
+  // column, too narrow for a side-by-side label + a date/select editor without
+  // overflowing — so every editor gets the whole width to work in.
   return (
     <div
       className={cn(
-        'group flex flex-col sm:grid sm:grid-cols-[7.5rem_1fr] items-start sm:items-center gap-1.5 sm:gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors duration-150 hover:bg-muted/40 motion-reduce:transition-none',
+        'group flex flex-col gap-1.5 rounded-lg px-2.5 py-2 transition-colors duration-150 hover:bg-muted/40 motion-reduce:transition-none',
         className,
       )}
     >
-      <div className="flex items-center gap-2 text-muted-foreground shrink-0 w-[7.5rem]">
+      <div className="flex items-center gap-2 text-muted-foreground">
         {Icon && <Icon className="size-3.5 shrink-0 opacity-70" aria-hidden />}
-        <span className="text-xs sm:text-sm font-medium">{label}</span>
+        <span className="text-xs font-medium">{label}</span>
       </div>
-      <div className="min-w-0 w-full flex-1">{children}</div>
+      <div className="min-w-0">{children}</div>
     </div>
   )
 }
@@ -199,9 +202,9 @@ function ScheduleField({
   }
 
   return (
-    <div className="space-y-2 rounded-lg border border-border/80 bg-background/95 p-2.5 shadow-xs">
+    <div className="w-full space-y-2 rounded-lg border border-border/80 bg-background/95 p-2.5 shadow-xs">
       <div className="grid grid-cols-2 gap-2">
-        <div>
+        <div className="min-w-0">
           <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Tanggal
           </label>
@@ -209,11 +212,11 @@ function ScheduleField({
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
-            className="h-8 text-xs px-2"
+            className="h-8 w-full min-w-0 px-2 text-xs"
             aria-label={`${label} tanggal`}
           />
         </div>
-        <div>
+        <div className="min-w-0">
           <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Waktu
           </label>
@@ -221,7 +224,7 @@ function ScheduleField({
             type="time"
             value={time}
             onChange={(e) => setTime(e.target.value)}
-            className="h-8 text-xs px-2"
+            className="h-8 w-full min-w-0 px-2 text-xs"
             aria-label={`${label} waktu`}
           />
         </div>
@@ -312,9 +315,9 @@ function ReminderAdder({
   }
 
   return (
-    <div className="space-y-2 rounded-lg border border-border/80 bg-background/95 p-2.5 shadow-xs">
+    <div className="w-full space-y-2 rounded-lg border border-border/80 bg-background/95 p-2.5 shadow-xs">
       <div className="grid grid-cols-2 gap-2">
-        <div>
+        <div className="min-w-0">
           <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Tanggal
           </label>
@@ -322,11 +325,11 @@ function ReminderAdder({
             type="date"
             value={date}
             onChange={(e) => setDate(e.target.value)}
-            className="h-8 text-xs px-2"
+            className="h-8 w-full min-w-0 px-2 text-xs"
             aria-label="Tanggal pengingat"
           />
         </div>
-        <div>
+        <div className="min-w-0">
           <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Waktu
           </label>
@@ -334,7 +337,7 @@ function ReminderAdder({
             type="time"
             value={time}
             onChange={(e) => setTime(e.target.value)}
-            className="h-8 text-xs px-2"
+            className="h-8 w-full min-w-0 px-2 text-xs"
             aria-label="Waktu pengingat"
           />
         </div>
@@ -402,7 +405,7 @@ function DependencyPicker({
 
   if (editing) {
     return (
-      <div className="space-y-2 rounded-lg border border-border/80 bg-background/95 p-2.5 shadow-xs">
+      <div className="w-full space-y-2 rounded-lg border border-border/80 bg-background/95 p-2.5 shadow-xs">
         {eligible.length === 0 ? (
           <span className="text-xs text-muted-foreground block">Tidak ada tugas lain yang tersedia.</span>
         ) : (
@@ -643,7 +646,7 @@ export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
       {/* Label */}
       <Row icon={Tag} label="Label" className={editLabels ? 'items-start' : undefined}>
         {editLabels ? (
-          <div className="space-y-2 rounded-lg border border-border/80 bg-background/95 p-2.5 shadow-xs">
+          <div className="w-full space-y-2 rounded-lg border border-border/80 bg-background/95 p-2.5 shadow-xs">
             <div className="flex flex-wrap gap-1.5">
               {labels.map((l) => {
                 const on = (task.labelIds ?? []).includes(l.id)
