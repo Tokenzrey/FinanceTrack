@@ -1,6 +1,19 @@
 'use client'
 
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
+import {
+  Bell,
+  Calendar,
+  Check,
+  Clock,
+  Flag,
+  GitFork,
+  Hash,
+  Kanban,
+  Laptop,
+  Plus,
+  Tag,
+} from 'lucide-react'
 import { toast } from 'sonner'
 
 import { Button } from '@/shared/components/ui/button'
@@ -17,7 +30,7 @@ import { formatDateTime } from '@/shared/lib/format'
 import { repositories } from '@/shared/repositories'
 import { usePlannerStore } from '@/shared/stores/planner.store'
 import { useAuthStore } from '@/shared/stores/auth.store'
-import type { BoardList, Label } from '@/shared/types/board'
+import { LABEL_COLORS, type BoardList, type Label } from '@/shared/types/board'
 import type { Task, TaskPriority, TaskStatus } from '@/shared/types/productivity'
 import { addDependency } from '@/shared/use-cases/board/AddDependency.usecase'
 import { moveTask } from '@/shared/use-cases/board/MoveTask.usecase'
@@ -52,15 +65,31 @@ const SOURCE_LABELS: Record<Task['source'], string> = {
 }
 
 /**
- * One label→value row. A fixed label column with a left-aligned value beats
- * `justify-between` + `text-right`: long values ("+ Tambah tanggal mulai", a
- * created-at stamp) used to rag against the panel edge and wrap mid-phrase.
+ * One label→value row. A fixed label column with an icon on the left, and interactive value on the right.
  */
-function Row({ label, children }: { label: string; children: ReactNode }) {
+function Row({
+  icon: Icon,
+  label,
+  children,
+  className,
+}: {
+  icon?: React.ComponentType<{ className?: string }>
+  label: string
+  children: ReactNode
+  className?: string
+}) {
   return (
-    <div className="grid grid-cols-[6.5rem_1fr] items-start gap-x-3 gap-y-0.5 rounded-md px-2 py-1.5 text-sm transition-colors duration-200 hover:bg-muted/40 motion-reduce:transition-none">
-      <span className="pt-px text-muted-foreground">{label}</span>
-      <div className="min-w-0">{children}</div>
+    <div
+      className={cn(
+        'group flex flex-col sm:grid sm:grid-cols-[7.5rem_1fr] items-start sm:items-center gap-1.5 sm:gap-2.5 rounded-lg px-2.5 py-1.5 text-sm transition-colors duration-150 hover:bg-muted/40 motion-reduce:transition-none',
+        className,
+      )}
+    >
+      <div className="flex items-center gap-2 text-muted-foreground shrink-0 w-[7.5rem]">
+        {Icon && <Icon className="size-3.5 shrink-0 opacity-70" aria-hidden />}
+        <span className="text-xs sm:text-sm font-medium">{label}</span>
+      </div>
+      <div className="min-w-0 w-full flex-1">{children}</div>
     </div>
   )
 }
@@ -71,7 +100,7 @@ function AddAction({ label, onClick }: { label: string; onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="rounded-md px-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs sm:text-sm text-muted-foreground hover:text-foreground hover:bg-muted/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-left"
     >
       + {label}
     </button>
@@ -146,14 +175,21 @@ function ScheduleField({
   const [date, setDate] = useState(initial.date)
   const [time, setTime] = useState(initial.time)
 
+  useEffect(() => {
+    const next = toDateTimeParts(ts, tz)
+    setDate(next.date)
+    setTime(next.time)
+  }, [ts, tz])
+
   if (!editing) {
     return ts ? (
       <button
         type="button"
         onClick={() => setEditing(true)}
-        className="rounded-md px-1 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-2.5 py-1 text-xs sm:text-sm font-medium hover:bg-accent/60 hover:border-border transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-left"
       >
-        {formatDateTime(ts.toDate(), tz)}
+        <Calendar className="size-3.5 text-muted-foreground shrink-0" aria-hidden />
+        <span className="truncate">{formatDateTime(ts.toDate(), tz)}</span>
       </button>
     ) : (
       <AddAction label={label} onClick={() => setEditing(true)} />
@@ -167,31 +203,76 @@ function ScheduleField({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <Input
-        type="date"
-        value={date}
-        onChange={(e) => commit(e.target.value, time)}
-        className="h-8 w-auto"
-        aria-label={`${label} tanggal`}
-      />
-      <Input
-        type="time"
-        value={time}
-        onChange={(e) => commit(date, e.target.value)}
-        className="h-8 w-auto"
-        aria-label={`${label} waktu`}
-      />
-      {date && (
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-8 px-2 text-muted-foreground"
-          onClick={() => commit('', '')}
-        >
-          Hapus
-        </Button>
-      )}
+    <div className="space-y-2 rounded-lg border border-border/80 bg-background/95 p-2.5 shadow-xs">
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Tanggal
+          </label>
+          <Input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="h-8 text-xs px-2"
+            aria-label={`${label} tanggal`}
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Waktu
+          </label>
+          <Input
+            type="time"
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
+            className="h-8 text-xs px-2"
+            aria-label={`${label} waktu`}
+          />
+        </div>
+      </div>
+      <div className="flex items-center justify-between border-t border-border/50 pt-2">
+        <div className="flex items-center gap-1.5">
+          <Button
+            type="button"
+            size="sm"
+            className="h-7 px-2.5 text-xs font-medium"
+            onClick={() => {
+              commit(date, time)
+              setEditing(false)
+            }}
+          >
+            Simpan
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground"
+            onClick={() => {
+              const prev = toDateTimeParts(ts, tz)
+              setDate(prev.date)
+              setTime(prev.time)
+              setEditing(false)
+            }}
+          >
+            Batal
+          </Button>
+        </div>
+        {date && (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-xs text-destructive hover:bg-destructive/10 hover:text-destructive"
+            onClick={() => {
+              commit('', '')
+              setEditing(false)
+            }}
+          >
+            Hapus
+          </Button>
+        )}
+      </div>
     </div>
   )
 }
@@ -235,38 +316,65 @@ function ReminderAdder({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <Input
-        type="date"
-        value={date}
-        onChange={(e) => setDate(e.target.value)}
-        className="h-8 w-auto"
-        aria-label="Tanggal pengingat"
-      />
-      <Input
-        type="time"
-        value={time}
-        onChange={(e) => setTime(e.target.value)}
-        className="h-8 w-auto"
-        aria-label="Waktu pengingat"
-      />
-      <Input
-        value={message}
-        onChange={(e) => setMessage(e.target.value)}
-        className="h-8 w-[180px] max-w-full"
-        aria-label="Isi pengingat"
-      />
-      <Button size="sm" className="h-8 px-2" disabled={busy} onClick={() => void submit()}>
-        Tambah
-      </Button>
-      <Button
-        size="sm"
-        variant="ghost"
-        className="h-8 px-2 text-muted-foreground"
-        onClick={onDone}
-      >
-        Batal
-      </Button>
+    <div className="space-y-2 rounded-lg border border-border/80 bg-background/95 p-2.5 shadow-xs">
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Tanggal
+          </label>
+          <Input
+            type="date"
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+            className="h-8 text-xs px-2"
+            aria-label="Tanggal pengingat"
+          />
+        </div>
+        <div>
+          <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Waktu
+          </label>
+          <Input
+            type="time"
+            value={time}
+            onChange={(e) => setTime(e.target.value)}
+            className="h-8 text-xs px-2"
+            aria-label="Waktu pengingat"
+          />
+        </div>
+      </div>
+      <div>
+        <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Pesan
+        </label>
+        <Input
+          value={message}
+          onChange={(e) => setMessage(e.target.value)}
+          className="h-8 text-xs px-2 w-full"
+          aria-label="Isi pengingat"
+          placeholder="Pesan pengingat"
+        />
+      </div>
+      <div className="flex items-center justify-end gap-1.5 border-t border-border/50 pt-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-xs text-muted-foreground"
+          onClick={onDone}
+        >
+          Batal
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          className="h-7 px-3 text-xs font-medium"
+          disabled={busy}
+          onClick={() => void submit()}
+        >
+          Tambah
+        </Button>
+      </div>
     </div>
   )
 }
@@ -298,13 +406,13 @@ function DependencyPicker({
 
   if (editing) {
     return (
-      <div className="flex flex-wrap items-center gap-1.5">
+      <div className="space-y-2 rounded-lg border border-border/80 bg-background/95 p-2.5 shadow-xs">
         {eligible.length === 0 ? (
-          <span className="text-xs text-muted-foreground">Tidak ada tugas lain.</span>
+          <span className="text-xs text-muted-foreground block">Tidak ada tugas lain yang tersedia.</span>
         ) : (
           <Select onValueChange={onAdd}>
-            <SelectTrigger className="h-8 w-[200px] max-w-full" aria-label="Pilih tugas blocker">
-              <SelectValue placeholder="Pilih tugas…" />
+            <SelectTrigger className="h-8 w-full text-xs" aria-label="Pilih tugas blocker">
+              <SelectValue placeholder="Pilih tugas blocker…" />
             </SelectTrigger>
             <SelectContent>
               {eligible.map((t) => (
@@ -315,14 +423,16 @@ function DependencyPicker({
             </SelectContent>
           </Select>
         )}
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-8 px-2 text-muted-foreground"
-          onClick={() => setEditing(false)}
-        >
-          Selesai
-        </Button>
+        <div className="flex justify-end border-t border-border/50 pt-1.5">
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-6 px-2 text-xs text-muted-foreground"
+            onClick={() => setEditing(false)}
+          >
+            Selesai
+          </Button>
+        </div>
       </div>
     )
   }
@@ -332,15 +442,15 @@ function DependencyPicker({
   }
 
   return (
-    <div className="flex flex-wrap gap-1">
+    <div className="flex flex-wrap items-center gap-1.5">
       {blockerIds.map((id) => {
         const title = titleById.get(id)
         return (
           <span
             key={id}
-            className="inline-flex max-w-full items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs"
+            className="inline-flex max-w-full items-center gap-1 rounded-md border border-border/60 bg-muted/50 px-2 py-0.5 text-xs"
           >
-            <span className="max-w-[140px] truncate">
+            <span className="max-w-[130px] truncate font-medium">
               {title ?? id}
               {title == null && <span className="text-muted-foreground"> (tidak ditemukan)</span>}
             </span>
@@ -348,7 +458,7 @@ function DependencyPicker({
               type="button"
               aria-label={`Hapus dependency ${title ?? id}`}
               onClick={() => onRemove(id)}
-              className="shrink-0 rounded-full text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="shrink-0 rounded-full text-muted-foreground hover:text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               ×
             </button>
@@ -358,9 +468,11 @@ function DependencyPicker({
       <button
         type="button"
         onClick={() => setEditing(true)}
-        className="rounded-md px-1 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="inline-flex size-6 items-center justify-center rounded-md border border-dashed border-border text-muted-foreground hover:border-foreground/30 hover:text-foreground transition-colors"
+        aria-label="Tambah dependency"
+        title="Tambah dependency"
       >
-        + Tambah
+        <Plus className="size-3" aria-hidden />
       </button>
     </div>
   )
@@ -386,9 +498,6 @@ export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
   const [labelMgrOpen, setLabelMgrOpen] = useState(false)
   const [editPoints, setEditPoints] = useState(false)
   const [editDeps, setEditDeps] = useState(false)
-  const [editList, setEditList] = useState(false)
-  const [editStatus, setEditStatus] = useState(false)
-  const [editPriority, setEditPriority] = useState(false)
   const [editReminder, setEditReminder] = useState(false)
 
   const sortedLists = [...lists].sort((a, b) => a.order - b.order)
@@ -410,83 +519,73 @@ export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
   }
 
   return (
-    <div className="space-y-0.5">
-      {/* Status / Kolom — moving the column keeps `status` in sync via moveTask. */}
-      <Row label="Kolom">
-        {editList ? (
+    <div className="space-y-1">
+      <div className="pb-1.5 mb-1 border-b border-border/50">
+        <h4 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          Detail Properti
+        </h4>
+      </div>
+
+      {/* Kolom */}
+      <Row icon={Kanban} label="Kolom">
+        <Select
+          value={currentListId ?? ''}
+          onValueChange={(v) => {
+            if (!uid) return
+            const cards = usePlannerStore
+              .getState()
+              .tasks.filter((t) => t.listId === v && t.id !== task.id)
+              .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+            const last = cards[cards.length - 1]?.order ?? null
+            void moveTask(uid, task.id, v, (last ?? 0) + 1000, lists).catch(() =>
+              toast.error('Gagal memindahkan tugas.'),
+            )
+          }}
+        >
+          <SelectTrigger
+            className="h-8 w-fit max-w-full justify-between gap-2 border-border/60 bg-background/60 hover:bg-accent/60 text-xs sm:text-sm font-medium"
+            aria-label="Kolom tugas"
+          >
+            <SelectValue placeholder="Pilih kolom" />
+          </SelectTrigger>
+          <SelectContent>
+            {sortedLists.map((l) => (
+              <SelectItem key={l.id} value={l.id}>
+                {l.title}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Row>
+
+      {/* Status axis (bot-visible), editable independently — only for a list-less task. */}
+      {task.listId == null && (
+        <Row icon={Check} label="Status">
           <Select
-            value={currentListId ?? ''}
+            value={task.status}
             onValueChange={(v) => {
-              setEditList(false)
-              if (!uid) return
-              const cards = usePlannerStore
-                .getState()
-                .tasks.filter((t) => t.listId === v && t.id !== task.id)
-                .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-              const last = cards[cards.length - 1]?.order ?? null
-              void moveTask(uid, task.id, v, (last ?? 0) + 1000, lists).catch(() =>
-                toast.error('Gagal memindahkan tugas.'),
-              )
-            }}
-            onOpenChange={(o) => {
-              if (!o) setEditList(false)
+              void setStatus(task.id, v as TaskStatus)
             }}
           >
-            <SelectTrigger className="h-8 w-[160px]" aria-label="Kolom tugas">
-              <SelectValue placeholder="Pilih kolom" />
+            <SelectTrigger
+              className="h-8 w-fit max-w-full justify-between gap-2 border-border/60 bg-background/60 hover:bg-accent/60 text-xs sm:text-sm font-medium"
+              aria-label="Status tugas"
+            >
+              <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {sortedLists.map((l) => (
-                <SelectItem key={l.id} value={l.id}>
-                  {l.title}
+              {(['todo', 'doing', 'done'] as TaskStatus[]).map((s) => (
+                <SelectItem key={s} value={s}>
+                  {STATUS_LABELS[s]}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-        ) : currentListId == null ? (
-          <AddAction label="Pilih kolom" onClick={() => setEditList(true)} />
-        ) : (
-          <button type="button" onClick={() => setEditList(true)} className={DISPLAY_BUTTON_CLASS}>
-            {sortedLists.find((l) => l.id === currentListId)?.title ?? 'Pilih kolom'}
-          </button>
-        )}
-      </Row>
-
-      {/* Status axis (bot-visible), editable independently — only for a list-less task.
-          For a column-bound task the Kolom row owns the status axis and keeps it synced. */}
-      {task.listId == null && (
-        <Row label="Status">
-          {editStatus ? (
-            <Select
-              value={task.status}
-              onValueChange={(v) => {
-                setEditStatus(false)
-                void setStatus(task.id, v as TaskStatus)
-              }}
-              onOpenChange={(o) => {
-                if (!o) setEditStatus(false)
-              }}
-            >
-              <SelectTrigger className="h-8 w-[160px]" aria-label="Status tugas">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(['todo', 'doing', 'done'] as TaskStatus[]).map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {STATUS_LABELS[s]}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <button type="button" onClick={() => setEditStatus(true)} className={DISPLAY_BUTTON_CLASS}>
-              {STATUS_LABELS[task.status]}
-            </button>
-          )}
         </Row>
       )}
 
-      <Row label="Tanggal mulai">
+      {/* Tanggal mulai */}
+      <Row icon={Calendar} label="Tanggal mulai" className={task.startAt ? undefined : 'items-center'}>
         <ScheduleField
           label="Tambah tanggal mulai"
           ts={task.startAt}
@@ -500,7 +599,8 @@ export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
         />
       </Row>
 
-      <Row label="Jatuh tempo">
+      {/* Jatuh tempo */}
+      <Row icon={Clock} label="Jatuh tempo" className={task.dueAt ? undefined : 'items-center'}>
         <ScheduleField
           label="Tambah jatuh tempo"
           ts={task.dueAt}
@@ -514,77 +614,149 @@ export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
         />
       </Row>
 
-      <Row label="Prioritas">
-        {editPriority ? (
-          <Select
-            value={task.priority}
-            onValueChange={(v) => {
-              setEditPriority(false)
-              void patch({ priority: v as TaskPriority })
-            }}
-            onOpenChange={(o) => {
-              if (!o) setEditPriority(false)
-            }}
+      {/* Prioritas */}
+      <Row icon={Flag} label="Prioritas">
+        <Select
+          value={task.priority}
+          onValueChange={(v) => {
+            void patch({ priority: v as TaskPriority })
+          }}
+        >
+          <SelectTrigger
+            className="h-8 w-fit max-w-full justify-between gap-2 border-border/60 bg-background/60 hover:bg-accent/60 text-xs sm:text-sm font-medium"
+            aria-label="Prioritas tugas"
           >
-            <SelectTrigger className="h-8 w-[140px]" aria-label="Prioritas tugas">
-              <span className="flex items-center gap-1.5">
-                <PriorityDot priority={task.priority} />
-                {PRIORITY_LABELS[task.priority]}
-              </span>
-            </SelectTrigger>
-            <SelectContent>
-              {(['low', 'med', 'high'] as TaskPriority[]).map((p) => (
-                <SelectItem key={p} value={p}>
-                  {PRIORITY_LABELS[p]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setEditPriority(true)}
-            className={cn(DISPLAY_BUTTON_CLASS, 'inline-flex items-center gap-1.5')}
-          >
-            <PriorityDot priority={task.priority} />
-            {PRIORITY_LABELS[task.priority]}
-          </button>
-        )}
+            <span className="flex items-center gap-1.5">
+              <PriorityDot priority={task.priority} />
+              <span>{PRIORITY_LABELS[task.priority]}</span>
+            </span>
+          </SelectTrigger>
+          <SelectContent>
+            {(['low', 'med', 'high'] as TaskPriority[]).map((p) => (
+              <SelectItem key={p} value={p}>
+                <span className="flex items-center gap-1.5">
+                  <PriorityDot priority={p} />
+                  <span>{PRIORITY_LABELS[p]}</span>
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </Row>
 
-      <Row label="Label">
-        {editLabels || taskLabels.length > 0 ? (
-          <div className="flex flex-wrap gap-1">
-            {labels.map((l) => {
-              const on = (task.labelIds ?? []).includes(l.id)
+      {/* Label */}
+      <Row icon={Tag} label="Label" className={editLabels ? 'items-start' : undefined}>
+        {editLabels ? (
+          <div className="space-y-2 rounded-lg border border-border/80 bg-background/95 p-2.5 shadow-xs">
+            <div className="flex flex-wrap gap-1.5">
+              {labels.map((l) => {
+                const on = (task.labelIds ?? []).includes(l.id)
+                const colorClass = LABEL_COLORS[l.colorKey]
+                return (
+                  <button
+                    key={l.id}
+                    type="button"
+                    onClick={() => {
+                      const next = on
+                        ? (task.labelIds ?? []).filter((id) => id !== l.id)
+                        : [...(task.labelIds ?? []), l.id]
+                      if (uid) void setTaskLabels(uid, task, next)
+                    }}
+                    className={cn(
+                      'inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs font-medium transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      on
+                        ? cn(colorClass.light, 'border-transparent shadow-xs dark:hidden')
+                        : 'border-border text-muted-foreground hover:text-foreground hover:border-foreground/30',
+                    )}
+                  >
+                    {on && <Check className="size-3" />}
+                    <span>{l.name}</span>
+                  </button>
+                )
+              })}
+              {labels.map((l) => {
+                const on = (task.labelIds ?? []).includes(l.id)
+                if (!on) return null
+                const colorClass = LABEL_COLORS[l.colorKey]
+                return (
+                  <button
+                    key={`${l.id}-dark`}
+                    type="button"
+                    onClick={() => {
+                      const next = (task.labelIds ?? []).filter((id) => id !== l.id)
+                      if (uid) void setTaskLabels(uid, task, next)
+                    }}
+                    className={cn(
+                      'hidden items-center gap-1 rounded-full border border-transparent px-2.5 py-0.5 text-xs font-medium transition-all dark:inline-flex focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      colorClass.dark,
+                    )}
+                  >
+                    <Check className="size-3" />
+                    <span>{l.name}</span>
+                  </button>
+                )
+              })}
+              {labels.length === 0 && (
+                <span className="text-xs text-muted-foreground">Belum ada label di papan.</span>
+              )}
+            </div>
+            <div className="flex items-center justify-between border-t border-border/50 pt-1.5">
+              <button
+                type="button"
+                onClick={() => setLabelMgrOpen(true)}
+                className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
+              >
+                Kelola label
+              </button>
+              <Button
+                type="button"
+                size="sm"
+                className="h-6 px-2 text-xs"
+                onClick={() => setEditLabels(false)}
+              >
+                Selesai
+              </Button>
+            </div>
+          </div>
+        ) : taskLabels.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-1.5">
+            {taskLabels.map((l) => {
+              const colorClass = LABEL_COLORS[l.colorKey]
               return (
-                <button
+                <span
                   key={l.id}
-                  type="button"
-                  onClick={() => {
-                    const next = on
-                      ? (task.labelIds ?? []).filter((id) => id !== l.id)
-                      : [...(task.labelIds ?? []), l.id]
-                    if (uid) void setTaskLabels(uid, task, next)
-                  }}
                   className={cn(
-                    'rounded-full border px-2 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
-                    on ? 'border-foreground/30 bg-muted' : 'border-border text-muted-foreground',
+                    'inline-flex items-center rounded-full border border-transparent px-2.5 py-0.5 text-xs font-medium',
+                    colorClass.light,
+                    'dark:hidden',
                   )}
                 >
                   {l.name}
-                </button>
+                </span>
               )
             })}
-            {labels.length === 0 && (
-              <span className="text-xs text-muted-foreground">Belum ada label di papan.</span>
-            )}
+            {taskLabels.map((l) => {
+              const colorClass = LABEL_COLORS[l.colorKey]
+              return (
+                <span
+                  key={`${l.id}-dark`}
+                  className={cn(
+                    'hidden items-center rounded-full border border-transparent px-2.5 py-0.5 text-xs font-medium dark:inline-flex',
+                    colorClass.dark,
+                  )}
+                >
+                  {l.name}
+                </span>
+              )
+            })}
             <button
               type="button"
-              onClick={() => setLabelMgrOpen(true)}
-              className="rounded-md px-1 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => setEditLabels(true)}
+              className="inline-flex size-5 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label="Ubah label"
+              title="Ubah label"
             >
-              Kelola label
+              <Plus className="size-3" />
             </button>
           </div>
         ) : (
@@ -592,28 +764,51 @@ export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
         )}
       </Row>
 
-      <Row label="Story points">
-        {editPoints || task.storyPoints != null ? (
-          <Input
-            type="number"
-            min={0}
-            autoFocus={editPoints}
-            defaultValue={task.storyPoints ?? ''}
-            onBlur={(e) => {
-              const raw = e.target.value.trim()
-              const next = raw === '' ? null : Math.max(0, Math.floor(Number(raw)))
-              if (next !== task.storyPoints) void patch({ storyPoints: Number.isFinite(next as number) ? next : null })
-              setEditPoints(false)
-            }}
-            className="h-8 w-20"
-            aria-label="Story points"
-          />
+      {/* Story points */}
+      <Row icon={Hash} label="Story points">
+        {editPoints ? (
+          <div className="flex items-center gap-1.5">
+            <Input
+              type="number"
+              min={0}
+              autoFocus
+              defaultValue={task.storyPoints ?? ''}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const raw = (e.target as HTMLInputElement).value.trim()
+                  const next = raw === '' ? null : Math.max(0, Math.floor(Number(raw)))
+                  if (next !== task.storyPoints) void patch({ storyPoints: Number.isFinite(next as number) ? next : null })
+                  setEditPoints(false)
+                }
+                if (e.key === 'Escape') setEditPoints(false)
+              }}
+              onBlur={(e) => {
+                const raw = e.target.value.trim()
+                const next = raw === '' ? null : Math.max(0, Math.floor(Number(raw)))
+                if (next !== task.storyPoints) void patch({ storyPoints: Number.isFinite(next as number) ? next : null })
+                setEditPoints(false)
+              }}
+              className="h-8 w-20 text-xs sm:text-sm font-mono"
+              aria-label="Story points"
+            />
+            <span className="text-xs text-muted-foreground font-mono">pts</span>
+          </div>
+        ) : task.storyPoints != null ? (
+          <button
+            type="button"
+            onClick={() => setEditPoints(true)}
+            className="inline-flex items-center gap-1 rounded-md border border-border/60 bg-background/60 px-2 py-0.5 text-xs sm:text-sm font-mono font-medium hover:bg-accent/60 transition-colors"
+          >
+            <span>{task.storyPoints}</span>
+            <span className="text-muted-foreground text-xs">pts</span>
+          </button>
         ) : (
           <AddAction label="Tambah story points" onClick={() => setEditPoints(true)} />
         )}
       </Row>
 
-      <Row label="Dependencies">
+      {/* Dependencies */}
+      <Row icon={GitFork} label="Dependencies" className={editDeps ? 'items-start' : undefined}>
         <DependencyPicker
           task={task}
           allTasks={allTasks}
@@ -634,30 +829,46 @@ export function MetadataRail({ task, lists, labels, tz }: MetadataRailProps) {
         />
       </Row>
 
-      <Row label="Pengingat">
+      {/* Pengingat */}
+      <Row icon={Bell} label="Pengingat" className={editReminder ? 'items-start' : undefined}>
         {editReminder ? (
           <ReminderAdder task={task} tz={tz} onDone={() => setEditReminder(false)} />
         ) : reminderCount > 0 ? (
-          <button
-            type="button"
-            onClick={() => setEditReminder(true)}
-            className={cn(DISPLAY_BUTTON_CLASS, 'font-mono text-xs tabular-nums')}
-          >
-            {reminderCount} aktif
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setEditReminder(true)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border/60 bg-background/60 px-2 py-0.5 text-xs font-mono font-medium tabular-nums hover:bg-accent/60 transition-colors"
+            >
+              <Bell className="size-3 text-muted-foreground" />
+              <span>{reminderCount} aktif</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditReminder(true)}
+              className="inline-flex size-5 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+              aria-label="Tambah pengingat"
+              title="Tambah pengingat"
+            >
+              <Plus className="size-3" />
+            </button>
+          </div>
         ) : (
           <AddAction label="Tambah pengingat" onClick={() => setEditReminder(true)} />
         )}
       </Row>
 
-      <Row label="Asal">
-        <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-          <SourceGlyph source={task.source} />
-          {SOURCE_LABELS[task.source]}
-          <span className="font-mono text-xs tabular-nums">
-            · {formatDateTime(task.createdAt.toDate(), tz)}
+      {/* Asal */}
+      <Row icon={Laptop} label="Asal">
+        <div className="flex flex-col gap-0.5 py-0.5">
+          <span className="inline-flex items-center gap-1.5 text-xs sm:text-sm font-medium">
+            <SourceGlyph source={task.source} />
+            {SOURCE_LABELS[task.source]}
           </span>
-        </span>
+          <span className="font-mono text-[11px] text-muted-foreground">
+            {formatDateTime(task.createdAt.toDate(), tz)}
+          </span>
+        </div>
       </Row>
 
       <LabelManagerDialog open={labelMgrOpen} onOpenChange={setLabelMgrOpen} />

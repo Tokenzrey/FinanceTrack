@@ -149,7 +149,7 @@ export function BoardColumn({
         ref={bodyRef as React.RefObject<HTMLDivElement>}
         data-dragsort-container={list.id}
         className={cn(
-          'scrollbar-thin flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-2 pb-2',
+          'scrollbar-thin flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2',
           'transition-colors duration-200 motion-reduce:transition-none',
           isDropTarget && 'bg-primary/[0.03] ring-2 ring-inset ring-ring',
         )}
@@ -207,10 +207,10 @@ export function BoardColumn({
           ))}
 
         {adding && (
-          // `px-0.5` + `ring-offset-0`: the column body is `overflow-y-auto`, which
+          // `p-0.5` + `ring-offset-0`: the column body is `overflow-y-auto`, which
           // clips the default 2px offset focus ring against the column's rounded
-          // edge. An inset ring with a hair of side padding stays inside the box.
-          <div className="px-0.5">
+          // edge. An inset ring with padding stays inside the box.
+          <div className="p-0.5">
             <Input
               data-dropzone="true"
               autoFocus
