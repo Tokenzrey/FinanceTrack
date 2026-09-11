@@ -103,7 +103,10 @@ export function TimelineView() {
     // to earliest-span-first so an untouched board still reads chronologically.
     s.sort((a, b) => {
       if (a.timelineOrder != null || b.timelineOrder != null) {
-        return (a.timelineOrder ?? Number.MAX_SAFE_INTEGER) - (b.timelineOrder ?? Number.MAX_SAFE_INTEGER)
+        return (
+          (a.timelineOrder ?? Number.MAX_SAFE_INTEGER) -
+          (b.timelineOrder ?? Number.MAX_SAFE_INTEGER)
+        )
       }
       const sa = taskSpan(a)
       const sb = taskSpan(b)
@@ -203,9 +206,7 @@ export function TimelineView() {
         label: 'urutkan baris',
         undo: () =>
           Promise.all(
-            prevOrders.map((p) =>
-              repositories.tasks.update(uid, p.id, { timelineOrder: p.order }),
-            ),
+            prevOrders.map((p) => repositories.tasks.update(uid, p.id, { timelineOrder: p.order })),
           ).then(() => undefined),
       })
       void reorderTimelineRow(uid, scheduled, r.fromIndex, r.toIndex).catch(() =>
@@ -277,7 +278,12 @@ export function TimelineView() {
       const endPx = (columnForDate(endD, rangeStart) + fractionOfDay(endD)) * colWidth
       return { leftPx, rightPx: Math.max(endPx, leftPx + 6), startD, endD }
     }
-    const out: { key: string; from: { x: number; y: number }; to: { x: number; y: number }; conflict: boolean }[] = []
+    const out: {
+      key: string
+      from: { x: number; y: number }
+      to: { x: number; y: number }
+      conflict: boolean
+    }[] = []
     for (const dep of scheduled) {
       const depRow = rowByTask.get(dep.id)
       if (depRow == null || !dep.dependsOn?.length) continue
@@ -405,9 +411,7 @@ export function TimelineView() {
               <span className="font-display text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 Daftar Tugas
               </span>
-              <span className="font-mono text-xs text-muted-foreground/70">
-                {scheduled.length}
-              </span>
+              <span className="font-mono text-xs text-muted-foreground/70">{scheduled.length}</span>
             </div>
             <TimelineRuler
               rangeStart={rangeStart}
@@ -431,8 +435,8 @@ export function TimelineView() {
                 {/* Sticky name gutter - 100% opaque solid background */}
                 <div
                   className={cn(
-                    'sticky left-0 z-[100] flex shrink-0 items-center gap-1.5 border-b border-r border-border bg-background px-2.5 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)] dark:shadow-[2px_0_6px_-2px_rgba(0,0,0,0.25)] transition-colors',
-                    focusedTaskId === task.id ? 'bg-primary/10' : 'hover:bg-muted/80',
+                    'sticky left-0 z-[100] flex shrink-0 items-center gap-1.5 border-b border-r border-border bg-background px-2.5 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)] transition-colors dark:shadow-[2px_0_6px_-2px_rgba(0,0,0,0.25)]',
+                    focusedTaskId === task.id ? 'hover:bg-muted/80' : 'hover:bg-muted/90',
                     GUTTER_CLASS,
                   )}
                 >
@@ -450,9 +454,9 @@ export function TimelineView() {
                     onDoubleClick={() => openTask(task.id)}
                     title={`${task.title} (Klik untuk fokus ke bar; klik dua kali untuk membuka tugas)`}
                     className={cn(
-                      'min-w-0 flex-1 truncate rounded text-left text-xs sm:text-sm transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      'min-w-0 flex-1 truncate rounded text-left text-xs transition-colors hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:text-sm',
                       task.status === 'done'
-                        ? 'line-through text-muted-foreground'
+                        ? 'text-muted-foreground line-through'
                         : 'font-medium text-foreground',
                     )}
                   >
