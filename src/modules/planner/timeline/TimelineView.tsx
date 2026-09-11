@@ -435,7 +435,7 @@ export function TimelineView() {
                 {/* Sticky name gutter - 100% opaque solid background */}
                 <div
                   className={cn(
-                    'sticky left-0 z-[100] flex shrink-0 items-center gap-1.5 border-b border-r border-border bg-background px-2.5 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)] transition-colors dark:shadow-[2px_0_6px_-2px_rgba(0,0,0,0.25)]',
+                    'sticky left-0 z-[30] flex shrink-0 items-center gap-1.5 border-b border-r border-border bg-background px-2.5 shadow-[2px_0_6px_-2px_rgba(0,0,0,0.06)] transition-colors dark:shadow-[2px_0_6px_-2px_rgba(0,0,0,0.25)]',
                     focusedTaskId === task.id ? 'hover:bg-muted/80' : 'hover:bg-muted/90',
                     GUTTER_CLASS,
                   )}
